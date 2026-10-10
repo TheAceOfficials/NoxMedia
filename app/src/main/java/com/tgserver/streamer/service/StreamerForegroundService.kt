@@ -47,7 +47,11 @@ class StreamerForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        activeTgClient = TelegramClientManager(applicationContext)
+        // Only initialize the TG client — do NOT auto-start the HTTP server.
+        // The server is started explicitly by the user via the toggle in HomeScreen.
+        if (activeTgClient == null) {
+            activeTgClient = TelegramClientManager(applicationContext)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

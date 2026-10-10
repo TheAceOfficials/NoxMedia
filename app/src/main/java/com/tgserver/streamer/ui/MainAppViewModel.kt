@@ -4,6 +4,8 @@ import android.app.Application
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.os.Build
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -24,13 +26,13 @@ enum class AppTab {
 }
 
 data class TelemetryUiState(
-    val isRunning: Boolean = true,
+    val isRunning: Boolean = false, // Server OFF by default until user turns it on
     val port: Int = 7788,
     val localIp: String = "127.0.0.1",
     val manifestUrl: String = "http://127.0.0.1:7788/manifest.json",
     val uptimeFormatted: String = "0m",
     val memoryUsedMb: Long = 20,
-    val cpuPercent: Double = 1.2
+    val cpuPercent: Double = 0.0
 )
 
 class MainAppViewModel(application: Application) : AndroidViewModel(application) {
@@ -42,12 +44,6 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     val channels: StateFlow<List<ChannelInfo>> = tgClient.channelsState
     val media: StateFlow<List<MediaItem>> = tgClient.mediaState
     val apiCredentials: StateFlow<Pair<Int, String>> = tgClient.apiCredentials
-
-    fun saveApiCredentials(apiId: Int, apiHash: String) {
-        tgClient.saveApiCredentials(apiId, apiHash)
-        _config.value.telegramApiId = apiId
-        _config.value.telegramApiHash = apiHash
-    }
 
     private val _selectedTab = MutableStateFlow(AppTab.HOME)
     val selectedTab: StateFlow<AppTab> = _selectedTab.asStateFlow()
@@ -73,6 +69,14 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     private val _codeSentSuccess = MutableStateFlow(false)
     val codeSentSuccess: StateFlow<Boolean> = _codeSentSuccess.asStateFlow()
 
+    /** True while we are validating API credentials against Telegram servers */
+    private val _isValidatingApi = MutableStateFlow(false)
+    val isValidatingApi: StateFlow<Boolean> = _isValidatingApi.asStateFlow()
+
+    /** Holds any API validation error message */
+    private val _apiValidationError = MutableStateFlow<String?>(null)
+    val apiValidationError: StateFlow<String?> = _apiValidationError.asStateFlow()
+
     private val startTime = System.currentTimeMillis()
 
     init {
@@ -97,6 +101,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                 val server = StreamerForegroundService.activeServer
                 val ip = server?.getLocalIpAddress() ?: "127.0.0.1"
                 val port = _config.value.port
+                val isRunning = StreamerForegroundService.isServiceRunning
                 val uptimeSec = (System.currentTimeMillis() - startTime) / 1000
                 val h = uptimeSec / 3600
                 val m = (uptimeSec % 3600) / 60
@@ -106,21 +111,78 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                 val usedMem = (runtime.totalMemory() - runtime.freeMemory()) / (1024 * 1024)
 
                 _telemetry.value = TelemetryUiState(
-                    isRunning = _config.value.isRunning,
+                    isRunning = isRunning,
                     port = port,
                     localIp = ip,
                     manifestUrl = "http://$ip:$port/manifest.json",
                     uptimeFormatted = uptimeStr,
                     memoryUsedMb = usedMem,
-                    cpuPercent = if (_config.value.isRunning) 1.2 else 0.0
+                    cpuPercent = if (isRunning) 1.2 else 0.0
                 )
                 delay(3000)
             }
         }
     }
 
+    /**
+     * Validates API credentials against Telegram, then saves them if valid.
+     * Calls onResult(success, errorMessage)
+     */
+    fun validateAndSaveApiCredentials(apiId: Int, apiHash: String, onResult: (Boolean, String?) -> Unit) {
+        viewModelScope.launch {
+            _isValidatingApi.value = true
+            _apiValidationError.value = null
+            val res = tgClient.validateApiCredentials(apiId, apiHash)
+            _isValidatingApi.value = false
+            if (res.isSuccess) {
+                tgClient.saveApiCredentials(apiId, apiHash)
+                _config.value.telegramApiId = apiId
+                _config.value.telegramApiHash = apiHash
+                onResult(true, null)
+            } else {
+                val msg = res.exceptionOrNull()?.message ?: "Invalid API credentials"
+                _apiValidationError.value = msg
+                onResult(false, msg)
+            }
+        }
+    }
+
+    fun saveApiCredentials(apiId: Int, apiHash: String) {
+        tgClient.saveApiCredentials(apiId, apiHash)
+        _config.value.telegramApiId = apiId
+        _config.value.telegramApiHash = apiHash
+    }
+
+    fun clearApiCredentials() {
+        tgClient.saveApiCredentials(0, "")
+        _config.value.telegramApiId = 0
+        _config.value.telegramApiHash = ""
+    }
+
     fun toggleServer() {
-        val newState = !_config.value.isRunning
+        val context = getApplication<Application>().applicationContext
+        val isCurrentlyRunning = StreamerForegroundService.isServiceRunning
+
+        if (!isCurrentlyRunning) {
+            // Start the server
+            val intent = Intent(context, StreamerForegroundService::class.java).apply {
+                action = StreamerForegroundService.ACTION_START
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        } else {
+            // Stop the server
+            val intent = Intent(context, StreamerForegroundService::class.java).apply {
+                action = StreamerForegroundService.ACTION_STOP
+            }
+            context.startService(intent)
+        }
+
+        // Optimistically update UI; telemetry loop will confirm in 3s
+        val newState = !isCurrentlyRunning
         _config.value.isRunning = newState
         _telemetry.value = _telemetry.value.copy(isRunning = newState)
     }
@@ -153,6 +215,10 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
 
     // --- Telegram Auth Actions ---
 
+    fun validatePhoneNumber(phone: String): String? {
+        return tgClient.validatePhoneNumber(phone)
+    }
+
     fun sendAuthCode(phoneNumber: String) {
         viewModelScope.launch {
             _isSendingCode.value = true
@@ -160,11 +226,21 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             _isSendingCode.value = false
             if (res.isSuccess) {
                 _codeSentSuccess.value = true
-                Toast.makeText(getApplication(), "Code sent to Telegram app", Toast.LENGTH_LONG).show()
+                Toast.makeText(getApplication(), "✓ Code sent to your Telegram app", Toast.LENGTH_LONG).show()
             } else {
-                Toast.makeText(getApplication(), res.exceptionOrNull()?.message ?: "Failed to send code", Toast.LENGTH_LONG).show()
+                Toast.makeText(
+                    getApplication(),
+                    res.exceptionOrNull()?.message ?: "Failed to send code",
+                    Toast.LENGTH_LONG
+                ).show()
             }
         }
+    }
+
+    fun resendAuthCode(phoneNumber: String) {
+        // Reset codeSentSuccess before resending so UI reacts
+        _codeSentSuccess.value = false
+        sendAuthCode(phoneNumber)
     }
 
     fun verifyAuthCode(code: String) {
@@ -174,9 +250,13 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             _isVerifyingCode.value = false
             if (res.isSuccess) {
                 _codeSentSuccess.value = false
-                Toast.makeText(getApplication(), "Logged in successfully!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(getApplication(), "✓ Logged in successfully!", Toast.LENGTH_SHORT).show()
             } else {
-                Toast.makeText(getApplication(), res.exceptionOrNull()?.message ?: "Invalid code", Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    getApplication(),
+                    res.exceptionOrNull()?.message ?: "Invalid code",
+                    Toast.LENGTH_LONG
+                ).show()
             }
         }
     }
@@ -185,9 +265,13 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             val res = tgClient.importSessionString(sessionStr)
             if (res.isSuccess) {
-                Toast.makeText(getApplication(), "Session imported successfully!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(getApplication(), "✓ Session imported successfully!", Toast.LENGTH_SHORT).show()
             } else {
-                Toast.makeText(getApplication(), res.exceptionOrNull()?.message ?: "Invalid session", Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    getApplication(),
+                    res.exceptionOrNull()?.message ?: "Invalid session",
+                    Toast.LENGTH_SHORT
+                ).show()
             }
         }
     }
@@ -196,7 +280,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             val res = tgClient.loginWithWebSession(firstName, username, userId, sessionStr)
             if (res.isSuccess) {
-                Toast.makeText(getApplication(), "Telegram Login Successful!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(getApplication(), "✓ Telegram Login Successful!", Toast.LENGTH_SHORT).show()
             }
         }
     }
