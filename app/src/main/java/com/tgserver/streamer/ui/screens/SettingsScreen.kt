@@ -268,6 +268,74 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
             }
         }
 
+        // 1.5 TELEGRAM API CREDENTIALS
+        val (apiId, apiHash) = viewModel.apiCredentials.collectAsState().value
+        var editApiId by remember(apiId) { mutableStateOf(if (apiId > 0) apiId.toString() else "") }
+        var editApiHash by remember(apiHash) { mutableStateOf(apiHash) }
+
+        SettingsCard(title = "Telegram API Credentials") {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "API ID",
+                    color = TextTertiary,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                OutlinedTextField(
+                    value = editApiId,
+                    onValueChange = { editApiId = it },
+                    placeholder = { Text("API ID", color = TextTertiary, fontSize = 13.sp) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = Color(0xFFF3A43B),
+                        unfocusedBorderColor = BorderSubtle,
+                        focusedContainerColor = SurfaceCardElevated,
+                        unfocusedContainerColor = SurfaceCardElevated
+                    ),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Text(
+                    text = "API HASH",
+                    color = TextTertiary,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                OutlinedTextField(
+                    value = editApiHash,
+                    onValueChange = { editApiHash = it },
+                    placeholder = { Text("API Hash", color = TextTertiary, fontSize = 13.sp) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = Color(0xFFF3A43B),
+                        unfocusedBorderColor = BorderSubtle,
+                        focusedContainerColor = SurfaceCardElevated,
+                        unfocusedContainerColor = SurfaceCardElevated
+                    ),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Button(
+                    onClick = {
+                        val parsedId = editApiId.trim().toIntOrNull() ?: 0
+                        viewModel.saveApiCredentials(parsedId, editApiHash.trim())
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF3A43B)),
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text("Save Credentials", color = Color(0xFF1E1402), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
         // 2. LOCAL SERVER CONFIGURATION (PORT 7788)
         SettingsCard(title = "Local Streaming Engine") {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {

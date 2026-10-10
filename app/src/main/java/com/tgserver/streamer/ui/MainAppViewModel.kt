@@ -41,6 +41,13 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     val session: StateFlow<AuthSession> = tgClient.sessionState
     val channels: StateFlow<List<ChannelInfo>> = tgClient.channelsState
     val media: StateFlow<List<MediaItem>> = tgClient.mediaState
+    val apiCredentials: StateFlow<Pair<Int, String>> = tgClient.apiCredentials
+
+    fun saveApiCredentials(apiId: Int, apiHash: String) {
+        tgClient.saveApiCredentials(apiId, apiHash)
+        _config.value.telegramApiId = apiId
+        _config.value.telegramApiHash = apiHash
+    }
 
     private val _selectedTab = MutableStateFlow(AppTab.HOME)
     val selectedTab: StateFlow<AppTab> = _selectedTab.asStateFlow()

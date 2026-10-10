@@ -34,6 +34,31 @@ class TelegramClientManager(private val context: Context) {
     private val channels = ConcurrentHashMap<Long, ChannelInfo>()
     private val mediaIndex = ConcurrentHashMap<String, MediaItem>()
 
+    private val _apiCredentials = MutableStateFlow(
+        Pair(
+            prefs.getInt("tg_api_id", 0),
+            prefs.getString("tg_api_hash", "") ?: ""
+        )
+    )
+    val apiCredentials: StateFlow<Pair<Int, String>> = _apiCredentials.asStateFlow()
+
+    fun getApiId(): Int = _apiCredentials.value.first
+    fun getApiHash(): String = _apiCredentials.value.second
+
+    fun hasApiCredentials(): Boolean {
+        val (id, hash) = _apiCredentials.value
+        return id > 0 && hash.isNotBlank()
+    }
+
+    fun saveApiCredentials(apiId: Int, apiHash: String) {
+        prefs.edit().apply {
+            putInt("tg_api_id", apiId)
+            putString("tg_api_hash", apiHash.trim())
+            apply()
+        }
+        _apiCredentials.value = Pair(apiId, apiHash.trim())
+    }
+
     init {
         loadSession()
         loadChannels()

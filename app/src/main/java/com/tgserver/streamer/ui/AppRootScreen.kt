@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tgserver.streamer.theme.*
+import com.tgserver.streamer.ui.screens.ApiCredentialsScreen
 import com.tgserver.streamer.ui.screens.ChannelsScreen
 import com.tgserver.streamer.ui.screens.HomeScreen
 import com.tgserver.streamer.ui.screens.LibraryScreen
@@ -33,26 +34,33 @@ import com.tgserver.streamer.ui.screens.SettingsScreen
 @Composable
 fun AppRootScreen(viewModel: MainAppViewModel) {
     val selectedTab by viewModel.selectedTab.collectAsState()
+    val apiCreds by viewModel.apiCredentials.collectAsState()
 
-    Scaffold(
-        containerColor = BackgroundOled,
-        bottomBar = {
-            MinimalBottomNav(
-                currentTab = selectedTab,
-                onTabSelected = { viewModel.selectTab(it) }
-            )
-        }
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) {
-            when (selectedTab) {
-                AppTab.HOME -> HomeScreen(viewModel = viewModel)
-                AppTab.CHANNELS -> ChannelsScreen(viewModel = viewModel)
-                AppTab.LIBRARY -> LibraryScreen(viewModel = viewModel)
-                AppTab.SETTINGS -> SettingsScreen(viewModel = viewModel)
+    val hasCredentials = apiCreds.first > 0 && apiCreds.second.isNotBlank()
+
+    if (!hasCredentials) {
+        ApiCredentialsScreen(viewModel = viewModel)
+    } else {
+        Scaffold(
+            containerColor = BackgroundOled,
+            bottomBar = {
+                MinimalBottomNav(
+                    currentTab = selectedTab,
+                    onTabSelected = { viewModel.selectTab(it) }
+                )
+            }
+        ) { innerPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            ) {
+                when (selectedTab) {
+                    AppTab.HOME -> HomeScreen(viewModel = viewModel)
+                    AppTab.CHANNELS -> ChannelsScreen(viewModel = viewModel)
+                    AppTab.LIBRARY -> LibraryScreen(viewModel = viewModel)
+                    AppTab.SETTINGS -> SettingsScreen(viewModel = viewModel)
+                }
             }
         }
     }
