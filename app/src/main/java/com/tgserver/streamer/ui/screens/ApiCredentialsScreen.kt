@@ -55,14 +55,24 @@ fun ApiCredentialsScreen(viewModel: MainAppViewModel) {
         ) {
             Spacer(modifier = Modifier.height(16.dp))
 
-            // APP BRANDING HEADER
-            Text(
-                text = "TeleStremio",
-                color = TextPrimary,
-                fontSize = 32.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = (-0.5).sp
-            )
+            // APP BRANDING HEADER (TG-Server)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .background(AccentApple, RoundedCornerShape(5.dp))
+                )
+                Text(
+                    text = "TG-Server",
+                    color = TextPrimary,
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-0.5).sp
+                )
+            }
 
             Spacer(modifier = Modifier.height(6.dp))
 
@@ -73,7 +83,7 @@ fun ApiCredentialsScreen(viewModel: MainAppViewModel) {
                 lineHeight = 20.sp
             )
 
-            Spacer(modifier = Modifier.height(48.dp))
+            Spacer(modifier = Modifier.height(44.dp))
 
             // SECTION TITLE
             Text(

@@ -71,36 +71,55 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .background(Color(0xFFF3A43B).copy(alpha = 0.15f), RoundedCornerShape(24.dp))
+                                .border(1.dp, Color(0xFFF3A43B).copy(alpha = 0.4f), RoundedCornerShape(24.dp))
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .background(StatusGreen, RoundedCornerShape(4.dp))
-                            )
                             Text(
-                                text = "Connected",
-                                color = StatusGreen,
-                                fontSize = 12.sp,
+                                text = session.initials,
+                                color = Color(0xFFF3A43B),
+                                fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
-                        Text(
-                            text = "@${session.username}",
-                            color = TextPrimary,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(top = 2.dp)
-                        )
-                        Text(
-                            text = session.phoneNumber.ifBlank { "Session active" },
-                            color = TextSecondary,
-                            fontSize = 12.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
+
+                        Column {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = session.firstName.ifBlank { "Telegram User" },
+                                    color = TextPrimary,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .size(7.dp)
+                                        .background(StatusGreen, RoundedCornerShape(4.dp))
+                                )
+                            }
+                            Text(
+                                text = "@${session.username.ifBlank { "tg_user" }}",
+                                color = Color(0xFF64B5F6),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = session.phoneNumber.ifBlank { "Session Connected" },
+                                color = TextSecondary,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
                     }
 
                     OutlinedButton(
@@ -109,9 +128,9 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = StatusRed),
                         border = androidx.compose.foundation.BorderStroke(1.dp, StatusRed.copy(alpha = 0.5f)),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                        modifier = Modifier.height(32.dp)
+                        modifier = Modifier.height(34.dp)
                     ) {
-                        Text("Log Out", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Log Out", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             } else {

@@ -68,8 +68,25 @@ data class AuthSession(
     var userId: Long = 0L,
     var sessionString: String = "",
     var phoneCodeHash: String = "",
+    var avatarUrl: String? = null,
     var lastError: String? = null
-)
+) {
+    val initials: String
+        get() {
+            if (firstName.isNotBlank()) {
+                val parts = firstName.trim().split(" ")
+                return if (parts.size >= 2) {
+                    "${parts[0].first()}${parts[1].first()}".uppercase()
+                } else {
+                    parts[0].take(2).uppercase()
+                }
+            }
+            if (username.isNotBlank()) {
+                return username.take(2).uppercase()
+            }
+            return "TG"
+        }
+}
 
 data class ServerTelemetry(
     val isRunning: Boolean,

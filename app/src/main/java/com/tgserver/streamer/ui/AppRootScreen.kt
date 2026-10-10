@@ -30,16 +30,20 @@ import com.tgserver.streamer.ui.screens.ChannelsScreen
 import com.tgserver.streamer.ui.screens.HomeScreen
 import com.tgserver.streamer.ui.screens.LibraryScreen
 import com.tgserver.streamer.ui.screens.SettingsScreen
+import com.tgserver.streamer.ui.screens.TelegramLoginScreen
 
 @Composable
 fun AppRootScreen(viewModel: MainAppViewModel) {
     val selectedTab by viewModel.selectedTab.collectAsState()
     val apiCreds by viewModel.apiCredentials.collectAsState()
+    val session by viewModel.session.collectAsState()
 
     val hasCredentials = apiCreds.first > 0 && apiCreds.second.isNotBlank()
 
     if (!hasCredentials) {
         ApiCredentialsScreen(viewModel = viewModel)
+    } else if (!session.isLoggedIn) {
+        TelegramLoginScreen(viewModel = viewModel)
     } else {
         Scaffold(
             containerColor = BackgroundOled,

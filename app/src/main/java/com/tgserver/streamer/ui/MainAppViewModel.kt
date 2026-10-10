@@ -192,6 +192,15 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun loginWithWebSession(firstName: String, username: String, userId: Long, sessionStr: String) {
+        viewModelScope.launch {
+            val res = tgClient.loginWithWebSession(firstName, username, userId, sessionStr)
+            if (res.isSuccess) {
+                Toast.makeText(getApplication(), "Telegram Login Successful!", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     fun logout() {
         tgClient.logout()
         _codeSentSuccess.value = false
