@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport">
+  <title>TG-Server Mobile Streamer</title>
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=JetBrains+Mono:wght@100..900&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "surface": "#121318",
+            "surface-container": "#1e1f25",
+            "surface-container-low": "#1a1b21",
+            "surface-container-lowest": "#0d0e13",
+            "surface-container-high": "#292a2f",
+            "surface-bright": "#38393f",
+            "primary": "#ffc174",
+            "primary-container": "#f59e0b",
+            "tertiary": "#56e5a9",
+            "on-surface": "#e3e1e9",
+            "on-surface-variant": "#d8c3ad",
+            "error": "#ffb4ab"
+          },
+          fontFamily: {
+            "geist": ["Geist", "sans-serif"],
+            "mono": ["JetBrains Mono", "monospace"]
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    body {
+      background-color: #121318;
+      font-family: 'Geist', sans-serif;
+      overscroll-behavior: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    ::-webkit-scrollbar { display: none; }
+    .pb-safe { padding-bottom: max(env(safe-area-inset-bottom, 0px), 16px); }
+    .pt-safe { padding-top: max(env(safe-area-inset-top, 0px), 12px); }
+  </style>
+</head>
+<body class="bg-surface text-on-surface select-none min-h-screen flex flex-col justify-between">
+
+  <!-- TOP HEADER -->
+  <header class="fixed top-0 w-full z-50 bg-surface/85 backdrop-blur-xl pt-safe border-b border-surface-container-high/40">
+    <div class="h-16 px-4 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="w-9 h-9 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center">
+          <span class="material-symbols-outlined text-primary text-[22px]">cell_tower</span>
+        </div>
+        <div class="flex flex-col">
+          <div class="flex items-center gap-1.5">
+            <span class="text-[17px] font-bold tracking-tight text-on-surface">TG-Server</span>
+            <span id="headerLiveDot" class="w-2 h-2 rounded-full bg-tertiary shadow-[0_0_8px_rgba(86,229,169,0.8)]"></span>
+          </div>
+          <span id="headerStatusText" class="text-[11px] font-mono text-tertiary uppercase tracking-wider">ONLINE • Port 7788</span>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <div class="flex flex-col items-end">
+          <span id="headerUsername" class="text-xs font-semibold text-on-surface">@TheAceOfficials</span>
+          <span class="text-[9px] uppercase tracking-wider font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded">ADMIN</span>
+        </div>
+        <div class="w-8 h-8 rounded-full bg-surface-container-high border border-primary/30 flex items-center justify-center text-primary text-xs font-bold" id="headerAvatar">
+          TG
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN TAB CONTENT CONTAINER -->
+  <main class="flex-1 w-full pt-20 pb-28 px-4 overflow-y-auto">
+
+    <!-- TAB 1: HOME DASHBOARD -->
+    <section id="view-home" class="space-y-4">
+      <!-- Active Telemetry & Daemon Switch Card -->
+      <div class="w-full bg-surface-container rounded-2xl p-4 shadow-xl border border-surface-container-high/50">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center space-x-3">
+            <div class="relative flex items-center justify-center">
+              <span id="daemonDot" class="w-3 h-3 rounded-full bg-tertiary"></span>
+              <span id="daemonPing" class="absolute w-5 h-5 rounded-full bg-tertiary/30 animate-ping"></span>
+            </div>
+            <div class="flex flex-col">
+              <div class="flex items-center gap-2">
+                <span id="daemonTitle" class="text-base font-semibold text-on-surface">Server Active</span>
+                <span id="daemonPortBadge" class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-tertiary/15 text-tertiary font-bold">PORT 7788</span>
+              </div>
+              <span id="daemonSubtitle" class="text-xs text-on-surface-variant">Ready for Stremio handshakes</span>
+            </div>
+          </div>
+          <button id="serverToggleBtn" onclick="toggleServer()" class="w-13 h-7 rounded-full p-0.5 flex items-center transition-all duration-300 bg-primary cursor-pointer">
+            <span id="toggleKnob" class="w-6 h-6 rounded-full bg-surface-container-lowest shadow-md transform translate-x-6 transition-transform"></span>
+          </button>
+        </div>
+
+        <!-- Stremio Endpoint & Copier -->
+        <div class="mt-4 flex items-center justify-between bg-surface-container-lowest px-3 py-2 rounded-xl border border-surface-container-high/40">
+          <div class="flex items-center space-x-2 min-w-0 pr-2">
+            <span class="material-symbols-outlined text-primary text-[18px]">link</span>
+            <span id="endpointUrlText" class="text-xs font-mono text-on-surface-variant truncate">http://127.0.0.1:7788/manifest.json</span>
+          </div>
+          <button id="copyEndpointBtn" onclick="copyManifestUrl()" class="flex items-center space-x-1 px-2.5 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-bright active:scale-95 transition-all text-on-surface shrink-0">
+            <span id="copyIcon" class="material-symbols-outlined text-[14px] text-primary">content_copy</span>
+            <span id="copyLabel" class="text-[11px] font-bold">COPY</span>
+          </button>
+        </div>
+
+        <!-- Telemetry Stats Strip -->
+        <div class="grid grid-cols-3 gap-2 mt-4">
+          <div class="bg-surface-container-low p-2.5 rounded-xl border border-surface-container-high/30">
+            <span class="text-[10px] uppercase font-bold text-on-surface-variant block">Uptime</span>
+            <span id="statUptime" class="text-sm font-mono font-semibold text-on-surface mt-0.5 block">0h 05m</span>
+          </div>
+          <div class="bg-surface-container-low p-2.5 rounded-xl border border-surface-container-high/30">
+            <span class="text-[10px] uppercase font-bold text-on-surface-variant block">RAM (Engine)</span>
+            <span id="statRam" class="text-sm font-mono font-semibold text-on-surface mt-0.5 block">24 MB</span>
+          </div>
+          <div class="bg-surface-container-low p-2.5 rounded-xl border border-surface-container-high/30">
+            <span class="text-[10px] uppercase font-bold text-on-surface-variant block">CPU Load</span>
+            <span id="statCpu" class="text-sm font-mono font-semibold text-tertiary mt-0.5 block">1.8%</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bento Box Library Overview -->
+      <div class="space-y-2">
+        <div class="flex items-center justify-between px-1">
+          <div class="flex items-center space-x-1.5">
+            <span class="material-symbols-outlined text-primary text-[16px]">shelves</span>
+            <span class="text-xs font-bold uppercase tracking-wider text-on-surface-variant">Library Index</span>
+          </div>
+          <span id="overviewChannelsCount" class="text-xs font-mono text-on-surface-variant">3 Monitored Channels</span>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="bg-surface-container p-3.5 rounded-2xl border border-surface-container-high/40">
+            <div class="flex items-center justify-between">
+              <span class="material-symbols-outlined text-primary text-[20px]">movie</span>
+              <span class="text-[10px] font-mono text-tertiary font-bold">+2 New</span>
+            </div>
+            <span id="overviewMoviesCount" class="text-2xl font-bold font-mono text-on-surface block mt-2">2</span>
+            <span class="text-xs text-on-surface-variant">Movies Indexed</span>
+          </div>
+          <div class="bg-surface-container p-3.5 rounded-2xl border border-surface-container-high/40">
+            <div class="flex items-center justify-between">
+              <span class="material-symbols-outlined text-primary text-[20px]">tv</span>
+              <span class="text-[10px] font-mono text-tertiary font-bold">Synced</span>
+            </div>
+            <span id="overviewSeriesCount" class="text-2xl font-bold font-mono text-on-surface block mt-2">2</span>
+            <span class="text-xs text-on-surface-variant">Series Indexed</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Action / Stremio Setup Guide Card -->
+      <div class="bg-surface-container p-4 rounded-2xl border border-surface-container-high/40 space-y-2">
+        <div class="flex items-center space-x-2">
+          <span class="material-symbols-outlined text-primary text-[18px]">help</span>
+          <span class="text-sm font-semibold text-on-surface">How to connect to Stremio</span>
+        </div>
+        <p class="text-xs text-on-surface-variant leading-relaxed">
+          1. Copy the <code class="text-primary font-mono text-[11px]">/manifest.json</code> link above.<br>
+          2. Open Stremio (on this phone, Android TV, or PC on same Wi-Fi).<br>
+          3. Go to <b>Addons &gt; Add Addon URL</b> and paste it!
+        </p>
+      </div>
+    </section>
+
+    <!-- TAB 2: MONITORED CHANNELS -->
+    <section id="view-channels" class="hidden space-y-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-lg font-bold text-on-surface">Telegram Channels</h2>
+          <p class="text-xs text-on-surface-variant">Channels monitored for streamable media</p>
+        </div>
+        <button onclick="openAddChannelModal()" class="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-primary text-surface-container-lowest font-bold text-xs shadow hover:brightness-110 active:scale-95 transition-all">
+          <span class="material-symbols-outlined text-[16px]">add</span>
+          <span>Add Channel</span>
+        </button>
+      </div>
+
+      <!-- Channel List -->
+      <div id="channelsListContainer" class="space-y-3">
+        <!-- Rendered dynamically -->
+      </div>
+    </section>
+
+    <!-- TAB 3: MEDIA LIBRARY -->
+    <section id="view-library" class="hidden space-y-4">
+      <div class="space-y-3">
+        <!-- Search Input -->
+        <div class="relative">
+          <span class="material-symbols-outlined absolute left-3 top-3 text-[18px] text-on-surface-variant">search</span>
+          <input id="librarySearchInput" oninput="filterMedia()" type="text" placeholder="Search movies, anime, series..." class="w-full bg-surface-container pl-10 pr-4 py-2.5 rounded-xl text-sm border border-surface-container-high/40 focus:border-primary focus:outline-none text-on-surface placeholder:text-on-surface-variant/60">
+        </div>
+
+        <!-- Filter Chips -->
+        <div class="flex space-x-2 overflow-x-auto pb-1">
+          <button onclick="setCategoryFilter('all', this)" class="category-btn px-3 py-1 rounded-full text-xs font-semibold bg-primary text-surface-container-lowest">All</button>
+          <button onclick="setCategoryFilter('movies', this)" class="category-btn px-3 py-1 rounded-full text-xs font-semibold bg-surface-container text-on-surface-variant hover:text-on-surface">Movies</button>
+          <button onclick="setCategoryFilter('series', this)" class="category-btn px-3 py-1 rounded-full text-xs font-semibold bg-surface-container text-on-surface-variant hover:text-on-surface">Series</button>
+          <button onclick="setCategoryFilter('4k', this)" class="category-btn px-3 py-1 rounded-full text-xs font-semibold bg-surface-container text-on-surface-variant hover:text-on-surface">4K UHD</button>
+        </div>
+      </div>
+
+      <!-- Media Grid -->
+      <div id="mediaGridContainer" class="grid grid-cols-2 gap-3">
+        <!-- Rendered dynamically -->
+      </div>
+    </section>
+
+    <!-- TAB 4: SETTINGS & CONFIG -->
+    <section id="view-settings" class="hidden space-y-4">
+      <div>
+        <h2 class="text-lg font-bold text-on-surface">Settings & Config</h2>
+        <p class="text-xs text-on-surface-variant">Telegram session, port & poster sources</p>
+      </div>
+
+      <!-- Telegram Auth Section -->
+      <div class="bg-surface-container p-4 rounded-2xl border border-surface-container-high/40 space-y-3">
+        <div class="flex items-center space-x-2">
+          <span class="material-symbols-outlined text-primary text-[20px]">account_circle</span>
+          <span class="text-sm font-semibold text-on-surface">Telegram Authentication</span>
+        </div>
+        <div id="authStatusBox" class="bg-surface-container-low p-3 rounded-xl border border-surface-container-high/30 flex items-center justify-between">
+          <div class="flex items-center space-x-2.5">
+            <span id="authStatusDot" class="w-2.5 h-2.5 rounded-full bg-tertiary"></span>
+            <div>
+              <span id="authStatusTitle" class="text-xs font-semibold block text-on-surface">Connected Account</span>
+              <span id="authStatusSub" class="text-[11px] font-mono text-on-surface-variant">@TheAceOfficials (+91 9876543210)</span>
+            </div>
+          </div>
+          <button onclick="handleLogout()" class="text-xs font-semibold text-error px-2.5 py-1 rounded-lg bg-error/10 hover:bg-error/20">Logout</button>
+        </div>
+
+        <!-- Phone / OTP login form -->
+        <div id="authLoginForm" class="space-y-2.5 hidden">
+          <div>
+            <label class="text-[11px] font-semibold text-on-surface-variant uppercase">Phone Number</label>
+            <div class="flex space-x-2 mt-1">
+              <input id="loginPhoneInput" type="tel" placeholder="+919876543210" class="flex-1 bg-surface-container-low px-3 py-2 rounded-xl text-xs border border-surface-container-high/40 focus:border-primary focus:outline-none">
+              <button onclick="sendAuthCode()" class="px-3 py-2 rounded-xl bg-primary text-surface-container-lowest text-xs font-bold shrink-0">Send OTP</button>
+            </div>
+          </div>
+          <div id="loginOtpGroup" class="hidden">
+            <label class="text-[11px] font-semibold text-on-surface-variant uppercase">Telegram OTP Code</label>
+            <div class="flex space-x-2 mt-1">
+              <input id="loginOtpInput" type="text" placeholder="12345" class="flex-1 bg-surface-container-low px-3 py-2 rounded-xl text-xs border border-surface-container-high/40 focus:border-primary focus:outline-none">
+              <button onclick="verifyAuthCode()" class="px-3 py-2 rounded-xl bg-tertiary text-surface-container-lowest text-xs font-bold shrink-0">Verify</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Server Engine Settings -->
+      <div class="bg-surface-container p-4 rounded-2xl border border-surface-container-high/40 space-y-3">
+        <div class="flex items-center space-x-2">
+          <span class="material-symbols-outlined text-primary text-[20px]">tune</span>
+          <span class="text-sm font-semibold text-on-surface">Local Server Engine</span>
+        </div>
+        <div>
+          <label class="text-[11px] font-semibold text-on-surface-variant uppercase">Server Port (Default: 7788)</label>
+          <input id="settingsPortInput" type="number" value="7788" class="w-full mt-1 bg-surface-container-low px-3 py-2 rounded-xl text-xs font-mono border border-surface-container-high/40 focus:border-primary focus:outline-none">
+          <span class="text-[10px] text-on-surface-variant mt-1 block">Safe non-conflicting port for local Stremio add-on streaming</span>
+        </div>
+        <div>
+          <label class="text-[11px] font-semibold text-on-surface-variant uppercase">Chunk Buffer Size</label>
+          <select id="settingsChunkSelect" class="w-full mt-1 bg-surface-container-low px-3 py-2 rounded-xl text-xs font-mono border border-surface-container-high/40 focus:border-primary focus:outline-none text-on-surface">
+            <option value="256">256 KB (Low RAM phones)</option>
+            <option value="512" selected>512 KB (Recommended)</option>
+            <option value="1024">1024 KB (Fast Wi-Fi)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Custom Poster Integration (SpatialPosters) -->
+      <div class="bg-surface-container p-4 rounded-2xl border border-surface-container-high/40 space-y-3">
+        <div class="flex items-center space-x-2">
+          <span class="material-symbols-outlined text-primary text-[20px]">image</span>
+          <span class="text-sm font-semibold text-on-surface">SpatialPosters Integration</span>
+        </div>
+        <div>
+          <label class="text-[11px] font-semibold text-on-surface-variant uppercase">SpatialPosters Endpoint URL</label>
+          <input id="settingsPosterUrl" type="url" placeholder="http://192.168.1.100:3000" class="w-full mt-1 bg-surface-container-low px-3 py-2 rounded-xl text-xs font-mono border border-surface-container-high/40 focus:border-primary focus:outline-none">
+          <span class="text-[10px] text-on-surface-variant mt-1 block">Custom Poster server to fetch matching posters for media</span>
+        </div>
+        <div>
+          <label class="text-[11px] font-semibold text-on-surface-variant uppercase">API Key (Optional)</label>
+          <input id="settingsPosterKey" type="password" placeholder="••••••••••••" class="w-full mt-1 bg-surface-container-low px-3 py-2 rounded-xl text-xs font-mono border border-surface-container-high/40 focus:border-primary focus:outline-none">
+        </div>
+        <button onclick="saveAllSettings()" class="w-full py-2.5 rounded-xl bg-primary text-surface-container-lowest font-bold text-xs shadow hover:brightness-110 active:scale-95 transition-all">
+          Save Settings
+        </button>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ADD CHANNEL MODAL -->
+  <div id="addChannelModal" class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="bg-surface-container w-full max-w-sm rounded-2xl p-5 border border-surface-container-high space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 class="text-base font-bold text-on-surface">Add Monitored Channel</h3>
+        <button onclick="closeAddChannelModal()" class="text-on-surface-variant hover:text-on-surface">
+          <span class="material-symbols-outlined text-[20px]">close</span>
+        </button>
+      </div>
+      <div>
+        <label class="text-[11px] font-semibold text-on-surface-variant uppercase">Channel Link or Username</label>
+        <input id="modalChannelInput" type="text" placeholder="@Cinema4KUHD or link" class="w-full mt-1 bg-surface-container-low px-3 py-2.5 rounded-xl text-xs border border-surface-container-high/40 focus:border-primary focus:outline-none">
+      </div>
+      <div class="flex space-x-2">
+        <button onclick="closeAddChannelModal()" class="flex-1 py-2 rounded-xl bg-surface-container-high text-xs font-semibold">Cancel</button>
+        <button onclick="confirmAddChannel()" class="flex-1 py-2 rounded-xl bg-primary text-surface-container-lowest text-xs font-bold">Add Channel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOTTOM NAVIGATION BAR -->
+  <nav class="fixed bottom-0 w-full z-50 bg-surface/90 backdrop-blur-xl border-t border-surface-container-high/40 pb-safe">
+    <div class="h-16 px-6 grid grid-cols-4 items-center">
+      <button onclick="switchTab('home')" id="nav-home" class="flex flex-col items-center justify-center space-y-1 text-primary">
+        <span class="material-symbols-outlined text-[22px]">dashboard</span>
+        <span class="text-[10px] font-semibold tracking-tight">Home</span>
+      </button>
+      <button onclick="switchTab('channels')" id="nav-channels" class="flex flex-col items-center justify-center space-y-1 text-on-surface-variant hover:text-on-surface">
+        <span class="material-symbols-outlined text-[22px]">hub</span>
+        <span class="text-[10px] font-semibold tracking-tight">Channels</span>
+      </button>
+      <button onclick="switchTab('library')" id="nav-library" class="flex flex-col items-center justify-center space-y-1 text-on-surface-variant hover:text-on-surface">
+        <span class="material-symbols-outlined text-[22px]">video_library</span>
+        <span class="text-[10px] font-semibold tracking-tight">Library</span>
+      </button>
+      <button onclick="switchTab('settings')" id="nav-settings" class="flex flex-col items-center justify-center space-y-1 text-on-surface-variant hover:text-on-surface">
+        <span class="material-symbols-outlined text-[22px]">settings</span>
+        <span class="text-[10px] font-semibold tracking-tight">Settings</span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- JAVASCRIPT APP LOGIC -->
+  <script>
+    let currentTab = 'home';
+    let currentCategory = 'all';
+    let cachedMedia = [];
+    let serverRunning = true;
+    let manifestUrl = "http://127.0.0.1:7788/manifest.json";
+
+    function switchTab(tab) {
+      currentTab = tab;
+      ['home', 'channels', 'library', 'settings'].forEach(t => {
+        const view = document.getElementById(`view-${t}`);
+        const nav = document.getElementById(`nav-${t}`);
+        if (t === tab) {
+          view.classList.remove('hidden');
+          nav.classList.remove('text-on-surface-variant');
+          nav.classList.add('text-primary');
+        } else {
+          view.classList.add('hidden');
+          nav.classList.remove('text-primary');
+          nav.classList.add('text-on-surface-variant');
+        }
+      });
+      if (tab === 'channels') loadChannels();
+      if (tab === 'library') loadLibrary();
+    }
+
+    async function fetchStatus() {
+      try {
+        const res = await fetch('/api/status');
+        if (!res.ok) return;
+        const data = await res.json();
+        
+        serverRunning = data.isRunning;
+        manifestUrl = data.manifestUrl;
+        
+        document.getElementById('endpointUrlText').innerText = data.manifestUrl;
+        document.getElementById('statUptime').innerText = data.uptimeFormatted || '0m';
+        document.getElementById('statRam').innerText = `${data.memoryUsedMb} MB`;
+        document.getElementById('statCpu').innerText = `${data.cpuPercent}%`;
+        document.getElementById('overviewChannelsCount').innerText = `${data.totalChannels} Monitored Channels`;
+        document.getElementById('headerStatusText').innerText = `ONLINE • Port ${data.port}`;
+        document.getElementById('daemonPortBadge').innerText = `PORT ${data.port}`;
+        
+        if (data.user && data.user.username) {
+          document.getElementById('headerUsername').innerText = `@${data.user.username}`;
+        }
+        
+        updateServerToggleUI(data.isRunning);
+      } catch (e) {
+        console.log("Telemetry fetch fallback", e);
+      }
+    }
+
+    function updateServerToggleUI(running) {
+      const knob = document.getElementById('toggleKnob');
+      const btn = document.getElementById('serverToggleBtn');
+      const dot = document.getElementById('daemonDot');
+      const ping = document.getElementById('daemonPing');
+      const title = document.getElementById('daemonTitle');
+      
+      if (running) {
+        btn.classList.add('bg-primary');
+        btn.classList.remove('bg-surface-container-high');
+        knob.classList.add('translate-x-6');
+        dot.className = "w-3 h-3 rounded-full bg-tertiary";
+        ping.className = "absolute w-5 h-5 rounded-full bg-tertiary/30 animate-ping";
+        title.innerText = "Server Active";
+      } else {
+        btn.classList.remove('bg-primary');
+        btn.classList.add('bg-surface-container-high');
+        knob.classList.remove('translate-x-6');
+        dot.className = "w-3 h-3 rounded-full bg-error";
+        ping.className = "hidden";
+        title.innerText = "Server Paused";
+      }
+    }
+
+    async function toggleServer() {
+      try {
+        const res = await fetch('/api/server/toggle', { method: 'POST' });
+        const data = await res.json();
+        updateServerToggleUI(data.isRunning);
+      } catch (e) {
+        serverRunning = !serverRunning;
+        updateServerToggleUI(serverRunning);
+      }
+    }
+
+    function copyManifestUrl() {
+      navigator.clipboard.writeText(manifestUrl);
+      const label = document.getElementById('copyLabel');
+      const icon = document.getElementById('copyIcon');
+      label.innerText = "COPIED!";
+      icon.innerText = "check";
+      setTimeout(() => {
+        label.innerText = "COPY";
+        icon.innerText = "content_copy";
+      }, 2000);
+    }
+
+    async function loadChannels() {
+      try {
+        const res = await fetch('/api/channels');
+        const channels = await res.json();
+        const container = document.getElementById('channelsListContainer');
+        container.innerHTML = "";
+        
+        channels.forEach(ch => {
+          const card = document.createElement('div');
+          card.className = "bg-surface-container p-4 rounded-2xl border border-surface-container-high/40 flex items-center justify-between";
+          card.innerHTML = `
+            <div class="flex items-center space-x-3">
+              <div class="w-10 h-10 rounded-xl bg-surface-container-low border border-surface-container-high flex items-center justify-center">
+                <span class="material-symbols-outlined text-primary text-[22px]">folder</span>
+              </div>
+              <div>
+                <h4 class="text-sm font-semibold text-on-surface">${ch.title}</h4>
+                <div class="flex items-center space-x-2 mt-0.5">
+                  <span class="text-[11px] font-mono text-tertiary font-bold">${ch.videoCount} Videos</span>
+                  <span class="text-[10px] text-on-surface-variant">•</span>
+                  <span class="text-[11px] text-on-surface-variant font-mono">@${ch.username || 'channel'}</span>
+                </div>
+              </div>
+            </div>
+            <div class="flex items-center space-x-2">
+              <button onclick="deleteChannel(${ch.id})" class="p-1.5 rounded-lg text-error hover:bg-error/10">
+                <span class="material-symbols-outlined text-[18px]">delete</span>
+              </button>
+            </div>
+          `;
+          container.appendChild(card);
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    function openAddChannelModal() {
+      document.getElementById('addChannelModal').classList.remove('hidden');
+    }
+    function closeAddChannelModal() {
+      document.getElementById('addChannelModal').classList.add('hidden');
+    }
+    async function confirmAddChannel() {
+      const input = document.getElementById('modalChannelInput');
+      if (!input.value.trim()) return;
+      await fetch('/api/channels/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: input.value.trim() })
+      });
+      input.value = "";
+      closeAddChannelModal();
+      loadChannels();
+      fetchStatus();
+    }
+    async function deleteChannel(id) {
+      await fetch(`/api/channels/${id}`, { method: 'DELETE' });
+      loadChannels();
+      fetchStatus();
+    }
+
+    async function loadLibrary() {
+      try {
+        const res = await fetch(`/api/library?category=${currentCategory}`);
+        cachedMedia = await res.json();
+        renderMedia(cachedMedia);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    function renderMedia(list) {
+      const container = document.getElementById('mediaGridContainer');
+      container.innerHTML = "";
+      list.forEach(m => {
+        const card = document.createElement('div');
+        card.className = "bg-surface-container rounded-2xl overflow-hidden border border-surface-container-high/40 flex flex-col";
+        card.innerHTML = `
+          <div class="relative w-full aspect-[2/3] bg-surface-container-low overflow-hidden">
+            <img src="${m.posterUrl || 'https://images.metahub.space/poster/medium/placeholder/img'}" alt="${m.title}" class="w-full h-full object-cover">
+            <span class="absolute top-2 right-2 text-[10px] font-mono px-2 py-0.5 rounded-md bg-black/70 text-primary backdrop-blur-md font-bold">${m.quality}</span>
+          </div>
+          <div class="p-3 flex-1 flex flex-col justify-between">
+            <div>
+              <h4 class="text-xs font-bold text-on-surface truncate">${m.title}</h4>
+              <span class="text-[10px] text-on-surface-variant font-mono mt-0.5 block">${m.formattedSize} • ${m.formattedDuration}</span>
+            </div>
+            <div class="mt-2.5 pt-2 border-t border-surface-container-high/40 flex items-center justify-between">
+              <span class="text-[10px] uppercase font-bold text-tertiary">Indexed</span>
+              <a href="/stream/video/${m.channelId}/${m.messageId}" target="_blank" class="p-1 rounded-lg bg-primary/10 text-primary hover:bg-primary hover:text-surface-container-lowest transition-all">
+                <span class="material-symbols-outlined text-[16px] block">play_arrow</span>
+              </a>
+            </div>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    function setCategoryFilter(cat, btn) {
+      currentCategory = cat;
+      document.querySelectorAll('.category-btn').forEach(b => {
+        b.className = "category-btn px-3 py-1 rounded-full text-xs font-semibold bg-surface-container text-on-surface-variant hover:text-on-surface";
+      });
+      btn.className = "category-btn px-3 py-1 rounded-full text-xs font-semibold bg-primary text-surface-container-lowest";
+      loadLibrary();
+    }
+
+    function filterMedia() {
+      const q = document.getElementById('librarySearchInput').value.toLowerCase().trim();
+      const filtered = cachedMedia.filter(m => m.title.toLowerCase().includes(q));
+      renderMedia(filtered);
+    }
+
+    async function sendAuthCode() {
+      const phone = document.getElementById('loginPhoneInput').value.trim();
+      if (!phone) return alert("Please enter phone number");
+      const res = await fetch('/api/auth/send-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phoneNumber: phone })
+      });
+      const data = await res.json();
+      if (data.success) {
+        document.getElementById('loginOtpGroup').classList.remove('hidden');
+        alert("OTP sent to your Telegram!");
+      } else {
+        alert(data.error || "Failed to send code");
+      }
+    }
+
+    async function verifyAuthCode() {
+      const code = document.getElementById('loginOtpInput').value.trim();
+      const res = await fetch('/api/auth/sign-in', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert("Login successful!");
+        location.reload();
+      } else {
+        alert(data.error || "Invalid code");
+      }
+    }
+
+    async function handleLogout() {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      document.getElementById('authStatusBox').classList.add('hidden');
+      document.getElementById('authLoginForm').classList.remove('hidden');
+    }
+
+    async function saveAllSettings() {
+      const port = parseInt(document.getElementById('settingsPortInput').value) || 7788;
+      const customPosterUrl = document.getElementById('settingsPosterUrl').value.trim();
+      const customPosterApiKey = document.getElementById('settingsPosterKey').value.trim();
+      const bufferChunkSizeKb = parseInt(document.getElementById('settingsChunkSelect').value) || 512;
+
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ port, customPosterUrl, customPosterApiKey, bufferChunkSizeKb })
+      });
+      alert("Settings saved successfully! (Port: " + port + ")");
+      fetchStatus();
+    }
+
+    // Initialize
+    fetchStatus();
+    setInterval(fetchStatus, 3000);
+  </script>
+</body>
+</html>

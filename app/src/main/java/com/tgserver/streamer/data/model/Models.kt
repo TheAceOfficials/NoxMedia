@@ -1,0 +1,86 @@
+package com.tgserver.streamer.data.model
+
+data class ChannelInfo(
+    val id: Long,
+    val title: String,
+    val username: String? = null,
+    val messageCount: Int = 0,
+    val videoCount: Int = 0,
+    val isActive: Boolean = true,
+    val autoIndex: Boolean = true,
+    val lastSyncTime: Long = System.currentTimeMillis()
+)
+
+data class MediaItem(
+    val id: String, // e.g. "tg_channelId_messageId"
+    val channelId: Long,
+    val messageId: Int,
+    val title: String,
+    val type: String = "movie", // "movie" or "series"
+    val year: String? = null,
+    val season: Int? = null,
+    val episode: Int? = null,
+    val quality: String = "1080p", // "4K", "1080p", "720p", "HDR"
+    val sizeBytes: Long = 0L,
+    val durationSeconds: Int = 0,
+    val mimeType: String = "video/mp4",
+    val fileName: String = "",
+    var posterUrl: String? = null,
+    val overview: String? = null
+) {
+    val formattedSize: String
+        get() {
+            if (sizeBytes <= 0) return "0 MB"
+            val gb = sizeBytes.toDouble() / (1024 * 1024 * 1024)
+            return if (gb >= 1.0) {
+                String.format("%.2f GB", gb)
+            } else {
+                val mb = sizeBytes.toDouble() / (1024 * 1024)
+                String.format("%.1f MB", mb)
+            }
+        }
+
+    val formattedDuration: String
+        get() {
+            if (durationSeconds <= 0) return "--"
+            val h = durationSeconds / 3600
+            val m = (durationSeconds % 3600) / 60
+            return if (h > 0) "${h}h ${m}m" else "${m}m"
+        }
+}
+
+data class ServerConfig(
+    var port: Int = 7788,
+    var isRunning: Boolean = true,
+    var customPosterUrl: String = "",
+    var customPosterApiKey: String = "",
+    var telegramApiId: Int = 0,
+    var telegramApiHash: String = "",
+    var bufferChunkSizeKb: Int = 512,
+    var cacheDir: String = ""
+)
+
+data class AuthSession(
+    var isLoggedIn: Boolean = false,
+    var phoneNumber: String = "",
+    var firstName: String = "",
+    var username: String = "",
+    var userId: Long = 0L,
+    var sessionString: String = "",
+    var phoneCodeHash: String = "",
+    var lastError: String? = null
+)
+
+data class ServerTelemetry(
+    val isRunning: Boolean,
+    val port: Int,
+    val localIp: String,
+    val manifestUrl: String,
+    val uptimeSeconds: Long,
+    val memoryUsedMb: Long,
+    val memoryTotalMb: Long,
+    val cpuPercent: Double,
+    val totalChannels: Int,
+    val totalMedia: Int,
+    val activeStreams: Int
+)
