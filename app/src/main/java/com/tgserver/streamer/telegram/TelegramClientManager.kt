@@ -219,69 +219,35 @@ class TelegramClientManager(private val context: Context) {
                 return@withContext Result.failure(IllegalStateException("Telegram API ID and Hash are required. Please set them first."))
             }
 
-            // Make real network request to Telegram MTProto API via gateway
-            // Using Telegram's official web API gateway for auth flow
-            val formBody = FormBody.Builder()
-                .add("api_id", apiId.toString())
-                .add("api_hash", apiHash)
-                .add("phone_number", cleanPhone)
-                .add("settings", "{}")
-                .build()
-
             var phoneCodeHash: String? = null
             var errorText: String? = null
 
             try {
+                val url = "http://127.0.0.1:7789/auth/sendCode?phone_number=$cleanPhone"
                 val request = Request.Builder()
-                    .url("https://my.telegram.org/auth/send_password")
-                    .post(formBody)
-                    .addHeader("User-Agent", "Mozilla/5.0 (Linux; Android 14; TG-Server) AppleWebKit/537.36")
-                    .addHeader("Origin", "https://my.telegram.org")
-                    .addHeader("Referer", "https://my.telegram.org/auth")
-                    .addHeader("X-Requested-With", "XMLHttpRequest")
+                    .url(url)
+                    .post("".toRequestBody(null))
                     .build()
 
                 httpClient.newCall(request).execute().use { response ->
                     val bodyStr = response.body?.string() ?: ""
                     Log.d(TAG, "sendCode response [${response.code}]: $bodyStr")
 
-                    when {
-                        response.code == 200 && (bodyStr.contains("random_hash") || bodyStr.contains("OK")) -> {
-                            // my.telegram.org send_password returns random_hash on success
+                    when (response.code) {
+                        200 -> {
                             val json = runCatching { JSONObject(bodyStr) }.getOrNull()
-                            phoneCodeHash = json?.optString("random_hash") ?: "mytg_${System.currentTimeMillis()}"
+                            if (json?.optString("status") == "success") {
+                                phoneCodeHash = json.optString("phone_code_hash")
+                            } else {
+                                errorText = "Server returned success but invalid format"
+                            }
                         }
-                        response.code == 200 && bodyStr.contains("error") -> {
+                        400 -> {
                             val json = runCatching { JSONObject(bodyStr) }.getOrNull()
-                            errorText = json?.optString("error") ?: "Telegram returned an error. Check your API credentials."
-                        }
-                        response.code == 400 -> {
-                            val json = runCatching { JSONObject(bodyStr) }.getOrNull()
-                            errorText = json?.optString("error") ?: "Invalid request. Check your phone number."
-                        }
-                        response.code == 401 || response.code == 403 -> {
-                            errorText = "Invalid API credentials. Please verify your API ID and Hash at my.telegram.org."
-                        }
-                        response.code in 500..599 -> {
-                            // Server error - treat as code sent (Telegram servers sometimes return 500 but still send code)
-                            phoneCodeHash = "server_${System.currentTimeMillis()}"
+                            errorText = json?.optString("detail") ?: "Invalid request to local server"
                         }
                         else -> {
-                            // For unexpected responses, try to extract any info
-                            if (bodyStr.isNotBlank()) {
-                                val json = runCatching { JSONObject(bodyStr) }.getOrNull()
-                                val sentCode = json?.optJSONObject("sent_code")
-                                if (sentCode != null) {
-                                    phoneCodeHash = json.optString("phone_code_hash").takeIf { it.isNotBlank() }
-                                        ?: "tg_${System.currentTimeMillis()}"
-                                } else if (bodyStr.contains("false", ignoreCase = true) || bodyStr.contains("Invalid", ignoreCase = true)) {
-                                    errorText = "Telegram rejected the request: $bodyStr"
-                                } else {
-                                    errorText = "Unexpected response from Telegram. Please try again."
-                                }
-                            } else {
-                                errorText = "No response from Telegram servers. Check your internet connection."
-                            }
+                            errorText = "Local server returned error ${response.code}: $bodyStr"
                         }
                     }
                 }
@@ -372,57 +338,44 @@ class TelegramClientManager(private val context: Context) {
             var verifiedUserId = 0L
 
             try {
-                val apiId = getApiId()
-                val apiHash = getApiHash()
-
-                val formBody = FormBody.Builder()
-                    .add("phone", current.phoneNumber)
-                    .add("phone_code_hash", current.phoneCodeHash)
-                    .add("phone_code", trimmedCode)
-                    .add("api_id", apiId.toString())
-                    .add("api_hash", apiHash)
-                    .build()
-
+                val url = "http://127.0.0.1:7789/auth/verifyCode?code=$trimmedCode"
                 val request = Request.Builder()
-                    .url("https://my.telegram.org/auth/login")
-                    .post(formBody)
-                    .addHeader("User-Agent", "Mozilla/5.0 (Linux; Android 14; TG-Server) AppleWebKit/537.36")
-                    .addHeader("Origin", "https://my.telegram.org")
-                    .addHeader("Referer", "https://my.telegram.org/auth")
-                    .addHeader("X-Requested-With", "XMLHttpRequest")
+                    .url(url)
+                    .post("".toRequestBody(null))
                     .build()
 
                 httpClient.newCall(request).execute().use { response ->
                     val bodyStr = response.body?.string() ?: ""
                     Log.d(TAG, "verifyCode response [${response.code}]: $bodyStr")
 
-                    when {
-                        response.code == 200 && (bodyStr.equals("true", ignoreCase = true) || bodyStr.contains("TRUE") || bodyStr.contains("OK")) -> {
-                            // Successful verification
-                            Log.d(TAG, "Code verified successfully via Telegram")
-                        }
-                        response.code == 200 && bodyStr.contains("error") -> {
+                    when (response.code) {
+                        200 -> {
                             val json = runCatching { JSONObject(bodyStr) }.getOrNull()
-                            val err = json?.optString("error") ?: "Invalid code"
-                            return@withContext Result.failure(Exception(
-                                when {
-                                    err.contains("PHONE_CODE_INVALID", true) -> "Invalid code. Please check and try again."
-                                    err.contains("PHONE_CODE_EXPIRED", true) -> "Code expired. Please request a new one."
-                                    err.contains("FLOOD", true) -> "Too many attempts. Please wait before trying again."
-                                    else -> err
-                                }
-                            ))
+                            if (json?.optString("status") == "success") {
+                                verifiedFirstName = json.optString("first_name")
+                                verifiedUserId = json.optLong("user_id")
+                                val sessionString = json.optString("session_string")
+                                
+                                val session = current.copy(
+                                    isLoggedIn = true,
+                                    firstName = verifiedFirstName.ifBlank { "Telegram User" },
+                                    username = verifiedUsername.ifBlank { "tg_user" },
+                                    userId = verifiedUserId,
+                                    sessionString = sessionString,
+                                    lastError = null
+                                )
+                                saveSession(session)
+                                return@withContext Result.success(session)
+                            } else {
+                                return@withContext Result.failure(Exception("Invalid response format from local server"))
+                            }
                         }
-                        response.code == 200 && (bodyStr.contains("false", ignoreCase = true) || bodyStr.contains("Invalid", ignoreCase = true)) -> {
-                            return@withContext Result.failure(Exception("Invalid verification code. Please try again."))
-                        }
-                        response.code == 400 -> {
-                            return@withContext Result.failure(Exception("Invalid request. Please try again."))
+                        400 -> {
+                            val json = runCatching { JSONObject(bodyStr) }.getOrNull()
+                            return@withContext Result.failure(Exception(json?.optString("detail") ?: "Invalid code."))
                         }
                         else -> {
-                            // Non-definitive response - proceed with local session creation
-                            // This happens when the gateway doesn't return a clear success/failure
-                            Log.w(TAG, "Ambiguous verify response, proceeding with session creation")
+                            return@withContext Result.failure(Exception("Local server returned error ${response.code}"))
                         }
                     }
                 }
@@ -432,27 +385,9 @@ class TelegramClientManager(private val context: Context) {
                 return@withContext Result.failure(Exception("Connection timed out. Please try again."))
             } catch (e: Exception) {
                 Log.e(TAG, "Error verifying code via network", e)
-                // If verification endpoint is unreachable but format is correct, allow login
-                // (user has proven they received the code by entering correct format)
+                return@withContext Result.failure(Exception("Network error"))
             }
 
-            // Build successful session
-            val phoneDigits = current.phoneNumber.replace("+", "").takeLast(6)
-            val usernameFromPhone = if (phoneDigits.isNotBlank()) "user_$phoneDigits" else "tg_user"
-            val sessionString = "tgs_${System.currentTimeMillis()}_${phoneDigits}"
-
-            val session = current.copy(
-                isLoggedIn = true,
-                firstName = verifiedFirstName.ifBlank { "Telegram User" },
-                username = verifiedUsername.ifBlank { usernameFromPhone },
-                userId = if (verifiedUserId > 0) verifiedUserId else
-                    (System.currentTimeMillis() % 100000000L).let { if (it < 10000) it + 1000000 else it },
-                sessionString = sessionString,
-                lastError = null
-            )
-            saveSession(session)
-
-            Result.success(session)
         } catch (e: Exception) {
             val updated = _sessionState.value.copy(lastError = e.message)
             _sessionState.value = updated
