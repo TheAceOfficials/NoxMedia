@@ -246,9 +246,10 @@ class TelegramClientManager(private val context: Context) {
                     Log.d(TAG, "sendCode response [${response.code}]: $bodyStr")
 
                     when {
-                        response.code == 200 && bodyStr.contains("OK") -> {
-                            // my.telegram.org send_password returns "OK" on success
-                            phoneCodeHash = "mytg_${System.currentTimeMillis()}"
+                        response.code == 200 && (bodyStr.contains("random_hash") || bodyStr.contains("OK")) -> {
+                            // my.telegram.org send_password returns random_hash on success
+                            val json = runCatching { JSONObject(bodyStr) }.getOrNull()
+                            phoneCodeHash = json?.optString("random_hash") ?: "mytg_${System.currentTimeMillis()}"
                         }
                         response.code == 200 && bodyStr.contains("error") -> {
                             val json = runCatching { JSONObject(bodyStr) }.getOrNull()
@@ -273,6 +274,8 @@ class TelegramClientManager(private val context: Context) {
                                 if (sentCode != null) {
                                     phoneCodeHash = json.optString("phone_code_hash").takeIf { it.isNotBlank() }
                                         ?: "tg_${System.currentTimeMillis()}"
+                                } else if (bodyStr.contains("false", ignoreCase = true) || bodyStr.contains("Invalid", ignoreCase = true)) {
+                                    errorText = "Telegram rejected the request: $bodyStr"
                                 } else {
                                     errorText = "Unexpected response from Telegram. Please try again."
                                 }
@@ -394,7 +397,7 @@ class TelegramClientManager(private val context: Context) {
                     Log.d(TAG, "verifyCode response [${response.code}]: $bodyStr")
 
                     when {
-                        response.code == 200 && (bodyStr.contains("TRUE") || bodyStr.contains("true") || bodyStr.contains("OK")) -> {
+                        response.code == 200 && (bodyStr.equals("true", ignoreCase = true) || bodyStr.contains("TRUE") || bodyStr.contains("OK")) -> {
                             // Successful verification
                             Log.d(TAG, "Code verified successfully via Telegram")
                         }
@@ -410,8 +413,11 @@ class TelegramClientManager(private val context: Context) {
                                 }
                             ))
                         }
-                        response.code == 400 -> {
+                        response.code == 200 && (bodyStr.contains("false", ignoreCase = true) || bodyStr.contains("Invalid", ignoreCase = true)) -> {
                             return@withContext Result.failure(Exception("Invalid verification code. Please try again."))
+                        }
+                        response.code == 400 -> {
+                            return@withContext Result.failure(Exception("Invalid request. Please try again."))
                         }
                         else -> {
                             // Non-definitive response - proceed with local session creation
