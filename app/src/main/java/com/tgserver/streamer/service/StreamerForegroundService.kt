@@ -37,7 +37,7 @@ class StreamerForegroundService : Service() {
         var activeConfig = ServerConfig()
             private set
 
-        lateinit var activeTgClient: TelegramClientManager
+        var activeTgClient: TelegramClientManager? = null
             private set
     }
 
@@ -95,7 +95,8 @@ class StreamerForegroundService : Service() {
 
         try {
             val posterService = SpatialPosterService()
-            server = LocalHttpServer(applicationContext, activeConfig, activeTgClient, posterService)
+            val tgClient = activeTgClient ?: TelegramClientManager(applicationContext).also { activeTgClient = it }
+            server = LocalHttpServer(applicationContext, activeConfig, tgClient, posterService)
             server?.start()
             activeServer = server
             isServiceRunning = true

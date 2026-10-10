@@ -273,9 +273,9 @@ class LocalHttpServer(
             addProperty("totalMedia", tgClient.getAllMedia().size)
             addProperty("activeStreams", 1)
             add("user", gson.toJsonTree(mapOf(
-                "username" to tgClient.currentSession.username,
-                "firstName" to tgClient.currentSession.firstName,
-                "isLoggedIn" to tgClient.currentSession.isLoggedIn
+                "username" to tgClient.sessionState.value.username,
+                "firstName" to tgClient.sessionState.value.firstName,
+                "isLoggedIn" to tgClient.sessionState.value.isLoggedIn
             )))
         }
 
@@ -295,7 +295,7 @@ class LocalHttpServer(
     }
 
     private fun handleGetAuthStatus(): Response {
-        return newFixedLengthResponse(Response.Status.OK, "application/json", gson.toJson(tgClient.currentSession))
+        return newFixedLengthResponse(Response.Status.OK, "application/json", gson.toJson(tgClient.sessionState.value))
     }
 
     private fun handleSendCode(session: IHTTPSession): Response = runBlocking {
@@ -412,21 +412,13 @@ class LocalHttpServer(
     }
 
     private fun serveStaticAsset(uri: String): Response {
-        val assetPath = if (uri == "/" || uri.isBlank()) "web/index.html" else "web" + uri
-        return try {
-            val stream: InputStream = context.assets.open(assetPath)
-            val mime = when {
-                assetPath.endsWith(".html") -> "text/html"
-                assetPath.endsWith(".css") -> "text/css"
-                assetPath.endsWith(".js") -> "application/javascript"
-                assetPath.endsWith(".png") -> "image/png"
-                assetPath.endsWith(".jpg") || assetPath.endsWith(".jpeg") -> "image/jpeg"
-                assetPath.endsWith(".svg") -> "image/svg+xml"
-                else -> "application/octet-stream"
-            }
-            newChunkedResponse(Response.Status.OK, mime, stream)
-        } catch (_: Exception) {
-            newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "Asset not found: $uri")
+        val info = JsonObject().apply {
+            addProperty("name", "TG-Server Mobile Streamer")
+            addProperty("version", "1.0.0")
+            addProperty("status", if (config.isRunning) "online" else "paused")
+            addProperty("port", config.port)
+            addProperty("manifest", "http://${getLocalIpAddress()}:${config.port}/manifest.json")
         }
+        return newFixedLengthResponse(Response.Status.OK, "application/json", gson.toJson(info))
     }
 }
