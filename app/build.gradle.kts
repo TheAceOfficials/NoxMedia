@@ -104,7 +104,12 @@ dependencies {
 chaquopy {
     defaultConfig {
         version = "3.12"
-        buildPython(rootProject.file("venv/bin/python").absolutePath)
+        val venvPython = rootProject.file("venv/bin/python")
+        if (venvPython.exists()) {
+            buildPython(venvPython.absolutePath)
+        } else {
+            buildPython("python3")
+        }
         pip {
             install(rootProject.file("app/wheels/pyaes-1.6.1-py3-none-any.whl").absolutePath)
             install(rootProject.file("app/wheels/PySocks-1.7.1-py3-none-any.whl").absolutePath)
