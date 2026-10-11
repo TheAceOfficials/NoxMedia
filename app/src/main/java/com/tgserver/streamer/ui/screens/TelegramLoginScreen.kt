@@ -25,6 +25,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -159,6 +160,7 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(
+                        modifier = Modifier.weight(1f),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -195,13 +197,31 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
                         }
                     }
 
-                    NothingPillButton(
-                        text = "Edit",
-                        onClick = { viewModel.clearApiCredentials() },
-                        variant = NothingButtonVariant.Ghost,
-                        height = 32.dp,
-                        modifier = Modifier.width(68.dp)
-                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .border(1.dp, BorderSubtle, CircleShape)
+                            .background(SurfaceCardElevated)
+                            .clickable { viewModel.clearApiCredentials() }
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "Edit Credentials",
+                            tint = TextSecondary,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Text(
+                            text = "Edit",
+                            color = TextPrimary,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                 }
             }
 
@@ -310,7 +330,7 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
                         value = phoneInput,
                         onValueChange = { phoneInput = it },
                         label = "PHONE NUMBER",
-                        badgeText = "E.164 FORMAT",
+                        badgeText = "+COUNTRY CODE",
                         placeholder = "+91 98765 43210",
                         isMonospace = true,
                         singleLine = true,
@@ -454,42 +474,91 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
             } else {
                 // ==================== MODE 1: SESSION STRING / COLAB ====================
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    NothingDotBadge(
-                        text = "PYROGRAM / TELETHON",
-                        dotColor = AccentSilver,
-                        textColor = TextSecondary
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(5.dp)
+                                .background(AccentSilver, CircleShape)
+                        )
+                        Text(
+                            text = "PYROGRAM / TELETHON STRING",
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            letterSpacing = 0.2.sp
+                        )
+                    }
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         if (sessionInput.isNotBlank()) {
-                            NothingPillButton(
-                                text = "Clear",
-                                onClick = { sessionInput = "" },
-                                variant = NothingButtonVariant.Ghost,
-                                height = 28.dp,
-                                modifier = Modifier.width(60.dp)
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .border(1.dp, BorderSubtle, CircleShape)
+                                    .background(SurfaceCardElevated)
+                                    .clickable { sessionInput = "" }
+                                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Clear",
+                                    tint = StatusRed,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    text = "Clear",
+                                    color = StatusRed,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
                         }
 
-                        NothingPillButton(
-                            text = "Paste",
-                            onClick = {
-                                val clipText = clipboardManager.getText()?.text
-                                if (!clipText.isNullOrBlank()) {
-                                    sessionInput = clipText.trim()
-                                    Toast.makeText(context, "Pasted from clipboard", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    Toast.makeText(context, "Clipboard is empty", Toast.LENGTH_SHORT).show()
+                        Row(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .border(1.dp, BorderSilver, CircleShape)
+                                .background(SurfaceCardElevated)
+                                .clickable {
+                                    val clipText = clipboardManager.getText()?.text
+                                    if (!clipText.isNullOrBlank()) {
+                                        sessionInput = clipText.trim()
+                                        Toast.makeText(context, "Pasted from clipboard", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, "Clipboard is empty", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
-                            },
-                            variant = NothingButtonVariant.Secondary,
-                            height = 28.dp,
-                            modifier = Modifier.width(68.dp)
-                        )
+                                .padding(horizontal = 12.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ContentPaste,
+                                contentDescription = "Paste",
+                                tint = TextPrimary,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Text(
+                                text = "Paste",
+                                color = TextPrimary,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
                 }
 
@@ -605,18 +674,70 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // GOOGLE COLAB 1-CLICK BUTTON (Secondary Smoked Glass Pill)
-                NothingPillButton(
-                    text = "Generate via Google Colab (1-Click) ↗",
-                    onClick = {
-                        val url = "https://colab.research.google.com/github/TheAceOfficials/TG-Server/blob/main/string_session.ipynb"
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                        context.startActivity(intent)
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    variant = NothingButtonVariant.Secondary,
-                    height = 50.dp
-                )
+                // GOOGLE COLAB ACTION CARD
+                NothingCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            val url = "https://colab.research.google.com/github/TheAceOfficials/TG-Server/blob/main/string_session.ipynb"
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                            context.startActivity(intent)
+                        },
+                    backgroundColor = SurfaceCardElevated,
+                    borderColor = BorderSubtle,
+                    shape = RoundedCornerShape(20.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0x1AFFFFFF))
+                                    .border(1.dp, BorderSubtle, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Cloud,
+                                    contentDescription = null,
+                                    tint = AccentSilver,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "Generate via Google Colab",
+                                    color = TextPrimary,
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    letterSpacing = (-0.2).sp
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Official 1-click cloud sandbox • Safe & fast",
+                                    color = TextTertiary,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                            contentDescription = "Open in browser",
+                            tint = TextSecondary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(20.dp))
 

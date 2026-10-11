@@ -61,6 +61,7 @@ fun NothingPillButton(
     variant: NothingButtonVariant = NothingButtonVariant.Primary,
     height: Dp = 54.dp,
     shape: Shape = CircleShape,
+    contentPadding: PaddingValues? = null,
     leadingIcon: (@Composable () -> Unit)? = null,
     trailingIcon: (@Composable () -> Unit)? = null
 ) {
@@ -96,6 +97,14 @@ fun NothingPillButton(
         else -> Color.Transparent
     }
 
+    val effectivePadding = contentPadding ?: if (height <= 38.dp) {
+        PaddingValues(horizontal = 14.dp, vertical = 0.dp)
+    } else {
+        PaddingValues(horizontal = 24.dp, vertical = 0.dp)
+    }
+
+    val effectiveFontSize = if (height <= 38.dp) 12.sp else 15.sp
+
     Box(
         modifier = modifier
             .scale(scale)
@@ -113,7 +122,7 @@ fun NothingPillButton(
                 enabled = enabled && !isLoading,
                 onClick = onClick
             )
-            .padding(horizontal = 24.dp),
+            .padding(effectivePadding),
         contentAlignment = Alignment.Center
     ) {
         if (isLoading) {
@@ -126,23 +135,23 @@ fun NothingPillButton(
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.wrapContentSize()
             ) {
                 if (leadingIcon != null) {
                     leadingIcon()
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                 }
 
                 Text(
                     text = text,
                     color = contentColor,
-                    fontSize = 15.sp,
+                    fontSize = effectiveFontSize,
                     fontWeight = FontWeight.SemiBold,
                     letterSpacing = (-0.2).sp
                 )
 
                 if (trailingIcon != null) {
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                     trailingIcon()
                 }
             }
