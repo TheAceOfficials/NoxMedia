@@ -69,6 +69,12 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     private val _codeSentSuccess = MutableStateFlow(false)
     val codeSentSuccess: StateFlow<Boolean> = _codeSentSuccess.asStateFlow()
 
+    private val _is2FARequired = MutableStateFlow(false)
+    val is2FARequired: StateFlow<Boolean> = _is2FARequired.asStateFlow()
+
+    private val _isVerifying2FA = MutableStateFlow(false)
+    val isVerifying2FA: StateFlow<Boolean> = _isVerifying2FA.asStateFlow()
+
     private val _isImportingSession = MutableStateFlow(false)
     val isImportingSession: StateFlow<Boolean> = _isImportingSession.asStateFlow()
 
@@ -256,15 +262,39 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             _isVerifyingCode.value = false
             if (res.isSuccess) {
                 _codeSentSuccess.value = false
+                _is2FARequired.value = false
                 Toast.makeText(getApplication(), "✓ Logged in successfully!", Toast.LENGTH_SHORT).show()
             } else {
-                Toast.makeText(
-                    getApplication(),
-                    res.exceptionOrNull()?.message ?: "Invalid code",
-                    Toast.LENGTH_LONG
-                ).show()
+                val err = res.exceptionOrNull()?.message ?: "Invalid code"
+                if (err == "2FA_REQUIRED") {
+                    _is2FARequired.value = true
+                    Toast.makeText(getApplication(), "2-Step verification password required", Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(getApplication(), err, Toast.LENGTH_LONG).show()
+                }
             }
         }
+    }
+
+    fun verify2FAPassword(password: String) {
+        viewModelScope.launch {
+            _isVerifying2FA.value = true
+            val res = tgClient.verify2FAPassword(password)
+            _isVerifying2FA.value = false
+            if (res.isSuccess) {
+                _codeSentSuccess.value = false
+                _is2FARequired.value = false
+                Toast.makeText(getApplication(), "✓ 2FA Verified! Logged in successfully!", Toast.LENGTH_SHORT).show()
+            } else {
+                val err = res.exceptionOrNull()?.message ?: "Incorrect 2FA password"
+                Toast.makeText(getApplication(), err, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    fun cancelPhoneAuth() {
+        _codeSentSuccess.value = false
+        _is2FARequired.value = false
     }
 
     fun importSessionString(sessionStr: String) {

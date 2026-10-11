@@ -2,6 +2,7 @@ plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.compose.compiler)
   alias(libs.plugins.kotlin.serialization)
+  id("com.chaquo.python")
 }
 
 android {
@@ -13,6 +14,9 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
+        ndk {
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
     }
 
     signingConfigs {
@@ -95,4 +99,17 @@ dependencies {
   implementation(libs.nanohttpd)
   implementation(libs.okhttp)
   implementation(libs.gson)
+}
+
+chaquopy {
+    defaultConfig {
+        version = "3.12"
+        buildPython(rootProject.file("venv/bin/python").absolutePath)
+        pip {
+            install(rootProject.file("app/wheels/pyaes-1.6.1-py3-none-any.whl").absolutePath)
+            install(rootProject.file("app/wheels/PySocks-1.7.1-py3-none-any.whl").absolutePath)
+            install(rootProject.file("app/wheels/Pyrogram-2.0.106-py3-none-any.whl").absolutePath)
+            install("tgcrypto")
+        }
+    }
 }

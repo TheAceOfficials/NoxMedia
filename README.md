@@ -38,9 +38,20 @@
 
 A **Session String** is a secure, persistent token that lets TG-Server stream media from your account without asking for phone codes every time.
 
-### Option A: On Mobile (No PC Required — 1 Minute) ⭐ *Recommended*
+### Option A: 1-Click Google Colab (Safest & 100% Transparent — Mobile & PC) ⭐ *Recommended*
 
-You can generate your session string directly on your phone using verified Telegram generator bots:
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/TheAceOfficials/TG-Server/blob/main/string_session.ipynb)
+
+Run the generator in your own private Google Cloud sandbox without installing anything on your device:
+1. Tap on the **[Open in Colab](https://colab.research.google.com/github/TheAceOfficials/TG-Server/blob/main/string_session.ipynb)** button above.
+2. Tap the **▶ Run** button on the code block.
+3. Enter your `API ID`, `API HASH`, and `Phone Number`.
+4. Enter the Telegram login OTP.
+5. Your session string is printed and sent straight to your **Saved Messages**!
+
+---
+
+### Option B: On Mobile via Telegram Bot
 
 1. Open your Telegram app and search for:
    - **`@StringSessionRobot`** or **`@SessionStringGeneratorBot`**

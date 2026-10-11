@@ -22,6 +22,8 @@ import java.util.concurrent.TimeUnit
 import android.util.Base64
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import com.chaquo.python.Python
+import com.chaquo.python.android.AndroidPlatform
 import okhttp3.FormBody
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -309,15 +311,136 @@ class TelegramClientManager(private val context: Context) {
         }
     }
 
+    private fun getPyBridge(): com.chaquo.python.PyObject? {
+        return try {
+            if (!Python.isStarted()) {
+                Python.start(AndroidPlatform(context))
+            }
+            Python.getInstance().getModule("tg_bridge")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initialize Python runtime: ${e.message}", e)
+            null
+        }
+    }
+
     suspend fun sendLoginCode(phoneNumber: String): Result<String> = withContext(Dispatchers.IO) {
-        Result.failure(IllegalStateException("Phone OTP login is deprecated. Please use Telegram Session String for instant, 100% reliable connection."))
+        try {
+            val cleanPhone = phoneNumber.replace(Regex("[^0-9+]"), "").trim()
+            if (cleanPhone.length < 8 || !cleanPhone.startsWith("+")) {
+                return@withContext Result.failure(IllegalArgumentException("Please enter phone number with country code (e.g. +91...)"))
+            }
+
+            val apiId = getApiId()
+            val apiHash = getApiHash()
+            if (apiId <= 0 || apiHash.isBlank()) {
+                return@withContext Result.failure(IllegalStateException("API ID and API HASH are required. Please configure them first."))
+            }
+
+            val bridge = getPyBridge()
+                ?: return@withContext Result.failure(IllegalStateException("Python runtime could not be started"))
+
+            val jsonStr = bridge.callAttr("send_code", apiId, apiHash, cleanPhone).toString()
+            val json = JSONObject(jsonStr)
+
+            if (json.optString("status") == "success") {
+                val hash = json.optString("phone_code_hash")
+                val updated = _sessionState.value.copy(
+                    phoneNumber = cleanPhone,
+                    phoneCodeHash = hash,
+                    lastError = null
+                )
+                saveSession(updated)
+                Result.success("Code sent to $cleanPhone via Telegram app")
+            } else {
+                val err = json.optString("error", "Failed to send code")
+                Result.failure(Exception(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     suspend fun verifyLoginCode(code: String): Result<AuthSession> = withContext(Dispatchers.IO) {
-        Result.failure(IllegalStateException("Phone OTP login is deprecated. Please use Telegram Session String."))
+        try {
+            val trimmedCode = code.trim()
+            if (trimmedCode.length < 4) {
+                return@withContext Result.failure(IllegalArgumentException("Code should be at least 5 digits."))
+            }
+
+            val bridge = getPyBridge()
+                ?: return@withContext Result.failure(IllegalStateException("Python runtime could not be started"))
+
+            val jsonStr = bridge.callAttr("verify_code", trimmedCode).toString()
+            val json = JSONObject(jsonStr)
+            val status = json.optString("status")
+
+            if (status == "success") {
+                val sessionStr = json.optString("session_string")
+                val userId = json.optLong("user_id")
+                val firstName = json.optString("first_name", "Telegram User")
+                val username = json.optString("username", "user_$userId")
+
+                val session = AuthSession(
+                    isLoggedIn = true,
+                    firstName = firstName,
+                    username = username,
+                    userId = userId,
+                    sessionString = sessionStr,
+                    phoneNumber = _sessionState.value.phoneNumber
+                )
+                saveSession(session)
+                Result.success(session)
+            } else if (status == "2fa_required") {
+                Result.failure(Exception("2FA_REQUIRED"))
+            } else {
+                val err = json.optString("error", "Invalid verification code")
+                Result.failure(Exception(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
-    fun validatePhoneNumber(phone: String): String? = null
+    suspend fun verify2FAPassword(password: String): Result<AuthSession> = withContext(Dispatchers.IO) {
+        try {
+            val bridge = getPyBridge()
+                ?: return@withContext Result.failure(IllegalStateException("Python runtime could not be started"))
+
+            val jsonStr = bridge.callAttr("check_password", password.trim()).toString()
+            val json = JSONObject(jsonStr)
+
+            if (json.optString("status") == "success") {
+                val sessionStr = json.optString("session_string")
+                val userId = json.optLong("user_id")
+                val firstName = json.optString("first_name", "Telegram User")
+                val username = json.optString("username", "user_$userId")
+
+                val session = AuthSession(
+                    isLoggedIn = true,
+                    firstName = firstName,
+                    username = username,
+                    userId = userId,
+                    sessionString = sessionStr,
+                    phoneNumber = _sessionState.value.phoneNumber
+                )
+                saveSession(session)
+                Result.success(session)
+            } else {
+                val err = json.optString("error", "Incorrect 2FA password")
+                Result.failure(Exception(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    fun validatePhoneNumber(phone: String): String? {
+        val clean = phone.replace(Regex("[^0-9+]"), "").trim()
+        if (clean.isBlank()) return "Phone number cannot be empty"
+        if (!clean.startsWith("+")) return "Phone must include country code starting with + (e.g. +91...)"
+        if (clean.length < 8) return "Phone number is too short"
+        return null
+    }
 
     suspend fun loginWithWebSession(firstName: String, username: String, userId: Long, sessionStr: String): Result<AuthSession> = withContext(Dispatchers.IO) {
         importSessionString(sessionStr)
@@ -424,13 +547,6 @@ class TelegramClientManager(private val context: Context) {
             totalSize = totalSize,
             mimeType = media?.mimeType ?: "video/mp4"
         )
-    }
-
-    suspend fun verify2FAPassword(password: String): Result<AuthSession> = withContext(Dispatchers.IO) {
-        val current = _sessionState.value
-        val session = current.copy(isLoggedIn = true, lastError = null)
-        saveSession(session)
-        Result.success(session)
     }
 }
 
