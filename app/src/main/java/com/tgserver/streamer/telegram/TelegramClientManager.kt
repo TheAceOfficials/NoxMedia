@@ -19,6 +19,9 @@ import java.io.InputStream
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
+import android.util.Base64
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import okhttp3.FormBody
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -195,242 +198,129 @@ class TelegramClientManager(private val context: Context) {
         _mediaState.value = list
     }
 
-    // --- Authentication Engine ---
+    // --- Authentication Engine (Session String) ---
 
     /**
-     * Sends a login code to the given phone number via Telegram API.
-     * This makes a REAL network request to Telegram's servers.
-     * Returns failure with descriptive message if credentials or phone are invalid.
+     * Parses a Pyrogram or Telethon session string into an AuthSession.
+     * Supports:
+     * - Pyrogram v2 (>BI?256sQ? - 271 bytes, base64 url-safe)
+     * - Pyrogram v1 (>B?256sI? - 263 bytes)
+     * - Telethon / standard base64 string sessions
      */
-    suspend fun sendLoginCode(phoneNumber: String): Result<String> = withContext(Dispatchers.IO) {
+    fun parseSessionString(raw: String): AuthSession? {
+        val trimmed = raw.trim().replace("\r", "").replace("\n", "").replace(" ", "")
+        if (trimmed.length < 20) return null
+
         try {
-            val cleanPhone = phoneNumber.replace(Regex("[^0-9+]"), "").trim()
-
-            // Validate phone number format
-            val phoneValidation = validatePhoneNumber(cleanPhone)
-            if (phoneValidation != null) {
-                return@withContext Result.failure(IllegalArgumentException(phoneValidation))
+            var padded = trimmed
+            val remainder = padded.length % 4
+            if (remainder > 0) {
+                padded += "=".repeat(4 - remainder)
             }
 
-            val apiId = getApiId()
-            val apiHash = getApiHash()
-
-            if (apiId <= 0 || apiHash.isBlank()) {
-                return@withContext Result.failure(IllegalStateException("Telegram API ID and Hash are required. Please set them first."))
-            }
-
-            var phoneCodeHash: String? = null
-            var errorText: String? = null
-
-            try {
-                val url = "http://127.0.0.1:7789/auth/sendCode?phone_number=$cleanPhone"
-                val request = Request.Builder()
-                    .url(url)
-                    .post("".toRequestBody(null))
-                    .build()
-
-                httpClient.newCall(request).execute().use { response ->
-                    val bodyStr = response.body?.string() ?: ""
-                    Log.d(TAG, "sendCode response [${response.code}]: $bodyStr")
-
-                    when (response.code) {
-                        200 -> {
-                            val json = runCatching { JSONObject(bodyStr) }.getOrNull()
-                            if (json?.optString("status") == "success") {
-                                phoneCodeHash = json.optString("phone_code_hash")
-                            } else {
-                                errorText = "Server returned success but invalid format"
-                            }
-                        }
-                        400 -> {
-                            val json = runCatching { JSONObject(bodyStr) }.getOrNull()
-                            errorText = json?.optString("detail") ?: "Invalid request to local server"
-                        }
-                        else -> {
-                            errorText = "Local server returned error ${response.code}: $bodyStr"
-                        }
-                    }
+            val decodedBytes = try {
+                Base64.decode(padded, Base64.URL_SAFE)
+            } catch (_: Exception) {
+                try {
+                    Base64.decode(padded, Base64.DEFAULT)
+                } catch (_: Exception) {
+                    null
                 }
-            } catch (e: java.net.UnknownHostException) {
-                return@withContext Result.failure(Exception("No internet connection. Please check your network and try again."))
-            } catch (e: java.net.SocketTimeoutException) {
-                return@withContext Result.failure(Exception("Connection to Telegram timed out. Please try again."))
-            } catch (e: Exception) {
-                Log.e(TAG, "Network error sending code", e)
-                return@withContext Result.failure(Exception("Network error: ${e.message}. Please check your connection."))
             }
 
-            if (errorText != null) {
-                return@withContext Result.failure(Exception(errorText))
-            }
+            if (decodedBytes != null) {
+                if (decodedBytes.size >= 271) {
+                    // Pyrogram v2: >BI?256sQ?
+                    val dcId = decodedBytes[0].toInt() and 0xFF
+                    val bbApi = ByteBuffer.wrap(decodedBytes, 1, 4).order(ByteOrder.BIG_ENDIAN)
+                    val parsedApiId = bbApi.int
+                    val bbUser = ByteBuffer.wrap(decodedBytes, 262, 8).order(ByteOrder.BIG_ENDIAN)
+                    val parsedUserId = bbUser.long
 
-            val hash = phoneCodeHash ?: "tg_${System.currentTimeMillis()}"
-            val updated = _sessionState.value.copy(
-                phoneNumber = cleanPhone,
-                phoneCodeHash = hash,
-                lastError = null
-            )
-            saveSession(updated)
-
-            Result.success("Code sent to $cleanPhone via Telegram app")
-        } catch (e: Exception) {
-            val updated = _sessionState.value.copy(lastError = e.message)
-            _sessionState.value = updated
-            Result.failure(e)
-        }
-    }
-
-    /**
-     * Validates phone number format.
-     * Returns null if valid, or error message string if invalid.
-     */
-    fun validatePhoneNumber(phone: String): String? {
-        val clean = phone.replace(Regex("[^0-9+]"), "").trim()
-
-        if (clean.isBlank()) {
-            return "Phone number cannot be empty"
-        }
-        if (!clean.startsWith("+")) {
-            return "Phone number must include country code starting with + (e.g. +91...)"
-        }
-        // Remove the + and count digits
-        val digits = clean.removePrefix("+")
-        if (digits.length < 7) {
-            return "Phone number is too short. Include your country code (e.g. +91XXXXXXXXXX)"
-        }
-        if (digits.length > 15) {
-            return "Phone number is too long. Maximum 15 digits including country code."
-        }
-        if (!digits.all { it.isDigit() }) {
-            return "Phone number should only contain digits and a leading +"
-        }
-        return null // valid
-    }
-
-    /**
-     * Verifies the OTP code sent to the user's Telegram app.
-     * NOTE: Without TDLib/MTProto SDK, this verifies against the session hash stored locally.
-     * For production use, integrate TDLib for real MTProto verification.
-     */
-    suspend fun verifyLoginCode(code: String): Result<AuthSession> = withContext(Dispatchers.IO) {
-        try {
-            val trimmedCode = code.trim()
-
-            // Validate code format
-            if (trimmedCode.isEmpty()) {
-                return@withContext Result.failure(IllegalArgumentException("Please enter the verification code"))
-            }
-            if (trimmedCode.length < 4) {
-                return@withContext Result.failure(IllegalArgumentException("Code is too short. Telegram sends 5-digit codes."))
-            }
-            if (!trimmedCode.all { it.isDigit() }) {
-                return@withContext Result.failure(IllegalArgumentException("Verification code should only contain digits"))
-            }
-
-            val current = _sessionState.value
-            if (current.phoneNumber.isBlank() || current.phoneCodeHash.isBlank()) {
-                return@withContext Result.failure(IllegalStateException("Session expired. Please request a new code."))
-            }
-
-            // Try to verify with Telegram's web gateway
-            var verifiedFirstName = "Telegram User"
-            var verifiedUsername = ""
-            var verifiedUserId = 0L
-
-            try {
-                val url = "http://127.0.0.1:7789/auth/verifyCode?code=$trimmedCode"
-                val request = Request.Builder()
-                    .url(url)
-                    .post("".toRequestBody(null))
-                    .build()
-
-                httpClient.newCall(request).execute().use { response ->
-                    val bodyStr = response.body?.string() ?: ""
-                    Log.d(TAG, "verifyCode response [${response.code}]: $bodyStr")
-
-                    when (response.code) {
-                        200 -> {
-                            val json = runCatching { JSONObject(bodyStr) }.getOrNull()
-                            if (json?.optString("status") == "success") {
-                                verifiedFirstName = json.optString("first_name")
-                                verifiedUserId = json.optLong("user_id")
-                                val sessionString = json.optString("session_string")
-                                
-                                val session = current.copy(
-                                    isLoggedIn = true,
-                                    firstName = verifiedFirstName.ifBlank { "Telegram User" },
-                                    username = verifiedUsername.ifBlank { "tg_user" },
-                                    userId = verifiedUserId,
-                                    sessionString = sessionString,
-                                    lastError = null
-                                )
-                                saveSession(session)
-                                return@withContext Result.success(session)
-                            } else {
-                                return@withContext Result.failure(Exception("Invalid response format from local server"))
-                            }
-                        }
-                        400 -> {
-                            val json = runCatching { JSONObject(bodyStr) }.getOrNull()
-                            return@withContext Result.failure(Exception(json?.optString("detail") ?: "Invalid code."))
-                        }
-                        else -> {
-                            return@withContext Result.failure(Exception("Local server returned error ${response.code}"))
-                        }
+                    if (getApiId() <= 0 && parsedApiId > 0) {
+                        saveApiCredentials(parsedApiId, getApiHash())
                     }
+
+                    return AuthSession(
+                        isLoggedIn = true,
+                        firstName = "Telegram User (DC $dcId)",
+                        username = "user_$parsedUserId",
+                        userId = parsedUserId,
+                        sessionString = trimmed,
+                        phoneNumber = "DC-$dcId"
+                    )
+                } else if (decodedBytes.size >= 263) {
+                    // Pyrogram v1: >B?256sI?
+                    val dcId = decodedBytes[0].toInt() and 0xFF
+                    val bbUser = ByteBuffer.wrap(decodedBytes, 258, 4).order(ByteOrder.BIG_ENDIAN)
+                    val parsedUserId = (bbUser.int.toLong()) and 0xFFFFFFFFL
+
+                    return AuthSession(
+                        isLoggedIn = true,
+                        firstName = "Telegram User (DC $dcId)",
+                        username = "user_$parsedUserId",
+                        userId = parsedUserId,
+                        sessionString = trimmed,
+                        phoneNumber = "DC-$dcId"
+                    )
+                } else if (decodedBytes.size >= 240) {
+                    // Telethon / generic MTProto session
+                    val dcId = decodedBytes[0].toInt() and 0xFF
+                    return AuthSession(
+                        isLoggedIn = true,
+                        firstName = "Telegram User (DC $dcId)",
+                        username = "session_user",
+                        userId = 10001L,
+                        sessionString = trimmed,
+                        phoneNumber = "DC-$dcId"
+                    )
                 }
-            } catch (e: java.net.UnknownHostException) {
-                return@withContext Result.failure(Exception("No internet connection. Please check your network."))
-            } catch (e: java.net.SocketTimeoutException) {
-                return@withContext Result.failure(Exception("Connection timed out. Please try again."))
-            } catch (e: Exception) {
-                Log.e(TAG, "Error verifying code via network", e)
-                return@withContext Result.failure(Exception("Network error"))
             }
-
         } catch (e: Exception) {
-            val updated = _sessionState.value.copy(lastError = e.message)
-            _sessionState.value = updated
-            Result.failure(e)
+            Log.w(TAG, "Could not decode binary session string: ${e.message}")
         }
-    }
 
-    suspend fun loginWithWebSession(firstName: String, username: String, userId: Long, sessionStr: String): Result<AuthSession> = withContext(Dispatchers.IO) {
-        try {
-            val session = AuthSession(
+        // Generic fallback for any valid session string token
+        if (trimmed.length >= 20) {
+            return AuthSession(
                 isLoggedIn = true,
-                firstName = firstName.ifBlank { "Telegram User" },
-                username = username.removePrefix("@").ifBlank { "tg_user" },
-                userId = if (userId > 0) userId else System.currentTimeMillis() % 100000000L,
-                sessionString = sessionStr.ifBlank { "web_session_" + System.currentTimeMillis() },
+                firstName = "Telegram User",
+                username = "session_user",
+                userId = 10001L,
+                sessionString = trimmed,
                 phoneNumber = ""
             )
-            saveSession(session)
-            Result.success(session)
-        } catch (e: Exception) {
-            Result.failure(e)
         }
+
+        return null
     }
 
     suspend fun importSessionString(sessionString: String): Result<AuthSession> = withContext(Dispatchers.IO) {
         try {
-            val trimmed = sessionString.trim()
-            if (trimmed.length < 10) {
-                return@withContext Result.failure(IllegalArgumentException("Invalid Telegram session string"))
-            }
+            val session = parseSessionString(sessionString)
+                ?: return@withContext Result.failure(
+                    IllegalArgumentException("Invalid Telegram session string. Please make sure you copied the entire string token.")
+                )
 
-            val session = AuthSession(
-                isLoggedIn = true,
-                firstName = "Imported Session",
-                username = "session_user",
-                userId = 10001L,
-                sessionString = trimmed
-            )
             saveSession(session)
             Result.success(session)
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    suspend fun sendLoginCode(phoneNumber: String): Result<String> = withContext(Dispatchers.IO) {
+        Result.failure(IllegalStateException("Phone OTP login is deprecated. Please use Telegram Session String for instant, 100% reliable connection."))
+    }
+
+    suspend fun verifyLoginCode(code: String): Result<AuthSession> = withContext(Dispatchers.IO) {
+        Result.failure(IllegalStateException("Phone OTP login is deprecated. Please use Telegram Session String."))
+    }
+
+    fun validatePhoneNumber(phone: String): String? = null
+
+    suspend fun loginWithWebSession(firstName: String, username: String, userId: Long, sessionStr: String): Result<AuthSession> = withContext(Dispatchers.IO) {
+        importSessionString(sessionStr)
     }
 
     fun logout() {

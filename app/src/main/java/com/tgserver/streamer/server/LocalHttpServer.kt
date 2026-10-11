@@ -69,6 +69,7 @@ class LocalHttpServer(
                 uri == "/api/status" -> handleGetStatus()
                 uri == "/api/server/toggle" && method == Method.POST -> handleToggleServer()
                 uri == "/api/auth/status" -> handleGetAuthStatus()
+                uri == "/api/auth/session" && method == Method.POST -> handleImportSession(session)
                 uri == "/api/auth/send-code" && method == Method.POST -> handleSendCode(session)
                 uri == "/api/auth/sign-in" && method == Method.POST -> handleSignIn(session)
                 uri == "/api/auth/password" && method == Method.POST -> handleVerify2FA(session)
@@ -334,6 +335,22 @@ class LocalHttpServer(
         val body = getRequestBody(session)
         val password = body?.get("password")?.asString ?: ""
         val result = tgClient.verify2FAPassword(password)
+
+        val res = JsonObject()
+        if (result.isSuccess) {
+            res.addProperty("success", true)
+            res.add("session", gson.toJsonTree(result.getOrNull()))
+        } else {
+            res.addProperty("success", false)
+            res.addProperty("error", result.exceptionOrNull()?.message)
+        }
+        newFixedLengthResponse(Response.Status.OK, "application/json", gson.toJson(res))
+    }
+
+    private fun handleImportSession(session: IHTTPSession): Response = runBlocking {
+        val body = getRequestBody(session)
+        val sessionString = body?.get("sessionString")?.asString ?: ""
+        val result = tgClient.importSessionString(sessionString)
 
         val res = JsonObject()
         if (result.isSuccess) {

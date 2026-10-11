@@ -137,151 +137,49 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 // LOGGED OUT STATE
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
-                        text = "Sign in with your Telegram account (secondary account recommended) to access your channels and stream video files.",
+                        text = "Sign in with your Telegram Session String to access your monitored channels and stream movies locally to Stremio.",
                         color = TextSecondary,
                         fontSize = 12.sp,
                         lineHeight = 17.sp
                     )
 
-                    // Phone input
                     Text(
-                        text = "PHONE NUMBER (WITH COUNTRY CODE)",
+                        text = "TELEGRAM SESSION STRING",
                         color = TextTertiary,
                         fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.5.sp
                     )
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    OutlinedTextField(
+                        value = sessionStringInput,
+                        onValueChange = { sessionStringInput = it },
+                        placeholder = { Text("Paste Pyrogram or Telethon session string", color = TextTertiary, fontSize = 12.sp) },
+                        minLines = 3,
+                        maxLines = 5,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = Color(0xFFF3A43B),
+                            unfocusedBorderColor = BorderSubtle,
+                            focusedContainerColor = SurfaceCardElevated,
+                            unfocusedContainerColor = SurfaceCardElevated
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Button(
+                        onClick = { viewModel.importSessionString(sessionStringInput) },
+                        enabled = sessionStringInput.trim().length >= 20,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFF3A43B),
+                            contentColor = Color(0xFF1E1402)
+                        ),
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
                     ) {
-                        OutlinedTextField(
-                            value = phoneInput,
-                            onValueChange = { phoneInput = it },
-                            placeholder = { Text("+91 9876543210", color = TextTertiary, fontSize = 13.sp) },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = TextPrimary,
-                                unfocusedTextColor = TextPrimary,
-                                focusedBorderColor = AccentApple,
-                                unfocusedBorderColor = BorderSubtle,
-                                focusedContainerColor = SurfaceCardElevated,
-                                unfocusedContainerColor = SurfaceCardElevated
-                            ),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.weight(1f)
-                        )
-
-                        Button(
-                            onClick = { viewModel.sendAuthCode(phoneInput) },
-                            enabled = !isSendingCode && phoneInput.length >= 8,
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = AccentApple),
-                            modifier = Modifier.height(54.dp)
-                        ) {
-                            Text(
-                                text = if (isSendingCode) "Sending..." else "Send OTP",
-                                color = BackgroundOled,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    // OTP verification field (when code sent)
-                    if (codeSentSuccess) {
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.padding(top = 4.dp)
-                        ) {
-                            Text(
-                                text = "ENTER VERIFICATION CODE",
-                                color = TextTertiary,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                OutlinedTextField(
-                                    value = otpInput,
-                                    onValueChange = { otpInput = it },
-                                    placeholder = { Text("Code from Telegram app", color = TextTertiary, fontSize = 13.sp) },
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedTextColor = TextPrimary,
-                                        unfocusedTextColor = TextPrimary,
-                                        focusedBorderColor = StatusGreen,
-                                        unfocusedBorderColor = BorderSubtle,
-                                        focusedContainerColor = SurfaceCardElevated,
-                                        unfocusedContainerColor = SurfaceCardElevated
-                                    ),
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier.weight(1f)
-                                )
-
-                                Button(
-                                    onClick = { viewModel.verifyAuthCode(otpInput) },
-                                    enabled = !isVerifyingCode && otpInput.isNotBlank(),
-                                    shape = RoundedCornerShape(10.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = StatusGreen),
-                                    modifier = Modifier.height(54.dp)
-                                ) {
-                                    Text(
-                                        text = if (isVerifyingCode) "Verifying..." else "Verify",
-                                        color = BackgroundOled,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Advanced: String Session Import
-                    TextButton(
-                        onClick = { showSessionImport = !showSessionImport },
-                        contentPadding = PaddingValues(0.dp)
-                    ) {
-                        Text(
-                            text = if (showSessionImport) "Hide Session String Import" else "Advanced: Import StringSession",
-                            color = TextSecondary,
-                            fontSize = 11.sp
-                        )
-                    }
-
-                    if (showSessionImport) {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedTextField(
-                                value = sessionStringInput,
-                                onValueChange = { sessionStringInput = it },
-                                placeholder = { Text("Paste Pyrogram / Telethon / GramJS session string", color = TextTertiary, fontSize = 12.sp) },
-                                maxLines = 3,
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = TextPrimary,
-                                    unfocusedTextColor = TextPrimary,
-                                    focusedBorderColor = AccentApple,
-                                    unfocusedBorderColor = BorderSubtle,
-                                    focusedContainerColor = SurfaceCardElevated,
-                                    unfocusedContainerColor = SurfaceCardElevated
-                                ),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
-                            Button(
-                                onClick = { viewModel.importSessionString(sessionStringInput) },
-                                enabled = sessionStringInput.length > 10,
-                                shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = SurfaceCardElevated)
-                            ) {
-                                Text("Import Session", color = TextPrimary, fontSize = 12.sp)
-                            }
-                        }
+                        Text("Connect Session String", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }

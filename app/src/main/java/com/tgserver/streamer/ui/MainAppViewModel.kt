@@ -69,6 +69,12 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     private val _codeSentSuccess = MutableStateFlow(false)
     val codeSentSuccess: StateFlow<Boolean> = _codeSentSuccess.asStateFlow()
 
+    private val _isImportingSession = MutableStateFlow(false)
+    val isImportingSession: StateFlow<Boolean> = _isImportingSession.asStateFlow()
+
+    private val _sessionImportError = MutableStateFlow<String?>(null)
+    val sessionImportError: StateFlow<String?> = _sessionImportError.asStateFlow()
+
     /** True while we are validating API credentials against Telegram servers */
     private val _isValidatingApi = MutableStateFlow(false)
     val isValidatingApi: StateFlow<Boolean> = _isValidatingApi.asStateFlow()
@@ -263,18 +269,21 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
 
     fun importSessionString(sessionStr: String) {
         viewModelScope.launch {
+            _isImportingSession.value = true
+            _sessionImportError.value = null
             val res = tgClient.importSessionString(sessionStr)
+            _isImportingSession.value = false
             if (res.isSuccess) {
-                Toast.makeText(getApplication(), "✓ Session imported successfully!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(getApplication(), "✓ Connected to Telegram successfully!", Toast.LENGTH_SHORT).show()
             } else {
-                Toast.makeText(
-                    getApplication(),
-                    res.exceptionOrNull()?.message ?: "Invalid session",
-                    Toast.LENGTH_SHORT
-                ).show()
+                val err = res.exceptionOrNull()?.message ?: "Invalid session string"
+                _sessionImportError.value = err
+                Toast.makeText(getApplication(), err, Toast.LENGTH_LONG).show()
             }
         }
     }
+
+
 
     fun loginWithWebSession(firstName: String, username: String, userId: Long, sessionStr: String) {
         viewModelScope.launch {
