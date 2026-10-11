@@ -92,6 +92,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     private val startTime = System.currentTimeMillis()
 
     init {
+        _config.value = loadStoredConfig()
         startTelemetryLoop()
     }
 
@@ -330,12 +331,148 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         Toast.makeText(getApplication(), "Logged out", Toast.LENGTH_SHORT).show()
     }
 
-    // --- Settings Actions ---
+    // --- Settings Actions & Persistence ---
+
+    private val prefs = getApplication<Application>().getSharedPreferences("tg_server_prefs", Context.MODE_PRIVATE)
+
+    private fun loadStoredConfig(): ServerConfig {
+        return ServerConfig(
+            port = prefs.getInt("server_port", 7788),
+            bufferChunkSizeKb = prefs.getInt("buffer_chunk_kb", 512),
+            customPosterUrl = prefs.getString("custom_poster_url", "") ?: "",
+            customPosterApiKey = prefs.getString("custom_poster_api_key", "") ?: "",
+            tmdbApiKey = prefs.getString("tmdb_api_key", "") ?: "",
+            tvdbApiKey = prefs.getString("tvdb_api_key", "") ?: "",
+            preferredQuality = prefs.getString("preferred_quality", "Any") ?: "Any",
+            hideCamTs = prefs.getBoolean("hide_cam_ts", false),
+            remotePublicUrl = prefs.getString("remote_public_url", "") ?: "",
+            startOnBoot = prefs.getBoolean("start_on_boot", false),
+            autoScanNewContent = prefs.getBoolean("auto_scan_new_content", true),
+            replaceSameQuality = prefs.getBoolean("replace_same_quality", false),
+            skipExactDuplicates = prefs.getBoolean("skip_exact_duplicates", true),
+            autoBackupEnabled = prefs.getBoolean("auto_backup_enabled", false),
+            autoBackupIntervalHours = prefs.getInt("auto_backup_interval_hours", 12)
+        )
+    }
+
+    private fun saveStoredConfig(cfg: ServerConfig) {
+        prefs.edit().apply {
+            putInt("server_port", cfg.port)
+            putInt("buffer_chunk_kb", cfg.bufferChunkSizeKb)
+            putString("custom_poster_url", cfg.customPosterUrl)
+            putString("custom_poster_api_key", cfg.customPosterApiKey)
+            putString("tmdb_api_key", cfg.tmdbApiKey)
+            putString("tvdb_api_key", cfg.tvdbApiKey)
+            putString("preferred_quality", cfg.preferredQuality)
+            putBoolean("hide_cam_ts", cfg.hideCamTs)
+            putString("remote_public_url", cfg.remotePublicUrl)
+            putBoolean("start_on_boot", cfg.startOnBoot)
+            putBoolean("auto_scan_new_content", cfg.autoScanNewContent)
+            putBoolean("replace_same_quality", cfg.replaceSameQuality)
+            putBoolean("skip_exact_duplicates", cfg.skipExactDuplicates)
+            putBoolean("auto_backup_enabled", cfg.autoBackupEnabled)
+            putInt("auto_backup_interval_hours", cfg.autoBackupIntervalHours)
+            apply()
+        }
+        _config.value = cfg
+    }
+
+    fun updateMetadataProviders(tmdb: String, tvdb: String) {
+        val updated = _config.value.copy(
+            tmdbApiKey = tmdb.trim(),
+            tvdbApiKey = tvdb.trim()
+        )
+        saveStoredConfig(updated)
+        Toast.makeText(getApplication(), "✓ Metadata provider keys saved", Toast.LENGTH_SHORT).show()
+    }
+
+    fun updatePosterSettings(url: String) {
+        val updated = _config.value.copy(
+            customPosterUrl = url.trim()
+        )
+        saveStoredConfig(updated)
+        Toast.makeText(getApplication(), "✓ Poster template updated", Toast.LENGTH_SHORT).show()
+    }
+
+    fun updateStreamingSettings(quality: String, hideCam: Boolean) {
+        val updated = _config.value.copy(
+            preferredQuality = quality,
+            hideCamTs = hideCam
+        )
+        saveStoredConfig(updated)
+        Toast.makeText(getApplication(), "✓ Streaming preferences saved", Toast.LENGTH_SHORT).show()
+    }
+
+    fun updateServerNetwork(port: Int, bufferKb: Int, remoteUrl: String, startOnBoot: Boolean) {
+        val updated = _config.value.copy(
+            port = port,
+            bufferChunkSizeKb = bufferKb,
+            remotePublicUrl = remoteUrl.trim(),
+            startOnBoot = startOnBoot
+        )
+        saveStoredConfig(updated)
+        Toast.makeText(getApplication(), "✓ Server settings saved (Port: $port)", Toast.LENGTH_SHORT).show()
+    }
+
+    fun updateChannelAutomation(autoScan: Boolean, replaceSameQuality: Boolean, skipExact: Boolean) {
+        val updated = _config.value.copy(
+            autoScanNewContent = autoScan,
+            replaceSameQuality = replaceSameQuality,
+            skipExactDuplicates = skipExact
+        )
+        saveStoredConfig(updated)
+        Toast.makeText(getApplication(), "✓ Channel automation rules updated", Toast.LENGTH_SHORT).show()
+    }
+
+    fun updateBackupSettings(enabled: Boolean, intervalHours: Int) {
+        val updated = _config.value.copy(
+            autoBackupEnabled = enabled,
+            autoBackupIntervalHours = intervalHours
+        )
+        saveStoredConfig(updated)
+        Toast.makeText(getApplication(), "✓ Backup schedule updated", Toast.LENGTH_SHORT).show()
+    }
+
+    fun scanDuplicates(): Int {
+        val items = media.value
+        val titleCounts = items.groupBy { "${it.title.lowercase().trim()}_${it.season ?: 0}_${it.episode ?: 0}" }
+        return titleCounts.values.sumOf { if (it.size > 1) it.size - 1 else 0 }
+    }
+
+    fun scanDeadFiles(): Int {
+        // Scans if any file size is 0 or inaccessible
+        return media.value.count { it.sizeBytes <= 0 || it.fileName.isBlank() }
+    }
+
+    fun exportBackupJson(): String {
+        val cfg = _config.value
+        val channelList = channels.value
+        return """
+            {
+              "version": 1,
+              "timestamp": ${System.currentTimeMillis()},
+              "serverConfig": {
+                "port": ${cfg.port},
+                "preferredQuality": "${cfg.preferredQuality}",
+                "hideCamTs": ${cfg.hideCamTs},
+                "remotePublicUrl": "${cfg.remotePublicUrl}",
+                "startOnBoot": ${cfg.startOnBoot},
+                "autoScanNewContent": ${cfg.autoScanNewContent},
+                "replaceSameQuality": ${cfg.replaceSameQuality},
+                "skipExactDuplicates": ${cfg.skipExactDuplicates}
+              },
+              "monitoredChannelsCount": ${channelList.size}
+            }
+        """.trimIndent()
+    }
 
     fun updateConfig(port: Int, posterUrl: String, apiKey: String) {
-        _config.value.port = port
-        _config.value.customPosterUrl = posterUrl
-        _config.value.customPosterApiKey = apiKey
+        val updated = _config.value.copy(
+            port = port,
+            customPosterUrl = posterUrl,
+            customPosterApiKey = apiKey
+        )
+        saveStoredConfig(updated)
         Toast.makeText(getApplication(), "Settings saved (Port: $port)", Toast.LENGTH_SHORT).show()
     }
 }

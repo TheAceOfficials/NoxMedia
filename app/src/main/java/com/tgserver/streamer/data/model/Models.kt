@@ -57,7 +57,18 @@ data class ServerConfig(
     var telegramApiId: Int = 0,
     var telegramApiHash: String = "",
     var bufferChunkSizeKb: Int = 512,
-    var cacheDir: String = ""
+    var cacheDir: String = "",
+    var tmdbApiKey: String = "",
+    var tvdbApiKey: String = "",
+    var preferredQuality: String = "Any",
+    var hideCamTs: Boolean = false,
+    var remotePublicUrl: String = "",
+    var startOnBoot: Boolean = false,
+    var autoScanNewContent: Boolean = true,
+    var replaceSameQuality: Boolean = false,
+    var skipExactDuplicates: Boolean = true,
+    var autoBackupEnabled: Boolean = false,
+    var autoBackupIntervalHours: Int = 12
 )
 
 data class AuthSession(

@@ -491,3 +491,76 @@ fun AdaptiveScreenContainer(
         )
     }
 }
+
+/**
+ * Tactile Pill Toggle Switch (Signature Nothing OS style matching reference image).
+ */
+@Composable
+fun NothingSwitch(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
+) {
+    val trackWidth = 46.dp
+    val trackHeight = 26.dp
+    val thumbSize = 20.dp
+    val padding = 3.dp
+
+    val thumbOffset by animateDpAsState(
+        targetValue = if (checked) trackWidth - thumbSize - padding else padding,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "switch_thumb_offset"
+    )
+
+    val trackColor by animateColorAsState(
+        targetValue = when {
+            !enabled -> Color(0xFF1B1B20)
+            checked -> Color(0xFFFFFFFF)
+            else -> Color(0xFF1E1E24)
+        },
+        animationSpec = tween(220, easing = FastOutSlowInEasing),
+        label = "switch_track_color"
+    )
+
+    val thumbColor by animateColorAsState(
+        targetValue = when {
+            !enabled -> Color(0xFF383842)
+            checked -> Color(0xFF070709)
+            else -> Color(0xFFD4D4D8)
+        },
+        animationSpec = tween(220, easing = FastOutSlowInEasing),
+        label = "switch_thumb_color"
+    )
+
+    val trackBorderColor by animateColorAsState(
+        targetValue = if (checked) Color.Transparent else BorderSubtle,
+        animationSpec = tween(220),
+        label = "switch_border_color"
+    )
+
+    Box(
+        modifier = modifier
+            .size(width = trackWidth, height = trackHeight)
+            .clip(CircleShape)
+            .border(1.dp, trackBorderColor, CircleShape)
+            .background(trackColor)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                enabled = enabled
+            ) { onCheckedChange(!checked) },
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Box(
+            modifier = Modifier
+                .padding(start = thumbOffset)
+                .size(thumbSize)
+                .clip(CircleShape)
+                .background(thumbColor)
+        )
+    }
+}
