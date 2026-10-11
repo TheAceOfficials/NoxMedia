@@ -152,7 +152,7 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
                 modifier = Modifier.fillMaxWidth(),
                 backgroundColor = SurfaceCard,
                 borderColor = BorderSubtle,
-                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp)
+                contentPadding = PaddingValues(16.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -160,44 +160,22 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(
-                        modifier = Modifier.weight(1f),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(StatusGreen, CircleShape)
+                        Text(
+                            text = "API CREDENTIALS",
+                            color = TextPrimary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = 0.5.sp
                         )
-                        Column {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Text(
-                                    text = "API CREDENTIALS",
-                                    color = TextPrimary,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    letterSpacing = 0.5.sp
-                                )
-                                NothingDotBadge(
-                                    text = "ACTIVE",
-                                    dotColor = StatusGreen,
-                                    textColor = StatusGreen
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "ID: $apiId • Hash: ${apiHash.take(6)}•••${apiHash.takeLast(4)}",
-                                color = TextTertiary,
-                                fontSize = 11.5.sp,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
+                        NothingDotBadge(
+                            text = "ACTIVE",
+                            dotColor = StatusGreen,
+                            textColor = StatusGreen
+                        )
                     }
-
-                    Spacer(modifier = Modifier.width(10.dp))
 
                     Row(
                         modifier = Modifier
@@ -205,9 +183,9 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
                             .border(1.dp, BorderSubtle, CircleShape)
                             .background(SurfaceCardElevated)
                             .clickable { viewModel.clearApiCredentials() }
-                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                            .padding(horizontal = 11.dp, vertical = 5.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Edit,
@@ -222,6 +200,40 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
                             fontWeight = FontWeight.Medium
                         )
                     }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(SurfaceCardElevated.copy(alpha = 0.6f))
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "ID: $apiId",
+                        color = TextSecondary,
+                        fontSize = 11.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                    Text(
+                        text = "•",
+                        color = TextTertiary,
+                        fontSize = 11.sp
+                    )
+                    Text(
+                        text = "HASH: ${apiHash.take(6)}•••${apiHash.takeLast(4)}",
+                        color = TextSecondary,
+                        fontSize = 11.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                        softWrap = false
+                    )
                 }
             }
 
@@ -330,7 +342,6 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
                         value = phoneInput,
                         onValueChange = { phoneInput = it },
                         label = "PHONE NUMBER",
-                        badgeText = "+COUNTRY CODE",
                         placeholder = "+91 98765 43210",
                         isMonospace = true,
                         singleLine = true,
@@ -481,6 +492,7 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(
+                        modifier = Modifier.weight(1f, fill = false),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
@@ -490,11 +502,13 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
                                 .background(AccentSilver, CircleShape)
                         )
                         Text(
-                            text = "PYROGRAM / TELETHON STRING",
+                            text = "SESSION STRING",
                             color = TextSecondary,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
-                            letterSpacing = 0.2.sp
+                            letterSpacing = 0.5.sp,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
 
@@ -523,7 +537,9 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
                                     text = "Clear",
                                     color = StatusRed,
                                     fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.Medium
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                             }
                         }
@@ -556,7 +572,9 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
                                 text = "Paste",
                                 color = TextPrimary,
                                 fontSize = 11.5.sp,
-                                fontWeight = FontWeight.SemiBold
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                     }
@@ -719,13 +737,17 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
                                     color = TextPrimary,
                                     fontSize = 13.5.sp,
                                     fontWeight = FontWeight.SemiBold,
-                                    letterSpacing = (-0.2).sp
+                                    letterSpacing = (-0.2).sp,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    text = "Official 1-click cloud sandbox • Safe & fast",
+                                    text = "Official cloud sandbox • 100% private",
                                     color = TextTertiary,
-                                    fontSize = 11.sp
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                             }
                         }
