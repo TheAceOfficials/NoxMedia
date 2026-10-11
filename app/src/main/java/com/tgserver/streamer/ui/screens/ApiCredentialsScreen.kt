@@ -4,31 +4,41 @@ import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.*
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tgserver.streamer.theme.*
 import com.tgserver.streamer.ui.MainAppViewModel
+import com.tgserver.streamer.ui.components.*
 
 @Composable
 fun ApiCredentialsScreen(viewModel: MainAppViewModel) {
@@ -47,8 +57,8 @@ fun ApiCredentialsScreen(viewModel: MainAppViewModel) {
     // Real-time format validation
     val apiIdError: String? = remember(apiIdInput) {
         when {
-            apiIdInput.isBlank() -> null // no error while empty
-            apiIdInput.toIntOrNull() == null -> "API ID must be a number"
+            apiIdInput.isBlank() -> null
+            apiIdInput.toIntOrNull() == null -> "API ID must contain digits only"
             (apiIdInput.toIntOrNull() ?: 0) <= 0 -> "API ID must be positive"
             else -> null
         }
@@ -56,268 +66,242 @@ fun ApiCredentialsScreen(viewModel: MainAppViewModel) {
     val apiHashError: String? = remember(apiHashInput) {
         when {
             apiHashInput.isBlank() -> null
-            apiHashInput.length < 20 -> "Hash is too short (should be 32 chars)"
-            !apiHashInput.matches(Regex("[a-fA-F0-9]+")) -> "Hash should only contain hex chars (0-9, a-f)"
+            apiHashInput.length < 20 -> "Hash is too short (32 hex characters expected)"
+            !apiHashInput.matches(Regex("[a-fA-F0-9]+")) -> "Hash must contain only hex characters (0-9, a-f)"
             else -> null
         }
     }
 
-    val amberButtonColor = Color(0xFFF3A43B)
-    val inputBackground = Color(0xFF18181C)
-    val validGreen = Color(0xFF4CAF50)
-    val errorRed = Color(0xFFFF5252)
-
     val isFormValid = apiIdInput.isNotBlank() && apiHashInput.isNotBlank()
-        && apiIdError == null && apiHashError == null
+            && apiIdError == null && apiHashError == null
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(BackgroundOled)
-            .statusBarsPadding()
-            .navigationBarsPadding()
-    ) {
+    AdaptiveScreenContainer {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 32.dp),
+                .padding(horizontal = 22.dp, vertical = 28.dp),
             verticalArrangement = Arrangement.Top
         ) {
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-            // APP BRANDING HEADER
+            // TOP BRANDING BADGE & STEP INDICATOR
             Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .background(AccentApple, RoundedCornerShape(5.dp))
+                NothingDotBadge(
+                    text = "TG-SERVER",
+                    dotColor = AccentApple,
+                    backgroundColor = Color(0x1FFFFFFF),
+                    textColor = TextPrimary
                 )
-                Text(
-                    text = "TG-Server",
-                    color = TextPrimary,
-                    fontSize = 32.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = (-0.5).sp
+
+                NothingDotBadge(
+                    text = "STEP 01/02",
+                    dotColor = AccentSilver,
+                    backgroundColor = Color(0x14FFFFFF),
+                    textColor = TextSecondary
                 )
-            }
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            Text(
-                text = "Your Telegram channels as a Stremio catalog, served from this device.",
-                color = TextSecondary,
-                fontSize = 14.sp,
-                lineHeight = 20.sp
-            )
-
-            Spacer(modifier = Modifier.height(44.dp))
-
-            // SECTION TITLE
-            Text(
-                text = "API credentials",
-                color = TextPrimary,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Medium
-            )
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.clickable {
-                    try {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://my.telegram.org/apps"))
-                        context.startActivity(intent)
-                    } catch (e: Exception) {
-                        Toast.makeText(context, "Open my.telegram.org/apps in your browser", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            ) {
-                Text(text = "From ", color = TextTertiary, fontSize = 13.sp)
-                Text(
-                    text = "my.telegram.org/apps",
-                    color = Color(0xFF64B5F6),
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium
-                )
-                Text(text = " → API development tools.", color = TextTertiary, fontSize = 13.sp)
-            }
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            // HOW TO GET CREDENTIALS INFO BOX
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFF1A1A1E), RoundedCornerShape(10.dp))
-                    .border(1.dp, Color(0xFF2C2C32), RoundedCornerShape(10.dp))
-                    .padding(12.dp)
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text("How to get API credentials:", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                    Text("1. Go to my.telegram.org and login with your phone", color = TextTertiary, fontSize = 12.sp)
-                    Text("2. Click 'API development tools'", color = TextTertiary, fontSize = 12.sp)
-                    Text("3. Create a new app and copy the API ID & Hash", color = TextTertiary, fontSize = 12.sp)
-                }
             }
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // INPUT 1: API ID
-            Column {
-                OutlinedTextField(
-                    value = apiIdInput,
-                    onValueChange = {
-                        apiIdInput = it.filter { c -> c.isDigit() }
-                        errorMessage = null
-                    },
-                    label = { Text("API ID", fontSize = 12.sp) },
-                    placeholder = {
-                        Text("e.g. 12345678", color = TextTertiary.copy(alpha = 0.6f), fontSize = 15.sp)
-                    },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    shape = RoundedCornerShape(12.dp),
-                    isError = apiIdError != null && apiIdInput.isNotBlank(),
-                    trailingIcon = {
-                        when {
-                            apiIdInput.isNotBlank() && apiIdError == null ->
-                                Icon(Icons.Default.CheckCircle, null, tint = validGreen, modifier = Modifier.size(18.dp))
-                            apiIdInput.isNotBlank() && apiIdError != null ->
-                                Icon(Icons.Default.Warning, null, tint = errorRed, modifier = Modifier.size(18.dp))
-                        }
-                    },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary,
-                        focusedBorderColor = if (apiIdError != null && apiIdInput.isNotBlank()) errorRed else amberButtonColor,
-                        unfocusedBorderColor = if (apiIdError != null && apiIdInput.isNotBlank()) errorRed.copy(alpha = 0.7f) else Color(0xFF2C2C32),
-                        focusedContainerColor = inputBackground,
-                        unfocusedContainerColor = inputBackground,
-                        focusedLabelColor = amberButtonColor,
-                        unfocusedLabelColor = TextTertiary,
-                        errorBorderColor = errorRed,
-                        errorContainerColor = inputBackground
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(60.dp)
-                )
-                AnimatedVisibility(
-                    visible = apiIdError != null && apiIdInput.isNotBlank(),
-                    enter = fadeIn(),
-                    exit = fadeOut()
+            // HEADLINE & DESCRIPTION (Apple SF Pro clean hierarchy)
+            Text(
+                text = "Telegram API",
+                color = TextPrimary,
+                fontSize = 32.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.8).sp
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "Connect your Telegram API ID & Hash to establish the local media bridge and stream directly to Stremio.",
+                color = TextSecondary,
+                fontSize = 14.5.sp,
+                lineHeight = 22.sp,
+                letterSpacing = (-0.2).sp
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            DotDivider(color = BorderSubtle, dotsCount = 20)
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // INFO CARD: HOW TO RETRIEVE API CREDENTIALS (Nothing Squircle Card)
+            NothingCard(
+                modifier = Modifier.fillMaxWidth(),
+                backgroundColor = SurfaceCard,
+                borderColor = BorderSubtle,
+                contentPadding = PaddingValues(18.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = apiIdError ?: "",
-                        color = errorRed,
-                        fontSize = 11.sp,
-                        modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+                        text = "GET YOUR CREDENTIALS",
+                        color = TextPrimary,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 1.sp
+                    )
+
+                    NothingDotBadge(
+                        text = "OFFICIAL",
+                        dotColor = StatusGreen,
+                        textColor = StatusGreen
                     )
                 }
-            }
 
-            Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-            // INPUT 2: API HASH
-            Column {
-                OutlinedTextField(
-                    value = apiHashInput,
-                    onValueChange = {
-                        apiHashInput = it.trim()
-                        errorMessage = null
-                    },
-                    label = { Text("API Hash", fontSize = 12.sp) },
-                    placeholder = {
-                        Text("e.g. a3b4c5d6... (32 hex chars)", color = TextTertiary.copy(alpha = 0.6f), fontSize = 13.sp)
-                    },
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
-                    isError = apiHashError != null && apiHashInput.isNotBlank(),
-                    trailingIcon = {
-                        when {
-                            apiHashInput.isNotBlank() && apiHashError == null ->
-                                Icon(Icons.Default.CheckCircle, null, tint = validGreen, modifier = Modifier.size(18.dp))
-                            apiHashInput.isNotBlank() && apiHashError != null ->
-                                Icon(Icons.Default.Warning, null, tint = errorRed, modifier = Modifier.size(18.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    GuideStepRow(
+                        step = "01",
+                        text = "Log in with your phone on my.telegram.org"
+                    )
+                    GuideStepRow(
+                        step = "02",
+                        text = "Select 'API development tools'"
+                    )
+                    GuideStepRow(
+                        step = "03",
+                        text = "Create app, then copy your API ID & API Hash"
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // 1-Click Link Button (Smoked secondary pill)
+                NothingPillButton(
+                    text = "Open my.telegram.org/apps ↗",
+                    onClick = {
+                        try {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://my.telegram.org/apps"))
+                            context.startActivity(intent)
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "Open my.telegram.org/apps in your browser", Toast.LENGTH_SHORT).show()
                         }
                     },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary,
-                        focusedBorderColor = if (apiHashError != null && apiHashInput.isNotBlank()) errorRed else amberButtonColor,
-                        unfocusedBorderColor = if (apiHashError != null && apiHashInput.isNotBlank()) errorRed.copy(alpha = 0.7f) else Color(0xFF2C2C32),
-                        focusedContainerColor = inputBackground,
-                        unfocusedContainerColor = inputBackground,
-                        focusedLabelColor = amberButtonColor,
-                        unfocusedLabelColor = TextTertiary,
-                        errorBorderColor = errorRed,
-                        errorContainerColor = inputBackground
-                    ),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    variant = NothingButtonVariant.Secondary,
+                    height = 44.dp
                 )
-                AnimatedVisibility(
-                    visible = apiHashError != null && apiHashInput.isNotBlank(),
-                    enter = fadeIn(),
-                    exit = fadeOut()
-                ) {
-                    Text(
-                        text = apiHashError ?: "",
-                        color = errorRed,
-                        fontSize = 11.sp,
-                        modifier = Modifier.padding(start = 4.dp, top = 2.dp)
-                    )
-                }
-            }
-
-            // Server-side error message (from validation attempt)
-            if (!errorMessage.isNullOrBlank()) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(errorRed.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-                        .border(1.dp, errorRed.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
-                        .padding(12.dp)
-                ) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.Top
-                    ) {
-                        Icon(
-                            Icons.Default.Warning,
-                            contentDescription = null,
-                            tint = errorRed,
-                            modifier = Modifier.size(16.dp).padding(top = 1.dp)
-                        )
-                        Text(text = errorMessage!!, color = errorRed, fontSize = 13.sp, lineHeight = 18.sp)
-                    }
-                }
             }
 
             Spacer(modifier = Modifier.height(28.dp))
 
-            // CONTINUE BUTTON
-            Button(
+            // INPUT 1: API ID
+            NothingTextField(
+                value = apiIdInput,
+                onValueChange = {
+                    apiIdInput = it.filter { c -> c.isDigit() }
+                    errorMessage = null
+                },
+                label = "TELEGRAM API ID",
+                badgeText = "NUMERIC",
+                placeholder = "e.g. 12345678",
+                isMonospace = true,
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                isError = apiIdError != null && apiIdInput.isNotBlank(),
+                errorMessage = apiIdError,
+                trailingIcon = {
+                    when {
+                        apiIdInput.isNotBlank() && apiIdError == null ->
+                            Icon(Icons.Default.CheckCircle, null, tint = AccentSilver, modifier = Modifier.size(18.dp))
+                        apiIdInput.isNotBlank() && apiIdError != null ->
+                            Icon(Icons.Default.Warning, null, tint = StatusRed, modifier = Modifier.size(18.dp))
+                    }
+                }
+            )
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            // INPUT 2: API HASH
+            NothingTextField(
+                value = apiHashInput,
+                onValueChange = {
+                    apiHashInput = it.trim()
+                    errorMessage = null
+                },
+                label = "TELEGRAM API HASH",
+                badgeText = "32-HEX",
+                placeholder = "e.g. a3b4c5d6e7f8091...",
+                isMonospace = true,
+                singleLine = true,
+                isError = apiHashError != null && apiHashInput.isNotBlank(),
+                errorMessage = apiHashError,
+                trailingIcon = {
+                    when {
+                        apiHashInput.isNotBlank() && apiHashError == null ->
+                            Icon(Icons.Default.CheckCircle, null, tint = AccentSilver, modifier = Modifier.size(18.dp))
+                        apiHashInput.isNotBlank() && apiHashError != null ->
+                            Icon(Icons.Default.Warning, null, tint = StatusRed, modifier = Modifier.size(18.dp))
+                    }
+                }
+            )
+
+            // Server-side validation error message banner
+            AnimatedVisibility(
+                visible = !errorMessage.isNullOrBlank(),
+                enter = fadeIn(tween(200)) + expandVertically(spring(stiffness = Spring.StiffnessLow)),
+                exit = fadeOut(tween(150)) + shrinkVertically()
+            ) {
+                Spacer(modifier = Modifier.height(16.dp))
+                NothingCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = Color(0xFF1B1113),
+                    borderColor = StatusRed.copy(alpha = 0.4f),
+                    contentPadding = PaddingValues(14.dp)
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .background(StatusRed, CircleShape)
+                        )
+                        Text(
+                            text = errorMessage ?: "",
+                            color = StatusRed,
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            // PRIMARY SUBMIT BUTTON (Solid White Pill with Spring Click)
+            NothingPillButton(
+                text = "Continue to Login →",
                 onClick = {
                     val idParsed = apiIdInput.trim().toIntOrNull()
                     val hashTrimmed = apiHashInput.trim()
 
                     if (idParsed == null || idParsed <= 0) {
                         errorMessage = "Please enter a valid numeric Telegram API ID"
-                        return@Button
+                        return@NothingPillButton
                     }
                     if (hashTrimmed.isBlank()) {
                         errorMessage = "Please enter your Telegram API hash"
-                        return@Button
+                        return@NothingPillButton
                     }
                     if (apiIdError != null || apiHashError != null) {
                         errorMessage = apiIdError ?: apiHashError
-                        return@Button
+                        return@NothingPillButton
                     }
 
                     viewModel.validateAndSaveApiCredentials(idParsed, hashTrimmed) { success, msg ->
@@ -326,43 +310,62 @@ fun ApiCredentialsScreen(viewModel: MainAppViewModel) {
                         }
                     }
                 },
+                modifier = Modifier.fillMaxWidth(),
                 enabled = isFormValid && !isValidatingApi,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = amberButtonColor,
-                    contentColor = Color(0xFF1E1402),
-                    disabledContainerColor = amberButtonColor.copy(alpha = 0.4f),
-                    disabledContentColor = Color(0xFF1E1402).copy(alpha = 0.5f)
-                ),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
+                isLoading = isValidatingApi,
+                variant = NothingButtonVariant.Primary,
+                height = 54.dp
+            )
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            // PRIVACY & LOCAL STORAGE GUARANTEE FOOTER
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                if (isValidatingApi) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            color = Color(0xFF1E1402),
-                            strokeWidth = 2.dp
-                        )
-                        Text(text = "Verifying credentials...", fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    }
-                } else {
-                    Text(text = "Continue →", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                }
+                Box(
+                    modifier = Modifier
+                        .size(4.dp)
+                        .background(TextTertiary, CircleShape)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Stored locally on device • Never shared externally",
+                    color = TextTertiary,
+                    fontSize = 11.5.sp,
+                    letterSpacing = 0.1.sp
+                )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Text(
-                text = "Your API credentials are stored locally on this device only.",
-                color = TextTertiary,
-                fontSize = 11.sp,
-                modifier = Modifier.align(Alignment.CenterHorizontally)
-            )
+            Spacer(modifier = Modifier.height(24.dp))
         }
+    }
+}
+
+@Composable
+private fun GuideStepRow(
+    step: String,
+    text: String
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            text = step,
+            color = AccentSilver,
+            fontSize = 11.sp,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            text = text,
+            color = TextSecondary,
+            fontSize = 12.5.sp,
+            lineHeight = 18.sp
+        )
     }
 }

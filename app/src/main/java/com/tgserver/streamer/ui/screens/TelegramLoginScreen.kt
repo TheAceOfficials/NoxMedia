@@ -1,43 +1,51 @@
 package com.tgserver.streamer.ui.screens
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tgserver.streamer.theme.*
 import com.tgserver.streamer.ui.MainAppViewModel
+import com.tgserver.streamer.ui.components.*
 
 @Composable
 fun TelegramLoginScreen(viewModel: MainAppViewModel) {
@@ -57,7 +65,7 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
 
     val (apiId, apiHash) = viewModel.apiCredentials.collectAsState().value
 
-    // Tabs: 0: In-App Phone Login, 1: Session String & Colab
+    // Tabs: 0: In-App Direct Login, 1: Session String & Colab
     var selectedAuthMode by remember { mutableIntStateOf(0) }
 
     // Inputs
@@ -67,15 +75,8 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
     var sessionInput by remember { mutableStateOf("") }
 
     // Guide state
-    var selectedGuideTab by remember { mutableIntStateOf(0) } // 0: Mobile, 1: PC
+    var selectedGuideTab by remember { mutableIntStateOf(0) } // 0: Colab, 1: PC
     var isGuideExpanded by remember { mutableStateOf(false) }
-
-    val amberColor = Color(0xFFF3A43B)
-    val inputBackground = Color(0xFF131418)
-    val cardBackground = Color(0xFF16171C)
-    val cardBorder = Color(0xFF26282F)
-    val validGreen = Color(0xFF34C759)
-    val telegramBlue = Color(0xFF2AABEE)
 
     // Validation for session string
     val trimmedSession = sessionInput.trim()
@@ -91,81 +92,66 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(BackgroundOled)
-            .statusBarsPadding()
-            .navigationBarsPadding()
-    ) {
+    AdaptiveScreenContainer {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 24.dp),
+                .padding(horizontal = 22.dp, vertical = 28.dp),
             verticalArrangement = Arrangement.Top
         ) {
             Spacer(modifier = Modifier.height(8.dp))
 
-            // BRANDING HEADER
+            // TOP BRANDING BADGE & STEP INDICATOR
             Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .background(amberColor, CircleShape)
+                NothingDotBadge(
+                    text = "TG-SERVER",
+                    dotColor = AccentApple,
+                    backgroundColor = Color(0x1FFFFFFF),
+                    textColor = TextPrimary
                 )
-                Text(
-                    text = "TG-Server",
-                    color = TextPrimary,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.5.sp
+
+                NothingDotBadge(
+                    text = "STEP 02/02",
+                    dotColor = AccentSilver,
+                    backgroundColor = Color(0x14FFFFFF),
+                    textColor = TextSecondary
                 )
-                Box(
-                    modifier = Modifier
-                        .background(amberColor.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                ) {
-                    Text(
-                        text = "EMBEDDED MTPROTO",
-                        color = amberColor,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
+            // HEADLINE & DESCRIPTION (Apple SF Pro clean hierarchy)
             Text(
-                text = "Connect Telegram",
+                text = "Connect Account",
                 color = TextPrimary,
-                fontSize = 26.sp,
+                fontSize = 32.sp,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = (-0.5).sp
+                letterSpacing = (-0.8).sp
             )
 
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "Connect your account to stream high-speed video directly to Stremio. Choose your preferred login method below.",
+                text = "Authenticate your Telegram account to allow Stremio to stream catalog media directly from your channels.",
                 color = TextSecondary,
-                fontSize = 13.sp,
-                lineHeight = 19.sp
+                fontSize = 14.5.sp,
+                lineHeight = 22.sp,
+                letterSpacing = (-0.2).sp
             )
 
-            Spacer(modifier = Modifier.height(18.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
-            // API CREDENTIALS BADGE / SUMMARY CARD
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(cardBackground, RoundedCornerShape(12.dp))
-                    .border(1.dp, cardBorder, RoundedCornerShape(12.dp))
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
+            // API CREDENTIALS SUMMARY SQUIRCLE CARD
+            NothingCard(
+                modifier = Modifier.fillMaxWidth(),
+                backgroundColor = SurfaceCard,
+                borderColor = BorderSubtle,
+                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -173,193 +159,208 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Box(
-                            contentAlignment = Alignment.Center,
                             modifier = Modifier
-                                .size(32.dp)
-                                .background(validGreen.copy(alpha = 0.12f), CircleShape)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = null,
-                                tint = validGreen,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
+                                .size(8.dp)
+                                .background(StatusGreen, CircleShape)
+                        )
                         Column {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "API CREDENTIALS",
+                                    color = TextPrimary,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    letterSpacing = 0.5.sp
+                                )
+                                NothingDotBadge(
+                                    text = "ACTIVE",
+                                    dotColor = StatusGreen,
+                                    textColor = StatusGreen
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "API Credentials Configured",
-                                color = TextPrimary,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                text = "ID: $apiId • Hash: ${apiHash.take(6)}...${apiHash.takeLast(4)}",
+                                text = "ID: $apiId • Hash: ${apiHash.take(6)}•••${apiHash.takeLast(4)}",
                                 color = TextTertiary,
-                                fontSize = 11.sp,
+                                fontSize = 11.5.sp,
                                 fontFamily = FontFamily.Monospace
                             )
                         }
                     }
 
-                    TextButton(
+                    NothingPillButton(
+                        text = "Edit",
                         onClick = { viewModel.clearApiCredentials() },
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
-                        Text(
-                            text = "Edit",
-                            color = amberColor,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
+                        variant = NothingButtonVariant.Ghost,
+                        height = 32.dp,
+                        modifier = Modifier.width(68.dp)
+                    )
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(22.dp))
 
-            // DUAL-MODE TAB SWITCHER (In-App Phone vs Session String)
-            Row(
+            // MODERN SEGMENTED PILL TAB SWITCHER (Nothing OS Minimal Touch)
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color(0xFF0F1014), RoundedCornerShape(10.dp))
+                    .clip(CircleShape)
+                    .background(SurfaceCardElevated)
+                    .border(1.dp, BorderSubtle, CircleShape)
                     .padding(4.dp)
             ) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (selectedAuthMode == 0) cardBackground else Color.Transparent)
-                        .clickable { selectedAuthMode = 0 }
-                        .padding(vertical = 10.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    // TAB 0: IN-APP DIRECT
+                    val tab0Active = selectedAuthMode == 0
+                    val tab0Bg by animateColorAsState(
+                        targetValue = if (tab0Active) Color(0xFF26262E) else Color.Transparent,
+                        animationSpec = tween(220, easing = FastOutSlowInEasing),
+                        label = "tab0_bg"
+                    )
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(42.dp)
+                            .clip(CircleShape)
+                            .background(tab0Bg)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { selectedAuthMode = 0 }
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Smartphone,
-                            contentDescription = null,
-                            tint = if (selectedAuthMode == 0) amberColor else TextTertiary,
-                            modifier = Modifier.size(15.dp)
-                        )
-                        Text(
-                            text = "In-App Direct Login",
-                            color = if (selectedAuthMode == 0) TextPrimary else TextTertiary,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(5.dp)
+                                    .background(
+                                        if (tab0Active) AccentApple else TextTertiary,
+                                        CircleShape
+                                    )
+                            )
+                            Text(
+                                text = "In-App Login",
+                                color = if (tab0Active) TextPrimary else TextSecondary,
+                                fontSize = 13.sp,
+                                fontWeight = if (tab0Active) FontWeight.SemiBold else FontWeight.Medium
+                            )
+                        }
                     }
-                }
 
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (selectedAuthMode == 1) cardBackground else Color.Transparent)
-                        .clickable { selectedAuthMode = 1 }
-                        .padding(vertical = 10.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    // TAB 1: SESSION STRING / COLAB
+                    val tab1Active = selectedAuthMode == 1
+                    val tab1Bg by animateColorAsState(
+                        targetValue = if (tab1Active) Color(0xFF26262E) else Color.Transparent,
+                        animationSpec = tween(220, easing = FastOutSlowInEasing),
+                        label = "tab1_bg"
+                    )
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(42.dp)
+                            .clip(CircleShape)
+                            .background(tab1Bg)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { selectedAuthMode = 1 }
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Key,
-                            contentDescription = null,
-                            tint = if (selectedAuthMode == 1) amberColor else TextTertiary,
-                            modifier = Modifier.size(15.dp)
-                        )
-                        Text(
-                            text = "Session String / Colab",
-                            color = if (selectedAuthMode == 1) TextPrimary else TextTertiary,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(5.dp)
+                                    .background(
+                                        if (tab1Active) AccentApple else TextTertiary,
+                                        CircleShape
+                                    )
+                            )
+                            Text(
+                                text = "Session String",
+                                color = if (tab1Active) TextPrimary else TextSecondary,
+                                fontSize = 13.sp,
+                                fontWeight = if (tab1Active) FontWeight.SemiBold else FontWeight.Medium
+                            )
+                        }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
+            // CONTENT BASED ON SELECTED TAB
             if (selectedAuthMode == 0) {
                 // ==================== MODE 0: IN-APP DIRECT PHONE LOGIN ====================
                 if (!codeSentSuccess) {
-                    // STEP 1: ENTER PHONE NUMBER
-                    Text(
-                        text = "PHONE NUMBER (WITH COUNTRY CODE)",
-                        color = TextTertiary,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.5.sp
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    OutlinedTextField(
+                    // STEP 1: PHONE INPUT
+                    NothingTextField(
                         value = phoneInput,
                         onValueChange = { phoneInput = it },
-                        placeholder = {
-                            Text(
-                                text = "+919876543210 (Include country code)",
-                                color = TextTertiary.copy(alpha = 0.6f),
-                                fontSize = 13.sp
-                            )
-                        },
+                        label = "PHONE NUMBER",
+                        badgeText = "E.164 FORMAT",
+                        placeholder = "+91 98765 43210",
+                        isMonospace = true,
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary,
-                            focusedBorderColor = amberColor,
-                            unfocusedBorderColor = cardBorder,
-                            focusedContainerColor = inputBackground,
-                            unfocusedContainerColor = inputBackground
-                        ),
-                        modifier = Modifier.fillMaxWidth()
+                        trailingIcon = {
+                            if (phoneInput.trim().length >= 8) {
+                                Icon(Icons.Default.CheckCircle, null, tint = AccentSilver, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    )
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    NothingPillButton(
+                        text = "Send Official Telegram Code →",
+                        onClick = { viewModel.sendAuthCode(phoneInput) },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isSendingCode && phoneInput.trim().length >= 8,
+                        isLoading = isSendingCode,
+                        variant = NothingButtonVariant.Primary,
+                        height = 54.dp
                     )
 
                     Spacer(modifier = Modifier.height(18.dp))
 
-                    Button(
-                        onClick = { viewModel.sendAuthCode(phoneInput) },
-                        enabled = !isSendingCode && phoneInput.trim().length >= 8,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = amberColor,
-                            contentColor = Color(0xFF1E1402)
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().height(50.dp)
+                    // PRIVACY NOTE (FROSTED OBSIDIAN CARD)
+                    NothingCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        backgroundColor = SurfaceCard,
+                        borderColor = BorderSubtle,
+                        contentPadding = PaddingValues(14.dp)
                     ) {
-                        if (isSendingCode) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                color = Color(0xFF1E1402),
-                                strokeWidth = 2.dp
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .background(AccentSilver, CircleShape)
                             )
-                            Spacer(Modifier.width(8.dp))
-                            Text("Connecting via Pyrogram Engine...", fontWeight = FontWeight.Bold)
-                        } else {
-                            Text("Send Official Telegram Code", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Spacer(Modifier.width(6.dp))
-                            Icon(Icons.AutoMirrored.Filled.ArrowForward, null, modifier = Modifier.size(16.dp))
+                            Text(
+                                text = "Runs 100% inside your device via embedded Chaquopy engine. No external server receives your credentials.",
+                                color = TextSecondary,
+                                fontSize = 12.sp,
+                                lineHeight = 17.sp
+                            )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Text(
-                        text = "🔒 Runs 100% inside your phone using embedded Chaquopy engine. No external server receives your phone number.",
-                        color = TextTertiary,
-                        fontSize = 11.sp,
-                        lineHeight = 15.sp
-                    )
                 } else if (!is2FARequired) {
                     // STEP 2: ENTER OTP
                     Row(
@@ -367,116 +368,87 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "ENTER CONFIRMATION CODE",
-                            color = TextTertiary,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.5.sp
+                        NothingDotBadge(
+                            text = "CODE SENT TO TELEGRAM",
+                            dotColor = StatusGreen,
+                            textColor = StatusGreen
                         )
-                        TextButton(
-                            onClick = { viewModel.cancelPhoneAuth() },
-                            contentPadding = PaddingValues(0.dp)
-                        ) {
-                            Text("Change phone", color = amberColor, fontSize = 11.sp)
-                        }
+
+                        Text(
+                            text = "Change phone",
+                            color = AccentSilver,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { viewModel.cancelPhoneAuth() }
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
                     }
 
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                    OutlinedTextField(
+                    NothingTextField(
                         value = otpInput,
                         onValueChange = { otpInput = it },
-                        placeholder = {
-                            Text("5-digit code sent to Telegram app", color = TextTertiary.copy(alpha = 0.6f), fontSize = 13.sp)
-                        },
+                        label = "CONFIRMATION CODE",
+                        badgeText = "5 DIGITS",
+                        placeholder = "•••••",
+                        isMonospace = true,
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary,
-                            focusedBorderColor = validGreen,
-                            unfocusedBorderColor = cardBorder,
-                            focusedContainerColor = inputBackground,
-                            unfocusedContainerColor = inputBackground
-                        ),
-                        modifier = Modifier.fillMaxWidth()
+                        trailingIcon = {
+                            if (otpInput.trim().length >= 4) {
+                                Icon(Icons.Default.CheckCircle, null, tint = AccentSilver, modifier = Modifier.size(18.dp))
+                            }
+                        }
                     )
 
-                    Spacer(modifier = Modifier.height(18.dp))
+                    Spacer(modifier = Modifier.height(20.dp))
 
-                    Button(
+                    NothingPillButton(
+                        text = "Verify & Connect →",
                         onClick = { viewModel.verifyAuthCode(otpInput) },
+                        modifier = Modifier.fillMaxWidth(),
                         enabled = !isVerifyingCode && otpInput.trim().length >= 4,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = validGreen,
-                            contentColor = Color.Black
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().height(50.dp)
-                    ) {
-                        if (isVerifyingCode) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.Black, strokeWidth = 2.dp)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Authorizing Session...", fontWeight = FontWeight.Bold)
-                        } else {
-                            Text("Verify & Connect", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        }
-                    }
+                        isLoading = isVerifyingCode,
+                        variant = NothingButtonVariant.Primary,
+                        height = 54.dp
+                    )
+
                 } else {
                     // STEP 3: 2FA PASSWORD
-                    Text(
-                        text = "TWO-STEP VERIFICATION PASSWORD",
-                        color = TextTertiary,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.5.sp
+                    NothingDotBadge(
+                        text = "TWO-STEP VERIFICATION",
+                        dotColor = AccentYellow,
+                        textColor = TextPrimary
                     )
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                    OutlinedTextField(
+                    NothingTextField(
                         value = password2FAInput,
                         onValueChange = { password2FAInput = it },
-                        placeholder = {
-                            Text("Enter your 2FA password", color = TextTertiary.copy(alpha = 0.6f), fontSize = 13.sp)
-                        },
+                        label = "CLOUD PASSWORD",
+                        badgeText = "2FA",
+                        placeholder = "Enter your 2FA password",
+                        isMonospace = false,
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary,
-                            focusedBorderColor = amberColor,
-                            unfocusedBorderColor = cardBorder,
-                            focusedContainerColor = inputBackground,
-                            unfocusedContainerColor = inputBackground
-                        ),
-                        modifier = Modifier.fillMaxWidth()
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
                     )
 
-                    Spacer(modifier = Modifier.height(18.dp))
+                    Spacer(modifier = Modifier.height(20.dp))
 
-                    Button(
+                    NothingPillButton(
+                        text = "Unlock & Connect →",
                         onClick = { viewModel.verify2FAPassword(password2FAInput) },
+                        modifier = Modifier.fillMaxWidth(),
                         enabled = !isVerifying2FA && password2FAInput.isNotBlank(),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = amberColor,
-                            contentColor = Color(0xFF1E1402)
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().height(50.dp)
-                    ) {
-                        if (isVerifying2FA) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color(0xFF1E1402), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Verifying 2FA...", fontWeight = FontWeight.Bold)
-                        } else {
-                            Text("Unlock & Connect", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        }
-                    }
+                        isLoading = isVerifying2FA,
+                        variant = NothingButtonVariant.Primary,
+                        height = 54.dp
+                    )
                 }
 
             } else {
@@ -486,27 +458,25 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "SESSION STRING",
-                        color = TextTertiary,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.5.sp
+                    NothingDotBadge(
+                        text = "PYROGRAM / TELETHON",
+                        dotColor = AccentSilver,
+                        textColor = TextSecondary
                     )
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (sessionInput.isNotBlank()) {
-                            TextButton(
+                            NothingPillButton(
+                                text = "Clear",
                                 onClick = { sessionInput = "" },
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                                modifier = Modifier.height(26.dp)
-                            ) {
-                                Text("Clear", color = StatusRed, fontSize = 11.sp)
-                            }
+                                variant = NothingButtonVariant.Ghost,
+                                height = 28.dp,
+                                modifier = Modifier.width(60.dp)
+                            )
                         }
 
-                        // PASTE BUTTON
-                        FilledTonalButton(
+                        NothingPillButton(
+                            text = "Paste",
                             onClick = {
                                 val clipText = clipboardManager.getText()?.text
                                 if (!clipText.isNullOrBlank()) {
@@ -516,271 +486,272 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
                                     Toast.makeText(context, "Clipboard is empty", Toast.LENGTH_SHORT).show()
                                 }
                             },
-                            colors = ButtonDefaults.filledTonalButtonColors(
-                                containerColor = Color(0xFF22242C),
-                                contentColor = TextPrimary
-                            ),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                            shape = RoundedCornerShape(6.dp),
-                            modifier = Modifier.height(26.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ContentPaste,
-                                contentDescription = null,
-                                modifier = Modifier.size(12.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Paste", fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = sessionInput,
-                    onValueChange = { sessionInput = it },
-                    placeholder = {
-                        Text(
-                            text = "Paste Pyrogram or Telethon session string here...\n(e.g., 1BVtsOG...)",
-                            color = TextTertiary.copy(alpha = 0.6f),
-                            fontSize = 12.sp,
-                            lineHeight = 16.sp
+                            variant = NothingButtonVariant.Secondary,
+                            height = 28.dp,
+                            modifier = Modifier.width(68.dp)
                         )
-                    },
-                    minLines = 4,
-                    maxLines = 6,
-                    shape = RoundedCornerShape(12.dp),
-                    isError = sessionFormatError != null || sessionImportError != null,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary,
-                        focusedBorderColor = if (isFormatLikelyValid) validGreen else amberColor,
-                        unfocusedBorderColor = if (isFormatLikelyValid) validGreen.copy(alpha = 0.6f) else cardBorder,
-                        focusedContainerColor = inputBackground,
-                        unfocusedContainerColor = inputBackground,
-                        errorBorderColor = StatusRed,
-                        errorContainerColor = inputBackground
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(6.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (sessionFormatError != null) {
-                        Text(text = sessionFormatError, color = StatusRed, fontSize = 11.sp)
-                    } else if (sessionImportError != null) {
-                        Text(text = sessionImportError ?: "", color = StatusRed, fontSize = 11.sp)
-                    } else if (isFormatLikelyValid) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.CheckCircle, null, tint = validGreen, modifier = Modifier.size(12.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Ready to connect", color = validGreen, fontSize = 11.sp)
-                        }
-                    } else {
-                        Text("Pyrogram / Telethon string supported", color = TextTertiary, fontSize = 11.sp)
-                    }
-
-                    if (trimmedSession.isNotEmpty()) {
-                        Text(
-                            text = "${trimmedSession.length} chars",
-                            color = TextTertiary,
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // CONNECT STRING BUTTON
-                Button(
-                    onClick = {
-                        if (trimmedSession.length < 20) {
-                            Toast.makeText(context, "Please enter a valid session string", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
-                        viewModel.importSessionString(trimmedSession)
-                    },
-                    enabled = !isImporting && trimmedSession.length >= 20,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = amberColor,
-                        contentColor = Color(0xFF1E1402),
-                        disabledContainerColor = amberColor.copy(alpha = 0.3f),
-                        disabledContentColor = Color(0xFF1E1402).copy(alpha = 0.4f)
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth().height(52.dp)
-                ) {
-                    if (isImporting) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            color = Color(0xFF1E1402),
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text("Connecting Account...", fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    } else {
-                        Text("Connect & Start Server", fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Icon(Icons.AutoMirrored.Filled.ArrowForward, null, modifier = Modifier.size(16.dp))
                     }
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // GOOGLE COLAB 1-CLICK BUTTON
-                OutlinedButton(
+                // MULTILINE TOKEN CONTAINER
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(20.dp))
+                        .border(
+                            1.dp,
+                            if (isFormatLikelyValid) StatusGreen.copy(alpha = 0.5f) else BorderSubtle,
+                            RoundedCornerShape(20.dp)
+                        )
+                        .background(SurfaceCardElevated)
+                        .padding(18.dp)
+                ) {
+                    Box(modifier = Modifier.fillMaxWidth().heightIn(min = 90.dp, max = 150.dp)) {
+                        if (sessionInput.isEmpty()) {
+                            Text(
+                                text = "Paste Pyrogram or Telethon session string here...\n(e.g., 1BVtsOG...)",
+                                color = TextTertiary,
+                                fontSize = 13.sp,
+                                lineHeight = 19.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+
+                        BasicTextField(
+                            value = sessionInput,
+                            onValueChange = { sessionInput = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            cursorBrush = SolidColor(TextPrimary),
+                            textStyle = TextStyle(
+                                color = TextPrimary,
+                                fontSize = 13.sp,
+                                fontFamily = FontFamily.Monospace,
+                                lineHeight = 18.sp,
+                                letterSpacing = 0.3.sp
+                            )
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    DotDivider(color = BorderSubtle, dotsCount = 16)
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (isFormatLikelyValid) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(modifier = Modifier.size(5.dp).background(StatusGreen, CircleShape))
+                                Text("Ready to connect", color = StatusGreen, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
+                            }
+                        } else {
+                            Text("Session String required", color = TextTertiary, fontSize = 11.5.sp)
+                        }
+
+                        if (trimmedSession.isNotEmpty()) {
+                            Text(
+                                text = "${trimmedSession.length} chars",
+                                color = TextTertiary,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+                }
+
+                // Error text if any
+                AnimatedVisibility(
+                    visible = sessionFormatError != null || sessionImportError != null,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically()
+                ) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = sessionFormatError ?: sessionImportError ?: "",
+                        color = StatusRed,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(start = 4.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // CONNECT BUTTON
+                NothingPillButton(
+                    text = "Connect & Start Server →",
+                    onClick = {
+                        if (trimmedSession.length < 20) {
+                            Toast.makeText(context, "Please enter a valid session string", Toast.LENGTH_SHORT).show()
+                            return@NothingPillButton
+                        }
+                        viewModel.importSessionString(trimmedSession)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !isImporting && trimmedSession.length >= 20,
+                    isLoading = isImporting,
+                    variant = NothingButtonVariant.Primary,
+                    height = 54.dp
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // GOOGLE COLAB 1-CLICK BUTTON (Secondary Smoked Glass Pill)
+                NothingPillButton(
+                    text = "Generate via Google Colab (1-Click) ↗",
                     onClick = {
                         val url = "https://colab.research.google.com/github/TheAceOfficials/TG-Server/blob/main/string_session.ipynb"
                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
                         context.startActivity(intent)
                     },
-                    shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF26282F)),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
-                    modifier = Modifier.fillMaxWidth().height(48.dp)
-                ) {
-                    Icon(Icons.Default.Cloud, null, tint = amberColor, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Generate String via Google Colab (1-Click)", fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                }
+                    modifier = Modifier.fillMaxWidth(),
+                    variant = NothingButtonVariant.Secondary,
+                    height = 50.dp
+                )
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                // EXPANDABLE GUIDE SECTION
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(cardBackground)
-                        .border(1.dp, cardBorder, RoundedCornerShape(14.dp))
+                // EXPANDABLE GUIDE SECTION (Nothing Card)
+                NothingCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = SurfaceCard,
+                    borderColor = BorderSubtle,
+                    contentPadding = PaddingValues(16.dp)
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { isGuideExpanded = !isGuideExpanded },
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { isGuideExpanded = !isGuideExpanded },
-                            horizontalArrangement = Arrangement.SpaceBetween,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.HelpOutline,
-                                    contentDescription = null,
-                                    tint = telegramBlue,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Text(
-                                    text = "How to get Session String in 1 minute?",
-                                    color = TextPrimary,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-
-                            Icon(
-                                imageVector = if (isGuideExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                contentDescription = null,
-                                tint = TextTertiary
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .background(AccentSilver, CircleShape)
+                            )
+                            Text(
+                                text = "How to get Session String in 1 min?",
+                                color = TextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
 
-                        AnimatedVisibility(visible = isGuideExpanded) {
-                            Column(modifier = Modifier.padding(top = 16.dp)) {
-                                Row(
+                        Icon(
+                            imageVector = if (isGuideExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = null,
+                            tint = TextSecondary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    AnimatedVisibility(
+                        visible = isGuideExpanded,
+                        enter = fadeIn(tween(200)) + expandVertically(spring(stiffness = Spring.StiffnessLow)),
+                        exit = fadeOut(tween(150)) + shrinkVertically()
+                    ) {
+                        Column(modifier = Modifier.padding(top = 16.dp)) {
+                            // Mini Guide Tab Switcher
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(CircleShape)
+                                    .background(SurfaceCardElevated)
+                                    .padding(3.dp)
+                            ) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
                                     modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(Color(0xFF0F1014), RoundedCornerShape(8.dp))
-                                        .padding(3.dp)
+                                        .weight(1f)
+                                        .height(34.dp)
+                                        .clip(CircleShape)
+                                        .background(if (selectedGuideTab == 0) Color(0xFF26262E) else Color.Transparent)
+                                        .clickable { selectedGuideTab = 0 }
                                 ) {
-                                    Box(
-                                        contentAlignment = Alignment.Center,
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(if (selectedGuideTab == 0) cardBackground else Color.Transparent)
-                                            .clickable { selectedGuideTab = 0 }
-                                            .padding(vertical = 8.dp)
-                                    ) {
-                                        Text(
-                                            text = "☁️ Google Colab (Safe)",
-                                            color = if (selectedGuideTab == 0) amberColor else TextTertiary,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                    }
-
-                                    Box(
-                                        contentAlignment = Alignment.Center,
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(if (selectedGuideTab == 1) cardBackground else Color.Transparent)
-                                            .clickable { selectedGuideTab = 1 }
-                                            .padding(vertical = 8.dp)
-                                    ) {
-                                        Text(
-                                            text = "💻 PC Terminal",
-                                            color = if (selectedGuideTab == 1) amberColor else TextTertiary,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(14.dp))
-
-                                if (selectedGuideTab == 0) {
-                                    GuideStepItem(
-                                        step = "1",
-                                        title = "Open Google Colab Sandbox",
-                                        desc = "Tap 'Generate via Google Colab' button above to open the official verified script in your browser."
-                                    )
-                                    Spacer(modifier = Modifier.height(10.dp))
-                                    GuideStepItem(
-                                        step = "2",
-                                        title = "Run the Code Cell",
-                                        desc = "Tap ▶ Play button. It runs in Google's cloud sandbox, 100% private to you."
-                                    )
-                                    Spacer(modifier = Modifier.height(10.dp))
-                                    GuideStepItem(
-                                        step = "3",
-                                        title = "Enter API Keys & OTP",
-                                        desc = "Enter your API ID ($apiId), Hash, and official Telegram OTP."
-                                    )
-                                    Spacer(modifier = Modifier.height(10.dp))
-                                    GuideStepItem(
-                                        step = "4",
-                                        title = "Copy String to App",
-                                        desc = "The string is sent straight to your Telegram Saved Messages chat. Copy and paste it here!"
-                                    )
-                                } else {
-                                    GuideStepItem(
-                                        step = "1",
-                                        title = "Run in Terminal",
-                                        desc = "In your PC terminal inside TG-Server: venv/bin/python generate_string.py"
-                                    )
-                                    Spacer(modifier = Modifier.height(10.dp))
-                                    GuideStepItem(
-                                        step = "2",
-                                        title = "Enter Credentials",
-                                        desc = "Enter your API ID and phone number to generate session string."
-                                    )
-                                    Spacer(modifier = Modifier.height(10.dp))
-                                    GuideStepItem(
-                                        step = "3",
-                                        title = "Copy & Paste",
-                                        desc = "Copy the output from terminal or Telegram Saved Messages and paste above."
+                                    Text(
+                                        text = "Google Colab (Safe)",
+                                        color = if (selectedGuideTab == 0) TextPrimary else TextTertiary,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Medium
                                     )
                                 }
+
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(34.dp)
+                                        .clip(CircleShape)
+                                        .background(if (selectedGuideTab == 1) Color(0xFF26262E) else Color.Transparent)
+                                        .clickable { selectedGuideTab = 1 }
+                                ) {
+                                    Text(
+                                        text = "PC Terminal",
+                                        color = if (selectedGuideTab == 1) TextPrimary else TextTertiary,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            if (selectedGuideTab == 0) {
+                                GuideStepItem(
+                                    step = "01",
+                                    title = "Open Google Colab Sandbox",
+                                    desc = "Tap 'Generate via Google Colab' button above to open the verified notebook in browser."
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                GuideStepItem(
+                                    step = "02",
+                                    title = "Run the Code Cell",
+                                    desc = "Tap ▶ Play button. It runs in Google's cloud sandbox, 100% private."
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                GuideStepItem(
+                                    step = "03",
+                                    title = "Enter API Keys & OTP",
+                                    desc = "Enter your API ID ($apiId), Hash, and official Telegram OTP."
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                GuideStepItem(
+                                    step = "04",
+                                    title = "Copy String to App",
+                                    desc = "The string is sent straight to your Telegram Saved Messages chat. Paste it above."
+                                )
+                            } else {
+                                GuideStepItem(
+                                    step = "01",
+                                    title = "Run in Terminal",
+                                    desc = "In your PC terminal inside TG-Server: venv/bin/python generate_string.py"
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                GuideStepItem(
+                                    step = "02",
+                                    title = "Enter Credentials",
+                                    desc = "Enter your API ID and phone number to generate session string."
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                GuideStepItem(
+                                    step = "03",
+                                    title = "Copy & Paste",
+                                    desc = "Copy the output from terminal or Telegram Saved Messages and paste above."
+                                )
                             }
                         }
                     }
@@ -803,33 +774,27 @@ private fun GuideStepItem(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.Top
     ) {
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier
-                .size(20.dp)
-                .background(Color(0xFF26282F), CircleShape)
-        ) {
-            Text(
-                text = step,
-                color = TextSecondary,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
+        Text(
+            text = step,
+            color = AccentSilver,
+            fontSize = 11.5.sp,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold
+        )
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
                 color = TextPrimary,
-                fontSize = 12.sp,
+                fontSize = 12.5.sp,
                 fontWeight = FontWeight.SemiBold
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = desc,
                 color = TextTertiary,
-                fontSize = 11.sp,
-                lineHeight = 15.sp
+                fontSize = 11.5.sp,
+                lineHeight = 16.sp
             )
         }
     }
