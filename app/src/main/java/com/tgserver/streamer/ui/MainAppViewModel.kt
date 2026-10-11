@@ -40,6 +40,8 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     private val tgClient: TelegramClientManager =
         StreamerForegroundService.activeTgClient ?: TelegramClientManager(application.applicationContext)
 
+    private val prefs = application.getSharedPreferences("tg_server_prefs", Context.MODE_PRIVATE)
+
     val session: StateFlow<AuthSession> = tgClient.sessionState
     val channels: StateFlow<List<ChannelInfo>> = tgClient.channelsState
     val media: StateFlow<List<MediaItem>> = tgClient.mediaState
@@ -332,8 +334,6 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // --- Settings Actions & Persistence ---
-
-    private val prefs = getApplication<Application>().getSharedPreferences("tg_server_prefs", Context.MODE_PRIVATE)
 
     private fun loadStoredConfig(): ServerConfig {
         return ServerConfig(
