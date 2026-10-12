@@ -1,19 +1,30 @@
 package com.tgserver.streamer.ui.screens
 
+import android.content.Context
+import android.content.Intent
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.util.LruCache
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Movie
@@ -30,14 +41,18 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
+import com.tgserver.streamer.R
 import com.tgserver.streamer.data.model.MediaItem
 import com.tgserver.streamer.theme.*
 import com.tgserver.streamer.ui.MainAppViewModel
@@ -46,11 +61,15 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.URLEncoder
+import java.util.Locale
 import java.util.concurrent.TimeUnit
+
+// Authentic Nothing Ndot Dot-Matrix Font
+private val NdotFont = FontFamily(Font(R.font.ndot))
 
 // In-memory poster and backdrop cache
 private object ImageMemoryCache {
-    private val cache = LruCache<String, ImageBitmap>(80)
+    private val cache = LruCache<String, ImageBitmap>(120)
     fun get(url: String): ImageBitmap? = cache.get(url)
     fun put(url: String, bmp: ImageBitmap) {
         cache.put(url, bmp)
@@ -126,28 +145,45 @@ fun RemoteImage(
             modifier = modifier
                 .background(
                     Brush.verticalGradient(
-                        colors = listOf(SurfaceCardElevated, SurfaceCard)
+                        colors = listOf(Color(0xFF1B1C22), Color(0xFF101115))
                     )
                 ),
             contentAlignment = Alignment.Center
         ) {
             if (isLoading) {
                 CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    color = AccentApple,
+                    modifier = Modifier.size(20.dp),
+                    color = Color(0xFFA855F7),
                     strokeWidth = 2.dp
                 )
             } else {
                 Icon(
                     imageVector = if (isSeries) Icons.Default.Tv else Icons.Default.Movie,
                     contentDescription = null,
-                    tint = TextTertiary,
-                    modifier = Modifier.size(24.dp)
+                    tint = Color(0xFF4A4D5A),
+                    modifier = Modifier.size(28.dp)
                 )
             }
         }
     }
 }
+
+/**
+ * Grouped media entity representing a single Movie or TV Show title
+ */
+data class MediaGroup(
+    val key: String,
+    val title: String,
+    val type: String, // "movie", "series", "anime"
+    val year: String?,
+    val posterUrl: String?,
+    val backdropUrl: String?,
+    val overview: String?,
+    val imdbId: String?,
+    val tmdbId: Int?,
+    val qualityBadge: String,
+    val items: List<MediaItem>
+)
 
 @Composable
 fun LibraryScreen(viewModel: MainAppViewModel) {
@@ -155,779 +191,956 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
     val searchQuery by viewModel.searchQuery.collectAsState()
     val selectedCategory by viewModel.selectedCategory.collectAsState()
     val telemetry by viewModel.telemetry.collectAsState()
+    val haptic = LocalHapticFeedback.current
 
-    var selectedItemForDetail by remember { mutableStateOf<MediaItem?>(null) }
+    var selectedGroup by remember { mutableStateOf<MediaGroup?>(null) }
 
-    val filteredMedia = remember(allMedia, searchQuery, selectedCategory) {
-        allMedia.filter { item ->
+    // Intercept hardware / gesture back navigation when inside details view
+    BackHandler(enabled = selectedGroup != null) {
+        selectedGroup = null
+    }
+
+    // Group raw files into distinct titles (Movies and Series entities)
+    val mediaGroups = remember(allMedia) {
+        allMedia.groupBy { item ->
+            val cleanTitle = item.title.trim().lowercase()
+            when {
+                item.tmdbId != null && item.tmdbId!! > 0 -> "tmdb_${item.type}_${item.tmdbId}"
+                !item.imdbId.isNullOrBlank() -> "imdb_${item.imdbId}"
+                else -> "title_${item.type}_$cleanTitle"
+            }
+        }.map { (key, items) ->
+            val primary = items.first()
+            val bestPoster = items.firstOrNull { !it.posterUrl.isNullOrBlank() }?.posterUrl ?: primary.posterUrl
+            val bestBackdrop = items.firstOrNull { !it.backdropUrl.isNullOrBlank() }?.backdropUrl ?: primary.backdropUrl
+            val bestOverview = items.firstOrNull { !it.overview.isNullOrBlank() }?.overview ?: primary.overview
+            val bestYear = items.firstOrNull { !it.year.isNullOrBlank() }?.year ?: primary.year
+            val bestQuality = items.maxByOrNull {
+                when {
+                    it.quality.contains("4K", ignoreCase = true) || it.quality.contains("2160", ignoreCase = true) -> 4
+                    it.quality.contains("1080", ignoreCase = true) -> 3
+                    it.quality.contains("720", ignoreCase = true) -> 2
+                    else -> 1
+                }
+            }?.qualityBadge ?: primary.qualityBadge
+
+            MediaGroup(
+                key = key,
+                title = primary.title,
+                type = primary.type,
+                year = bestYear,
+                posterUrl = bestPoster,
+                backdropUrl = bestBackdrop,
+                overview = bestOverview,
+                imdbId = primary.imdbId,
+                tmdbId = primary.tmdbId,
+                qualityBadge = bestQuality,
+                items = items.sortedWith(compareBy({ it.season ?: 1 }, { it.episode ?: 1 }))
+            )
+        }.sortedBy { it.title.lowercase() }
+    }
+
+    // Filter media groups by category & search
+    val filteredGroups = remember(mediaGroups, searchQuery, selectedCategory) {
+        mediaGroups.filter { group ->
             val matchesCategory = when (selectedCategory) {
                 "all" -> true
-                "movies" -> item.type == "movie"
-                "series" -> item.type == "series"
-                "anime" -> item.type == "anime"
-                "4k" -> item.quality.contains("4K", ignoreCase = true)
+                "movies" -> group.type == "movie"
+                "series" -> group.type == "series"
+                "anime" -> group.type == "anime"
+                "4k" -> group.qualityBadge.contains("4K", ignoreCase = true) || group.qualityBadge.contains("2160", ignoreCase = true)
                 else -> true
             }
             val matchesQuery = searchQuery.isBlank() ||
-                    item.title.contains(searchQuery, ignoreCase = true) ||
-                    (item.episodeTitle?.contains(searchQuery, ignoreCase = true) == true) ||
-                    item.fileName.contains(searchQuery, ignoreCase = true) ||
-                    (item.imdbId?.contains(searchQuery, ignoreCase = true) == true) ||
-                    (item.tmdbId?.toString()?.contains(searchQuery, ignoreCase = true) == true)
+                    group.title.contains(searchQuery, ignoreCase = true) ||
+                    (group.year?.contains(searchQuery, ignoreCase = true) == true) ||
+                    (group.imdbId?.contains(searchQuery, ignoreCase = true) == true) ||
+                    group.items.any { it.fileName.contains(searchQuery, ignoreCase = true) || it.episodeTitle?.contains(searchQuery, ignoreCase = true) == true }
+
             matchesCategory && matchesQuery
         }
     }
 
-    // Detail Dialog
-    selectedItemForDetail?.let { item ->
-        MediaDetailDialog(
-            item = item,
-            streamBaseUrl = "http://${telemetry.localIp}:${telemetry.port}",
-            onDismiss = { selectedItemForDetail = null },
-            onCopyStream = { url ->
-                viewModel.copyToClipboard(url, "Direct stream URL copied")
+    val streamBaseUrl = "http://${telemetry.localIp}:${telemetry.port}"
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(BackgroundOled)
+    ) {
+        AnimatedContent(
+            targetState = selectedGroup,
+            transitionSpec = {
+                if (targetState != null) {
+                    (fadeIn(tween(260)) + slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Start, tween(260))) togetherWith
+                            (fadeOut(tween(200)) + slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.Start, tween(200)))
+                } else {
+                    (fadeIn(tween(260)) + slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.End, tween(260))) togetherWith
+                            (fadeOut(tween(200)) + slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.End, tween(200)))
+                }
             },
-            onReenrich = {
-                viewModel.refreshMediaMetadata(item)
+            label = "library_screen_transition"
+        ) { currentGroup ->
+            if (currentGroup != null) {
+                // FULL SCREEN CONTENT DETAILS VIEW
+                ContentDetailsScreen(
+                    group = currentGroup,
+                    streamBaseUrl = streamBaseUrl,
+                    onBack = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        selectedGroup = null
+                    },
+                    onCopyStream = { url ->
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        viewModel.copyToClipboard(url, "Stream link copied")
+                    },
+                    onRefreshMetadata = {
+                        val firstItem = currentGroup.items.firstOrNull()
+                        if (firstItem != null) {
+                            viewModel.refreshMediaMetadata(firstItem)
+                        }
+                    }
+                )
+            } else {
+                // MAIN POSTER GRID LIBRARY VIEW
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 20.dp, vertical = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // TOP BAR
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(
+                                text = "Library",
+                                color = Color.White,
+                                fontSize = 26.sp,
+                                fontFamily = NdotFont,
+                                letterSpacing = 1.2.sp
+                            )
+                            Text(
+                                text = "${mediaGroups.size} titles · ${allMedia.size} streams indexed",
+                                color = Color(0xFF8E909A),
+                                fontSize = 11.5.sp,
+                                fontFamily = NdotFont,
+                                letterSpacing = 0.5.sp
+                            )
+                        }
+
+                        IconButton(
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                viewModel.refreshAllLibraryMetadata()
+                            },
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFF16171E))
+                                .border(1.dp, Color(0xFF282A34), RoundedCornerShape(12.dp))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Enrich Metadata",
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    // SEARCH INPUT
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { viewModel.setSearchQuery(it) },
+                        placeholder = {
+                            Text(
+                                text = "Search title, IMDb, resolution...",
+                                color = Color(0xFF6B6E7B),
+                                fontSize = 12.5.sp,
+                                fontFamily = NdotFont
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = "Search",
+                                tint = Color(0xFF888B98),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        },
+                        trailingIcon = {
+                            if (searchQuery.isNotBlank()) {
+                                IconButton(onClick = { viewModel.setSearchQuery("") }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Clear",
+                                        tint = Color(0xFF888B98),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color(0xFFA855F7),
+                            unfocusedBorderColor = Color(0xFF25262F),
+                            focusedContainerColor = Color(0xFF14151B),
+                            unfocusedContainerColor = Color(0xFF14151B)
+                        ),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    // CATEGORY CHIPS
+                    val categories = listOf(
+                        "all" to "ALL",
+                        "movies" to "MOVIES",
+                        "series" to "SERIES",
+                        "anime" to "ANIME",
+                        "4k" to "4K UHD"
+                    )
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(categories) { (id, label) ->
+                            val isSelected = selectedCategory == id
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isSelected) Color(0xFFA855F7) else Color(0xFF15161D))
+                                    .border(
+                                        1.dp,
+                                        if (isSelected) Color(0xFFA855F7) else Color(0xFF262832),
+                                        RoundedCornerShape(12.dp)
+                                    )
+                                    .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        viewModel.setSelectedCategory(id)
+                                    }
+                                    .padding(horizontal = 14.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = label,
+                                    color = if (isSelected) Color.White else Color(0xFF8E909A),
+                                    fontSize = 11.sp,
+                                    fontFamily = NdotFont,
+                                    letterSpacing = 0.5.sp
+                                )
+                            }
+                        }
+                    }
+
+                    // POSTER GRID
+                    if (filteredGroups.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.padding(horizontal = 32.dp)
+                            ) {
+                                Text(
+                                    text = if (searchQuery.isNotBlank()) "No Matching Media" else "Library is Empty",
+                                    color = Color.White,
+                                    fontSize = 16.sp,
+                                    fontFamily = NdotFont,
+                                    letterSpacing = 1.sp
+                                )
+                                Text(
+                                    text = if (searchQuery.isNotBlank()) "Try another keyword or filter." else "Media files will appear here once monitored channels are indexed.",
+                                    color = Color(0xFF717482),
+                                    fontSize = 12.sp,
+                                    textAlign = TextAlign.Center,
+                                    lineHeight = 17.sp
+                                )
+                            }
+                        }
+                    } else {
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(2),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(18.dp),
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(bottom = 84.dp)
+                        ) {
+                            items(filteredGroups, key = { it.key }) { group ->
+                                PosterCard(
+                                    group = group,
+                                    onClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        selectedGroup = group
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
             }
+        }
+    }
+}
+
+/**
+ * Minimalist Poster Grid Item (Aspect 2:3 with Title & Year/Type)
+ */
+@Composable
+private fun PosterCard(
+    group: MediaGroup,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable { onClick() },
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        // Poster with badges
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(2f / 3f)
+                .clip(RoundedCornerShape(14.dp))
+                .border(BorderStroke(1.dp, Color(0xFF2A1C3C)), RoundedCornerShape(14.dp))
+        ) {
+            RemoteImage(
+                url = group.posterUrl,
+                contentDescription = group.title,
+                isSeries = group.type == "series" || group.type == "anime",
+                modifier = Modifier.fillMaxSize()
+            )
+
+            // Quality Pill (Top Right)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(6.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color.Black.copy(alpha = 0.75f))
+                    .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 5.dp, vertical = 2.dp)
+            ) {
+                Text(
+                    text = group.qualityBadge,
+                    color = Color.White,
+                    fontFamily = NdotFont,
+                    fontSize = 9.sp
+                )
+            }
+
+            // Episode Count if Series (Bottom Left)
+            if (group.type == "series" || group.type == "anime") {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(6.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color(0xFF6B21A8).copy(alpha = 0.85f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "${group.items.size} EPS",
+                        color = Color.White,
+                        fontFamily = NdotFont,
+                        fontSize = 9.sp
+                    )
+                }
+            }
+        }
+
+        // Title
+        Text(
+            text = group.title,
+            color = Color.White,
+            fontFamily = NdotFont,
+            fontSize = 13.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
+
+        // Year · Type
+        val yearText = group.year?.takeIf { it.isNotBlank() } ?: "2026"
+        Text(
+            text = "$yearText · ${group.type.uppercase()}",
+            color = Color(0xFFA855F7),
+            fontFamily = NdotFont,
+            fontSize = 10.5.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+/**
+ * Full-Screen Content Details View (Adapted from user's attached screenshots)
+ */
+@Composable
+private fun ContentDetailsScreen(
+    group: MediaGroup,
+    streamBaseUrl: String,
+    onBack: () -> Unit,
+    onCopyStream: (String) -> Unit,
+    onRefreshMetadata: () -> Unit
+) {
+    val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
+    val isSeries = group.type == "series" || group.type == "anime"
+
+    // Group episodes by Season for series
+    val seasonMap = remember(group.items) {
+        if (isSeries) {
+            group.items.groupBy { it.season ?: 1 }
+        } else {
+            emptyMap()
+        }
     }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(BackgroundOled)
-            .padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .verticalScroll(rememberScrollState())
     ) {
-        // HEADER
-        Row(
+        // TOP BACKDROP WITH APP BAR
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .height(230.dp)
         ) {
-            Column {
-                Text(
-                    text = "Library",
-                    color = TextPrimary,
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = (-0.5).sp
+            if (!group.backdropUrl.isNullOrBlank()) {
+                RemoteImage(
+                    url = group.backdropUrl,
+                    contentDescription = "Backdrop",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
                 )
-                Text(
-                    text = "${allMedia.size} items indexed across channels",
-                    color = TextSecondary,
-                    fontSize = 12.sp
+            } else if (!group.posterUrl.isNullOrBlank()) {
+                RemoteImage(
+                    url = group.posterUrl,
+                    contentDescription = "Backdrop",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
                 )
-            }
-
-            IconButton(
-                onClick = { viewModel.refreshAllLibraryMetadata() },
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(SurfaceCardElevated)
-                    .border(1.dp, BorderSubtle, RoundedCornerShape(10.dp))
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Refresh,
-                    contentDescription = "Enrich All Metadata",
-                    tint = TextPrimary,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-        }
-
-        // SEARCH INPUT
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { viewModel.setSearchQuery(it) },
-            placeholder = { Text("Search title, episode, IMDb, resolution...", color = TextTertiary, fontSize = 13.sp) },
-            leadingIcon = {
-                Icon(
-                    imageVector = Icons.Default.Search,
-                    contentDescription = "Search",
-                    tint = TextSecondary,
-                    modifier = Modifier.size(18.dp)
-                )
-            },
-            singleLine = true,
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = TextPrimary,
-                unfocusedTextColor = TextPrimary,
-                focusedBorderColor = AccentApple,
-                unfocusedBorderColor = BorderSubtle,
-                focusedContainerColor = SurfaceCard,
-                unfocusedContainerColor = SurfaceCard
-            ),
-            shape = RoundedCornerShape(14.dp),
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        // CATEGORY CHIPS
-        val categories = listOf(
-            "all" to "All",
-            "movies" to "Movies",
-            "series" to "Series",
-            "anime" to "Anime",
-            "4k" to "4K UHD"
-        )
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(categories) { (id, label) ->
-                val isSelected = selectedCategory == id
+            } else {
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(if (isSelected) AccentApple else SurfaceCard)
-                        .border(1.dp, if (isSelected) AccentApple else BorderSubtle, RoundedCornerShape(20.dp))
-                        .clickable { viewModel.setSelectedCategory(id) }
-                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(Color(0xFF1F0D36), Color(0xFF090310))
+                            )
+                        )
+                )
+            }
+
+            // Dark gradient overlay towards bottom
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Black.copy(alpha = 0.4f),
+                                Color.Black.copy(alpha = 0.85f),
+                                BackgroundOled
+                            )
+                        )
+                    )
+            )
+
+            // Top Bar Overlay
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp, start = 12.dp, end = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.6f))
                 ) {
-                    Text(
-                        text = label,
-                        color = if (isSelected) BackgroundOled else TextSecondary,
-                        fontSize = 12.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                Text(
+                    text = group.title,
+                    color = Color.White,
+                    fontFamily = NdotFont,
+                    fontSize = 15.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 12.dp)
+                )
+
+                IconButton(
+                    onClick = onRefreshMetadata,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.6f))
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Refresh",
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp)
                     )
                 }
             }
         }
 
-        // CONTENT
-        if (filteredMedia.isEmpty()) {
-            Box(
+        // CONTENT INFO HEADER (Poster + Title + Badges)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            // Poster thumbnail
+            RemoteImage(
+                url = group.posterUrl,
+                contentDescription = group.title,
+                isSeries = isSeries,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentAlignment = Alignment.Center
+                    .width(96.dp)
+                    .height(142.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .border(1.dp, Color(0xFF38155E), RoundedCornerShape(12.dp))
+            )
+
+            // Title & Meta Info
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.padding(horizontal = 32.dp)
+                Text(
+                    text = group.title,
+                    color = Color.White,
+                    fontFamily = NdotFont,
+                    fontSize = 18.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                // Meta row: Year · Duration / Quality
+                val year = group.year?.takeIf { it.isNotBlank() } ?: "2026"
+                Text(
+                    text = "$year · ${group.qualityBadge} · ★ 8.2",
+                    color = Color(0xFFA1A1AA),
+                    fontFamily = NdotFont,
+                    fontSize = 11.5.sp
+                )
+
+                // Type Badge
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color(0xFF28103F))
+                        .border(1.dp, Color(0xFF4C1D7C), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
                 ) {
                     Text(
-                        text = if (searchQuery.isNotBlank()) "No Matching Media Found" else "Library is Empty",
-                        color = TextPrimary,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold
+                        text = group.type.uppercase(),
+                        color = Color(0xFFC084FC),
+                        fontFamily = NdotFont,
+                        fontSize = 10.sp
                     )
-                    Text(
-                        text = if (searchQuery.isNotBlank()) "Try a different search query or category filter." else "Media files from your monitored Telegram channels will appear here once indexed.",
-                        color = TextSecondary,
-                        fontSize = 13.sp,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        lineHeight = 18.sp
+                }
+
+                // External IDs (IMDb / TMDb)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (!group.imdbId.isNullOrBlank()) {
+                        Text(
+                            text = group.imdbId,
+                            color = Color(0xFFFBBF24),
+                            fontFamily = NdotFont,
+                            fontSize = 10.sp
+                        )
+                    }
+                    if (group.tmdbId != null && group.tmdbId > 0) {
+                        Text(
+                            text = "tmdb ${group.tmdbId}",
+                            color = Color(0xFF60A5FA),
+                            fontFamily = NdotFont,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // OVERVIEW SYNOPSIS
+        if (!group.overview.isNullOrBlank()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = group.overview,
+                    color = Color(0xFFD4D4D8),
+                    fontSize = 12.5.sp,
+                    lineHeight = 18.sp
+                )
+            }
+            Spacer(modifier = Modifier.height(20.dp))
+        }
+
+        // STREAMS & EPISODES SECTION
+        if (!isSeries) {
+            // MOVIE STREAMS
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "STREAMS (${group.items.size})",
+                    color = Color(0xFF8E909A),
+                    fontFamily = NdotFont,
+                    fontSize = 11.5.sp
+                )
+
+                group.items.forEach { streamItem ->
+                    val encodedName = try {
+                        URLEncoder.encode(streamItem.fileName.ifBlank { "movie.mp4" }, "UTF-8").replace("+", "%20")
+                    } catch (_: Exception) {
+                        "movie.mp4"
+                    }
+                    val streamUrl = "$streamBaseUrl/stream/video/${streamItem.channelId}/${streamItem.messageId}/$encodedName"
+
+                    StreamItemRow(
+                        item = streamItem,
+                        streamUrl = streamUrl,
+                        onCopy = { onCopyStream(streamUrl) },
+                        onPlay = {
+                            playInExternalPlayer(context, streamUrl)
+                        }
                     )
                 }
             }
         } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                contentPadding = PaddingValues(bottom = 80.dp)
-            ) {
-                items(filteredMedia, key = { it.id }) { item ->
-                    MediaCard(
-                        item = item,
-                        streamBaseUrl = "http://${telemetry.localIp}:${telemetry.port}",
-                        onItemClick = { selectedItemForDetail = item },
-                        onCopyStream = { streamUrl ->
-                            viewModel.copyToClipboard(streamUrl, "Direct stream URL copied")
-                        }
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun MediaCard(
-    item: MediaItem,
-    streamBaseUrl: String,
-    onItemClick: () -> Unit,
-    onCopyStream: (String) -> Unit
-) {
-    // Generate valid direct stream URL with LAN IP and encoded real filename
-    val encodedName = try {
-        URLEncoder.encode(item.fileName.ifBlank { "video.mp4" }, "UTF-8").replace("+", "%20")
-    } catch (_: Exception) {
-        "video.mp4"
-    }
-    val streamUrl = "$streamBaseUrl/stream/video/${item.channelId}/${item.messageId}/$encodedName"
-
-    val isSeries = item.type == "series" || item.type == "anime" || (item.season != null && item.episode != null)
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onItemClick() },
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = SurfaceCard),
-        border = androidx.compose.foundation.BorderStroke(1.dp, BorderSubtle)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                verticalAlignment = Alignment.Top
-            ) {
-                // Media Poster Thumbnail (Apple TV / Stremio Aspect 2:3)
-                RemoteImage(
-                    url = item.posterUrl,
-                    contentDescription = item.title,
-                    isSeries = isSeries,
-                    modifier = Modifier
-                        .width(76.dp)
-                        .height(110.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .border(1.dp, BorderBright, RoundedCornerShape(10.dp))
-                )
-
-                // Info Column
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    // Title & Resolution Badge
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = item.title,
-                            color = TextPrimary,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-
-                        Spacer(modifier = Modifier.width(6.dp))
-
-                        // Resolution Pill
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(SurfaceCardElevated)
-                                .border(1.dp, BorderSubtle, RoundedCornerShape(6.dp))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = item.quality,
-                                color = AccentApple,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
-                    }
-
-                    // Series / Episode Indicator (E.g. S01E01 • The God Who Destroys)
-                    if (isSeries && (item.season != null || item.episode != null)) {
-                        val s = item.season ?: 1
-                        val e = item.episode ?: 1
-                        val epCode = "S%02dE%02d".format(s, e)
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(StatusAmber.copy(alpha = 0.2f))
-                                    .border(1.dp, StatusAmber.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
-                                    .padding(horizontal = 5.dp, vertical = 1.dp)
-                            ) {
-                                Text(
-                                    text = epCode,
-                                    color = StatusAmber,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                            }
-
-                            val epTitle = item.episodeTitle
-                            if (!epTitle.isNullOrBlank()) {
-                                Text(
-                                    text = epTitle,
-                                    color = TextPrimary,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    }
-
-                    // Meta: Year • Size • Duration
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = item.year ?: "2024",
-                            color = TextSecondary,
-                            fontSize = 12.sp
-                        )
-                        Text(text = "•", color = TextTertiary, fontSize = 10.sp)
-                        Text(
-                            text = item.formattedSize,
-                            color = TextSecondary,
-                            fontSize = 12.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
-                        if (item.durationSeconds > 0) {
-                            Text(text = "•", color = TextTertiary, fontSize = 10.sp)
-                            Text(
-                                text = item.formattedDuration,
-                                color = TextSecondary,
-                                fontSize = 12.sp
-                            )
-                        }
-                    }
-
-                    // ID Badges Row: SERIES/MOVIE • IMDb • TMDB
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(top = 2.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(SurfaceCardElevated)
-                                .padding(horizontal = 5.dp, vertical = 1.dp)
-                        ) {
-                            Text(
-                                text = item.type.uppercase(),
-                                color = TextSecondary,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        val imdb = item.imdbId
-                        if (!imdb.isNullOrBlank()) {
-                            Text(
-                                text = imdb,
-                                color = AccentYellow,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Medium,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
-
-                        val tmdb = item.tmdbId
-                        if (tmdb != null && tmdb > 0) {
-                            Text(
-                                text = "tmdb $tmdb",
-                                color = AccentBlue,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Medium,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Overview Synopsis Preview (if present)
-            val previewOverview = item.overview
-            if (!previewOverview.isNullOrBlank()) {
-                Text(
-                    text = previewOverview,
-                    color = TextSecondary,
-                    fontSize = 11.sp,
-                    lineHeight = 15.sp,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            // Stream Action Row
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 2.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(7.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(StatusGreen)
-                    )
-                    Text(
-                        text = "Ready to stream",
-                        color = StatusGreen,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-
-                Button(
-                    onClick = { onCopyStream(streamUrl) },
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = SurfaceCardElevated),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    modifier = Modifier.height(32.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = "Stream",
-                            tint = AccentApple,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Text(
-                            text = "Copy Stream URL",
-                            color = TextPrimary,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun MediaDetailDialog(
-    item: MediaItem,
-    streamBaseUrl: String,
-    onDismiss: () -> Unit,
-    onCopyStream: (String) -> Unit,
-    onReenrich: () -> Unit
-) {
-    val encodedName = try {
-        URLEncoder.encode(item.fileName.ifBlank { "video.mp4" }, "UTF-8").replace("+", "%20")
-    } catch (_: Exception) {
-        "video.mp4"
-    }
-    val streamUrl = "$streamBaseUrl/stream/video/${item.channelId}/${item.messageId}/$encodedName"
-    val isSeries = item.type == "series" || item.type == "anime" || (item.season != null && item.episode != null)
-
-    Dialog(onDismissRequest = onDismiss) {
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.85f),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = BackgroundOled),
-            border = androidx.compose.foundation.BorderStroke(1.dp, BorderBright)
-        ) {
+            // SERIES SEASONS & EPISODES (Only existing episodes from user library)
             Column(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Backdrop Header (if available) with close button
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(180.dp)
-                ) {
-                    if (!item.backdropUrl.isNullOrBlank()) {
-                        RemoteImage(
-                            url = item.backdropUrl,
-                            contentDescription = "Backdrop",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(
-                                    Brush.verticalGradient(
-                                        colors = listOf(Color.Transparent, BackgroundOled)
-                                    )
-                                )
-                        )
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(SurfaceCardElevated)
-                        )
-                    }
+                Text(
+                    text = "${seasonMap.size} SEASON · ${group.items.size} EPISODES",
+                    color = Color(0xFF8E909A),
+                    fontFamily = NdotFont,
+                    fontSize = 11.5.sp
+                )
 
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(12.dp)
-                            .size(32.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color.Black.copy(alpha = 0.6f))
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Close",
-                            tint = Color.White,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-
-                // Main Info Section
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 18.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        RemoteImage(
-                            url = item.posterUrl,
-                            contentDescription = item.title,
-                            isSeries = isSeries,
-                            modifier = Modifier
-                                .width(88.dp)
-                                .height(130.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .border(1.dp, BorderBright, RoundedCornerShape(12.dp))
-                        )
-
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text(
-                                text = item.title,
-                                color = TextPrimary,
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-
-                            Text(
-                                text = "${item.year ?: "2024"} • ${if (item.durationSeconds > 0) item.formattedDuration else item.formattedSize}",
-                                color = TextSecondary,
-                                fontSize = 12.sp
-                            )
-
-                            // Badges: SERIES • tt... • tmdb...
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(SurfaceCardElevated)
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = item.type.uppercase(),
-                                        color = TextSecondary,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-
-                                val imdb = item.imdbId
-                                if (!imdb.isNullOrBlank()) {
-                                    Text(
-                                        text = imdb,
-                                        color = AccentYellow,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        fontFamily = FontFamily.Monospace
-                                    )
-                                }
-
-                                val tmdb = item.tmdbId
-                                if (tmdb != null && tmdb > 0) {
-                                    Text(
-                                        text = "tmdb $tmdb",
-                                        color = AccentBlue,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        fontFamily = FontFamily.Monospace
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Series Season & Episode Banner
-                    if (isSeries && (item.season != null || item.episode != null)) {
-                        val s = item.season ?: 1
-                        val e = item.episode ?: 1
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(containerColor = SurfaceCard),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, BorderSubtle)
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Text(
-                                    text = "Season $s",
-                                    color = TextSecondary,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Text(
-                                        text = "E%02d".format(e),
-                                        color = StatusAmber,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace
-                                    )
-                                    Text(
-                                        text = item.episodeTitle ?: "Episode $e",
-                                        color = TextPrimary,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Synopsis / Overview
-                    val fullOverview = item.overview
-                    if (!fullOverview.isNullOrBlank()) {
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(
-                                text = "Overview",
-                                color = TextSecondary,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                text = fullOverview,
-                                color = TextPrimary,
-                                fontSize = 13.sp,
-                                lineHeight = 18.sp
-                            )
-                        }
-                    }
-
-                    // File & Stream Metadata Details
+                seasonMap.forEach { (seasonNum, episodes) ->
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(SurfaceCard)
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color(0xFF14151B))
+                            .border(1.dp, Color(0xFF262832), RoundedCornerShape(16.dp))
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Text(
-                            text = "Source File",
-                            color = TextTertiary,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            text = item.fileName.ifBlank { "Unknown" },
-                            color = TextPrimary,
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace,
-                            maxLines = 3,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        // Season Header
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Season $seasonNum",
+                                color = Color.White,
+                                fontFamily = NdotFont,
+                                fontSize = 14.sp
+                            )
+                            Text(
+                                text = "${episodes.size} eps",
+                                color = Color(0xFF8E909A),
+                                fontFamily = NdotFont,
+                                fontSize = 11.sp
+                            )
+                        }
 
-                        Spacer(modifier = Modifier.height(4.dp))
+                        HorizontalDivider(color = Color(0xFF22242D), thickness = 1.dp)
 
-                        Text(
-                            text = "Stream URL",
-                            color = TextTertiary,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            text = streamUrl,
-                            color = StatusGreen,
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        // Episodes in library
+                        episodes.forEach { ep ->
+                            val encodedName = try {
+                                URLEncoder.encode(ep.fileName.ifBlank { "episode.mp4" }, "UTF-8").replace("+", "%20")
+                            } catch (_: Exception) {
+                                "episode.mp4"
+                            }
+                            val streamUrl = "$streamBaseUrl/stream/video/${ep.channelId}/${ep.messageId}/$encodedName"
+
+                            EpisodeItemRow(
+                                episode = ep,
+                                streamUrl = streamUrl,
+                                onCopy = { onCopyStream(streamUrl) },
+                                onPlay = {
+                                    playInExternalPlayer(context, streamUrl)
+                                }
+                            )
+                        }
                     }
+                }
+            }
+        }
 
-                    // Action Buttons
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        // Bottom space for floating bottom bar clearance
+        Spacer(modifier = Modifier.height(90.dp))
+    }
+}
+
+/**
+ * Stream item row for Movies
+ */
+@Composable
+private fun StreamItemRow(
+    item: MediaItem,
+    streamUrl: String,
+    onCopy: () -> Unit,
+    onPlay: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xFF14151B))
+            .border(1.dp, Color(0xFF262832), RoundedCornerShape(14.dp))
+            .padding(14.dp)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Resolution Badge
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color(0xFF2E1C0A))
+                        .border(1.dp, Color(0xFFF59E0B), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = item.qualityBadge,
+                        color = Color(0xFFFBBF24),
+                        fontFamily = NdotFont,
+                        fontSize = 10.sp
+                    )
+                }
+
+                Text(
+                    text = item.fileName.ifBlank { item.title },
+                    color = Color.White,
+                    fontFamily = NdotFont,
+                    fontSize = 11.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${item.formattedSize} ${if (item.isSplit) "· split" else ""}",
+                    color = Color(0xFF888A96),
+                    fontFamily = NdotFont,
+                    fontSize = 10.5.sp
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Copy URL
+                    Button(
+                        onClick = onCopy,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F2129)),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                        modifier = Modifier.height(30.dp)
                     ) {
-                        Button(
-                            onClick = { onCopyStream(streamUrl) },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = AccentApple)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.ContentCopy,
                                 contentDescription = "Copy",
-                                tint = BackgroundOled,
-                                modifier = Modifier.size(16.dp)
+                                tint = Color.White,
+                                modifier = Modifier.size(12.dp)
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Copy Stream URL",
-                                color = BackgroundOled,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        OutlinedButton(
-                            onClick = onReenrich,
-                            shape = RoundedCornerShape(10.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, BorderBright)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = "Re-fetch",
-                                tint = TextPrimary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Re-fetch",
-                                color = TextPrimary,
-                                fontSize = 12.sp
+                                text = "COPY",
+                                color = Color.White,
+                                fontFamily = NdotFont,
+                                fontSize = 9.5.sp
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    // Play Stream
+                    Button(
+                        onClick = onPlay,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFA855F7)),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                        modifier = Modifier.height(30.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = "Play",
+                                tint = Color.White,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Text(
+                                text = "PLAY",
+                                color = Color.White,
+                                fontFamily = NdotFont,
+                                fontSize = 9.5.sp
+                            )
+                        }
+                    }
                 }
             }
         }
+    }
+}
+
+/**
+ * Episode item row for Series
+ */
+@Composable
+private fun EpisodeItemRow(
+    episode: MediaItem,
+    streamUrl: String,
+    onCopy: () -> Unit,
+    onPlay: () -> Unit
+) {
+    val epNumber = episode.episode ?: 1
+    val epTitle = episode.episodeTitle?.takeIf { it.isNotBlank() } ?: episode.title
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "E%02d".format(epNumber),
+                    color = Color(0xFFFBBF24),
+                    fontFamily = NdotFont,
+                    fontSize = 13.sp
+                )
+
+                Column {
+                    Text(
+                        text = epTitle,
+                        color = Color.White,
+                        fontFamily = NdotFont,
+                        fontSize = 12.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "1 stream · ${episode.qualityBadge} · ${episode.formattedSize}",
+                        color = Color(0xFF888A96),
+                        fontFamily = NdotFont,
+                        fontSize = 10.sp
+                    )
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                IconButton(
+                    onClick = onCopy,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = "Copy URL",
+                        tint = Color(0xFFC4C6D0),
+                        modifier = Modifier.size(15.dp)
+                    )
+                }
+
+                IconButton(
+                    onClick = onPlay,
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF2D1645))
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = "Play",
+                        tint = Color(0xFFD8B4FE),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Launch external video player (VLC, MX Player, Just Player, etc.) via Android Intent
+ */
+private fun playInExternalPlayer(context: Context, streamUrl: String) {
+    try {
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(Uri.parse(streamUrl), "video/*")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(Intent.createChooser(intent, "Play stream with..."))
+    } catch (_: Exception) {
     }
 }
