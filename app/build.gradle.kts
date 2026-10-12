@@ -10,12 +10,12 @@ android {
     compileSdk = 36
     defaultConfig {
         applicationId = "com.tgserver.streamer"
-        minSdk = 26
+        minSdk = 24
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
         ndk {
-            abiFilters += listOf("arm64-v8a", "x86_64")
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
         }
     }
 
@@ -103,9 +103,12 @@ dependencies {
 
 chaquopy {
     defaultConfig {
-        version = "3.12"
+        version = "3.11"
+        val venv311 = rootProject.file("venv311/bin/python")
         val venvPython = rootProject.file("venv/bin/python")
-        if (venvPython.exists()) {
+        if (venv311.exists()) {
+            buildPython(venv311.absolutePath)
+        } else if (venvPython.exists()) {
             buildPython(venvPython.absolutePath)
         } else {
             buildPython("python3")

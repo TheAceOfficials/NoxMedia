@@ -16,6 +16,8 @@ local.properties
 .vscode/
 .kotlin/
 venv/
+venv311/
+.tools/
 *.session
 *.session-journal
 .env
