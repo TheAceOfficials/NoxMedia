@@ -194,40 +194,115 @@ def parse_media(filename: str, caption: str = "") -> str:
 def resolve_channel(api_id: int, api_hash: str, session_str: str, identifier: str) -> str:
     """
     Connects to Telegram via Pyrogram and verifies/resolves the channel.
-    Accepts @username, t.me link, -100... ID, or bare numeric ID.
+    Accepts @username, t.me link, private link (t.me/c/...), -100... ID, or bare numeric ID.
     Returns JSON with channel title, real ID, username, or error.
     """
     async def _async_resolve():
         client = await _get_connected_stream_client(api_id, api_hash, session_str)
-        target = identifier.strip()
-        if target.startswith("https://t.me/"):
-            target = target.replace("https://t.me/", "").replace("/", "").strip()
-        elif target.startswith("t.me/"):
-            target = target.replace("t.me/", "").replace("/", "").strip()
+        raw = identifier.strip()
 
-        # Handle numeric chat id (e.g. -100..., or bare id)
-        if target.startswith("-100") and target[4:].isdigit():
-            chat_target = int(target)
-        elif target.startswith("-") and target[1:].isdigit():
-            chat_target = int(target)
-        elif target.isdigit():
-            chat_target = int(f"-100{target}")
+        # 1. Private channel message link pattern: t.me/c/<channel_id>/...
+        c_match = re.search(r"t\.me/c/(\d+)", raw)
+        if c_match:
+            chat_target = int(f"-100{c_match.group(1)}")
         else:
-            if not target.startswith("@"):
-                target = f"@{target}"
-            chat_target = target
+            target = raw
+            if target.startswith("https://t.me/"):
+                target = target.removeprefix("https://t.me/").strip()
+            elif target.startswith("http://t.me/"):
+                target = target.removeprefix("http://t.me/").strip()
+            elif target.startswith("t.me/"):
+                target = target.removeprefix("t.me/").strip()
 
-        chat = await client.get_chat(chat_target)
-        title = chat.title or getattr(chat, "first_name", None) or "Telegram Channel"
-        uname = getattr(chat, "username", None) or str(chat.id)
+            target = target.strip("/")
 
-        return {
-            "status": "success",
-            "id": chat.id,
-            "title": title,
-            "username": uname,
-            "type": str(getattr(chat, "type", "channel"))
-        }
+            # Check if private invite link: +hash or joinchat/hash
+            if target.startswith("+") or target.startswith("joinchat/"):
+                chat_target = target
+            elif target.startswith("-100") and target[4:].isdigit():
+                chat_target = int(target)
+            elif target.startswith("-") and target[1:].isdigit():
+                bare = target[1:]
+                if not bare.startswith("100"):
+                    chat_target = int(f"-100{bare}")
+                else:
+                    chat_target = int(target)
+            elif target.isdigit():
+                chat_target = int(f"-100{target}")
+            else:
+                if not target.startswith("@"):
+                    target = f"@{target}"
+                chat_target = target
+
+        chat = None
+        # 1. Try direct get_chat first
+        try:
+            chat = await client.get_chat(chat_target)
+        except Exception:
+            chat = None
+
+        # 2. If get_chat failed, search the user's dialogs (vital for private/numeric channel IDs)
+        if chat is None:
+            target_id_variants = set()
+            if isinstance(chat_target, int):
+                target_id_variants.add(chat_target)
+                bare = str(abs(chat_target)).removeprefix("100")
+                if bare.isdigit():
+                    b_int = int(bare)
+                    target_id_variants.add(b_int)
+                    target_id_variants.add(-b_int)
+                    target_id_variants.add(int(f"-100{b_int}"))
+
+            try:
+                async for dialog in client.get_dialogs():
+                    d_chat = dialog.chat
+                    if not d_chat:
+                        continue
+                    d_id = d_chat.id
+                    d_bare = str(abs(d_id)).removeprefix("100")
+
+                    if d_id in target_id_variants or (isinstance(chat_target, int) and str(abs(chat_target)).endswith(d_bare)):
+                        chat = d_chat
+                        break
+
+                    if isinstance(chat_target, str) and d_chat.username:
+                        if d_chat.username.lower() == str(chat_target).removeprefix("@").lower():
+                            chat = d_chat
+                            break
+            except Exception:
+                pass
+
+        # 3. If still None and invite link, attempt join_chat
+        if chat is None and isinstance(chat_target, str) and (chat_target.startswith("+") or chat_target.startswith("joinchat/")):
+            try:
+                chat = await client.join_chat(chat_target)
+            except Exception:
+                try:
+                    chat = await client.get_chat(chat_target)
+                except Exception:
+                    pass
+
+        if chat is not None:
+            title = chat.title or getattr(chat, "first_name", None) or "Telegram Channel"
+            uname = getattr(chat, "username", None) or str(chat.id)
+            return {
+                "status": "success",
+                "id": chat.id,
+                "title": title,
+                "username": uname,
+                "type": str(getattr(chat, "type", "channel"))
+            }
+        else:
+            if isinstance(chat_target, int):
+                return {
+                    "status": "error",
+                    "error": f"Channel ID {chat_target} not found. Please ensure your Telegram account is a member of this channel."
+                }
+            else:
+                return {
+                    "status": "error",
+                    "error": f"Channel '{raw}' not found. Please check the username or link."
+                }
 
     try:
         res = run_async(_async_resolve(), timeout=30)
@@ -254,7 +329,12 @@ def sync_channel_media(api_id: int, api_hash: str, session_str: str, channel_id:
         try:
             await client.get_chat(chat_id)
         except Exception:
-            pass
+            try:
+                async for dialog in client.get_dialogs():
+                    if dialog.chat and (dialog.chat.id == chat_id or str(abs(dialog.chat.id)).endswith(str(abs(chat_id)))):
+                        break
+            except Exception:
+                pass
 
         items_map = {}
         split_groups = {}

@@ -487,7 +487,7 @@ class TelegramClientManager(private val context: Context) {
     fun getChannel(id: Long): ChannelInfo? = channels[id]
 
     suspend fun resolveAndAddChannel(identifier: String, isAnime: Boolean = false): Result<ChannelInfo> = withContext(Dispatchers.IO) {
-        val clean = identifier.trim().removePrefix("https://t.me/").removePrefix("t.me/")
+        val clean = identifier.trim()
         if (clean.isBlank()) {
             return@withContext Result.failure(IllegalArgumentException("Channel username, link, or ID cannot be empty"))
         }
