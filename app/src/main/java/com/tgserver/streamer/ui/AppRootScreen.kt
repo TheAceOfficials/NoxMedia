@@ -132,41 +132,42 @@ private fun EnhancedGlassBottomNav(
         modifier = Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(horizontal = 18.dp, vertical = 10.dp),
+            .padding(horizontal = 24.dp, bottom = 8.dp, top = 4.dp),
         contentAlignment = Alignment.Center
     ) {
-        // Floating Glassmorphism Capsule Bar
+        // Floating Liquid Glassmorphism Capsule Bar
         Box(
             modifier = Modifier
+                .widthIn(max = 480.dp)
                 .fillMaxWidth()
-                .height(64.dp)
+                .height(56.dp)
                 .shadow(
-                    elevation = 20.dp,
-                    shape = RoundedCornerShape(32.dp),
-                    spotColor = Color(0x4D0D2626),
-                    ambientColor = Color(0x66000000)
+                    elevation = 16.dp,
+                    shape = RoundedCornerShape(28.dp),
+                    spotColor = Color(0x33000000),
+                    ambientColor = Color(0x1F000000)
                 )
-                .clip(RoundedCornerShape(32.dp))
+                .clip(RoundedCornerShape(28.dp))
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            Color(0xEB1A1D28),
-                            Color(0xF50F1118)
+                            Color(0x38181D2A),
+                            Color(0x4D0E121B)
                         )
                     )
                 )
                 .border(
                     BorderStroke(
-                        1.dp,
+                        1.2.dp,
                         Brush.verticalGradient(
                             colors = listOf(
-                                Color(0x40FFFFFF),
-                                Color(0x18FFFFFF),
-                                Color(0x0DFFFFFF)
+                                Color(0x66FFFFFF),
+                                Color(0x24FFFFFF),
+                                Color(0x0EFFFFFF)
                             )
                         )
                     ),
-                    shape = RoundedCornerShape(32.dp)
+                    shape = RoundedCornerShape(28.dp)
                 )
                 .onSizeChanged { barWidthPx = it.width.toFloat() }
                 // Hold and drag/scrub across the bar to switch pages seamlessly
@@ -194,6 +195,22 @@ private fun EnhancedGlassBottomNav(
                     )
                 }
         ) {
+            // Liquid top sheen reflection
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(26.dp)
+                    .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0x22FFFFFF),
+                                Color(0x00FFFFFF)
+                            )
+                        )
+                    )
+            )
+
             Row(
                 modifier = Modifier
                     .fillMaxSize()
@@ -232,7 +249,7 @@ private fun EnhancedNavItem(
     modifier: Modifier = Modifier
 ) {
     val scale by animateFloatAsState(
-        targetValue = if (isSelected) 1.05f else 1.0f,
+        targetValue = if (isSelected) 1.10f else 1.0f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessMedium
@@ -240,34 +257,32 @@ private fun EnhancedNavItem(
         label = "nav_scale"
     )
 
-    val translateY by animateDpAsState(
-        targetValue = if (isSelected) (-2).dp else 0.dp,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMedium
-        ),
-        label = "nav_translate_y"
-    )
-
     Box(
         modifier = modifier
             .fillMaxHeight()
-            .clip(RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(22.dp))
             .then(
                 if (isSelected) {
                     Modifier
                         .background(
                             Brush.verticalGradient(
                                 colors = listOf(
-                                    Color(0x28FFFFFF),
-                                    Color(0x14FFFFFF)
+                                    Color(0x3DFFFFFF),
+                                    Color(0x1FFFFFFF)
                                 )
                             )
                         )
                         .border(
-                            1.dp,
-                            Color(0x2EFFFFFF),
-                            RoundedCornerShape(24.dp)
+                            BorderStroke(
+                                1.dp,
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color(0x66FFFFFF),
+                                        Color(0x26FFFFFF)
+                                    )
+                                )
+                            ),
+                            shape = RoundedCornerShape(22.dp)
                         )
                 } else Modifier
             )
@@ -279,26 +294,13 @@ private fun EnhancedNavItem(
             ),
         contentAlignment = Alignment.Center
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+        Icon(
+            imageVector = if (isSelected) item.selectedIcon else item.unselectedIcon,
+            contentDescription = item.label,
+            tint = if (isSelected) Color(0xFFFFFFFF) else Color(0x78FFFFFF),
             modifier = Modifier
+                .size(24.dp)
                 .scale(scale)
-                .offset(y = translateY)
-        ) {
-            Icon(
-                imageVector = if (isSelected) item.selectedIcon else item.unselectedIcon,
-                contentDescription = item.label,
-                tint = if (isSelected) Color(0xFFFFFFFF) else Color(0x80FFFFFF),
-                modifier = Modifier.size(20.dp)
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = item.label,
-                color = if (isSelected) Color(0xFFFFFFFF) else Color(0x80FFFFFF),
-                fontSize = 10.5.sp,
-                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
-            )
-        }
+        )
     }
 }
