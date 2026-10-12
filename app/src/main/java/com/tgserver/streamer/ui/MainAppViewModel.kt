@@ -15,11 +15,18 @@ import com.tgserver.streamer.data.model.MediaItem
 import com.tgserver.streamer.data.model.ServerConfig
 import com.tgserver.streamer.service.StreamerForegroundService
 import com.tgserver.streamer.telegram.TelegramClientManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.util.concurrent.TimeUnit
 
 enum class AppTab {
     HOME, CHANNELS, LIBRARY, SETTINGS
@@ -375,6 +382,56 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             apply()
         }
         _config.value = cfg
+    }
+
+    suspend fun verifyAndSaveMetadataKeys(tmdb: String, tvdb: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        val client = OkHttpClient.Builder()
+            .connectTimeout(7, TimeUnit.SECONDS)
+            .readTimeout(7, TimeUnit.SECONDS)
+            .build()
+
+        val cleanTmdb = tmdb.trim()
+        val cleanTvdb = tvdb.trim()
+
+        // 1. Verify TMDB API Key if provided
+        if (cleanTmdb.isNotEmpty()) {
+            try {
+                val req = Request.Builder()
+                    .url("https://api.themoviedb.org/3/authentication?api_key=$cleanTmdb")
+                    .get()
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) {
+                        return@withContext Pair(false, "Invalid TMDB API Key (HTTP ${resp.code})")
+                    }
+                }
+            } catch (e: Exception) {
+                return@withContext Pair(false, "TMDB check failed: ${e.localizedMessage ?: "Network error"}")
+            }
+        }
+
+        // 2. Verify TVDB API Key if provided
+        if (cleanTvdb.isNotEmpty()) {
+            try {
+                val jsonBody = """{"apikey":"$cleanTvdb"}"""
+                val body = jsonBody.toRequestBody("application/json".toMediaType())
+                val req = Request.Builder()
+                    .url("https://api4.thetvdb.com/v4/login")
+                    .post(body)
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) {
+                        return@withContext Pair(false, "Invalid TVDB API Key (HTTP ${resp.code})")
+                    }
+                }
+            } catch (e: Exception) {
+                return@withContext Pair(false, "TVDB check failed: ${e.localizedMessage ?: "Network error"}")
+            }
+        }
+
+        // Both verified or cleared
+        updateMetadataProviders(cleanTmdb, cleanTvdb)
+        return@withContext Pair(true, "✓ Metadata keys verified and saved!")
     }
 
     fun updateMetadataProviders(tmdb: String, tvdb: String) {

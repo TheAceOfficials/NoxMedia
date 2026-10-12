@@ -35,16 +35,19 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tgserver.streamer.theme.*
 import com.tgserver.streamer.ui.MainAppViewModel
 import com.tgserver.streamer.ui.components.*
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(viewModel: MainAppViewModel) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     val session by viewModel.session.collectAsState()
     val config by viewModel.config.collectAsState()
 
@@ -53,8 +56,16 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
     var tvdbKeyInput by remember(config.tvdbApiKey) { mutableStateOf(config.tvdbApiKey) }
     var posterUrlInput by remember(config.customPosterUrl) { mutableStateOf(config.customPosterUrl) }
     var portInput by remember(config.port) { mutableStateOf(config.port.toString()) }
+    var bufferMbInput by remember(config.bufferChunkSizeKb) {
+        mutableStateOf(
+            if (config.bufferChunkSizeKb <= 0) "1.0"
+            else {
+                val mbVal = config.bufferChunkSizeKb / 1024.0
+                if (mbVal % 1.0 == 0.0) "${mbVal.toInt()}" else String.format(java.util.Locale.US, "%.2f", mbVal).trimEnd('0').trimEnd('.')
+            }
+        )
+    }
     var remoteUrlInput by remember(config.remotePublicUrl) { mutableStateOf(config.remotePublicUrl) }
-    var selectedBufferKb by remember(config.bufferChunkSizeKb) { mutableIntStateOf(config.bufferChunkSizeKb) }
     var selectedQuality by remember(config.preferredQuality) { mutableStateOf(config.preferredQuality) }
     var hideCamTs by remember(config.hideCamTs) { mutableStateOf(config.hideCamTs) }
     var startOnBoot by remember(config.startOnBoot) { mutableStateOf(config.startOnBoot) }
@@ -63,6 +74,11 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
     var skipExactDuplicates by remember(config.skipExactDuplicates) { mutableStateOf(config.skipExactDuplicates) }
     var autoBackupEnabled by remember(config.autoBackupEnabled) { mutableStateOf(config.autoBackupEnabled) }
     var autoBackupHours by remember(config.autoBackupIntervalHours) { mutableIntStateOf(config.autoBackupIntervalHours) }
+
+    // Key verification state
+    var isVerifyingKeys by remember { mutableStateOf(false) }
+    var tmdbKeyError by remember { mutableStateOf<String?>(null) }
+    var tvdbKeyError by remember { mutableStateOf<String?>(null) }
 
     // Library scan state
     var duplicateScanCount by remember { mutableStateOf<Int?>(null) }
@@ -155,23 +171,13 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         }
 
                         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Text(
-                                    text = session.firstName.ifBlank { "Telegram User" },
-                                    color = TextPrimary,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1
-                                )
-                                NothingDotBadge(
-                                    text = if (session.isLoggedIn) "ACTIVE" else "OFFLINE",
-                                    dotColor = if (session.isLoggedIn) StatusGreen else StatusRed,
-                                    textColor = if (session.isLoggedIn) StatusGreen else StatusRed
-                                )
-                            }
+                            Text(
+                                text = session.firstName.ifBlank { "Telegram User" },
+                                color = TextPrimary,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1
+                            )
 
                             Text(
                                 text = if (session.username.isNotBlank()) "@${session.username}" else "Telegram Account",
@@ -210,58 +216,56 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
             ) {
                 NothingTextField(
                     value = tmdbKeyInput,
-                    onValueChange = { tmdbKeyInput = it },
+                    onValueChange = {
+                        tmdbKeyInput = it
+                        tmdbKeyError = null
+                    },
                     label = "TMDB API KEY (V3)",
                     badgeText = "MOVIES & SHOWS",
                     placeholder = "Paste your TMDB API Key...",
                     isMonospace = true,
-                    singleLine = true
+                    singleLine = true,
+                    isError = tmdbKeyError != null,
+                    errorMessage = tmdbKeyError
                 )
 
                 Spacer(modifier = Modifier.height(14.dp))
 
                 NothingTextField(
                     value = tvdbKeyInput,
-                    onValueChange = { tvdbKeyInput = it },
+                    onValueChange = {
+                        tvdbKeyInput = it
+                        tvdbKeyError = null
+                    },
                     label = "TVDB API KEY (V4)",
                     badgeText = "SERIES & ANIME",
                     placeholder = "Paste your TVDB API Key...",
                     isMonospace = true,
-                    singleLine = true
+                    singleLine = true,
+                    isError = tvdbKeyError != null,
+                    errorMessage = tvdbKeyError
                 )
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Interactive Cascade Pipeline Diagram Card
+                // Compact Minimal Cascade Fallback Engine Card
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(14.dp))
                         .background(SurfaceCardElevated.copy(alpha = 0.5f))
-                        .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp))
-                        .padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                        .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "CASCADE FALLBACK ENGINE",
-                            color = TextPrimary,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            letterSpacing = 0.8.sp
-                        )
-
-                        NothingDotBadge(
-                            text = "AUTO-SWAP",
-                            dotColor = StatusGreen,
-                            textColor = StatusGreen
-                        )
-                    }
+                    Text(
+                        text = "CASCADE FALLBACK ENGINE",
+                        color = TextPrimary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 0.8.sp
+                    )
 
                     FallbackPipelineRow(
                         category = "Movies",
@@ -278,21 +282,38 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         steps = listOf("Kitsu", "TVDB", "TMDB", "Cinemeta")
                     )
 
-                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "• If any provider hits rate limits or is missing a key, the engine seamlessly auto-switches to the next fallback.",
+                        text = "• Missing provider keys seamlessly fallback to next provider.",
                         color = TextTertiary,
                         fontSize = 10.5.sp,
-                        lineHeight = 15.sp
+                        lineHeight = 14.sp
                     )
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
                 NothingPillButton(
-                    text = "Save Provider Keys →",
+                    text = if (isVerifyingKeys) "Verifying API Keys..." else "Save & Verify Provider Keys →",
+                    isLoading = isVerifyingKeys,
                     onClick = {
-                        viewModel.updateMetadataProviders(tmdbKeyInput, tvdbKeyInput)
+                        coroutineScope.launch {
+                            isVerifyingKeys = true
+                            tmdbKeyError = null
+                            tvdbKeyError = null
+                            val (success, msg) = viewModel.verifyAndSaveMetadataKeys(tmdbKeyInput, tvdbKeyInput)
+                            isVerifyingKeys = false
+                            if (success) {
+                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                            } else {
+                                if (msg.contains("TMDB")) {
+                                    tmdbKeyError = msg
+                                } else if (msg.contains("TVDB")) {
+                                    tvdbKeyError = msg
+                                } else {
+                                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }
                     },
                     modifier = Modifier.fillMaxWidth(),
                     variant = NothingButtonVariant.Secondary,
@@ -420,10 +441,11 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Filters out low-quality theatre recordings (CAM, HDCAM, TS) from catalog.",
+                            text = "Filter low-quality theatre recordings (CAM, TS).",
                             color = TextTertiary,
                             fontSize = 11.sp,
-                            lineHeight = 15.sp
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
@@ -441,9 +463,9 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
             SettingsSectionCard(
                 icon = Icons.Default.Dns,
                 title = "SERVER & NETWORK",
-                description = "Configure local port, streaming buffer chunks, and remote tunnel URLs."
+                description = "Configure port, streaming buffer chunks, and remote access."
             ) {
-                // Aligned Local Port & Buffer Chunk side-by-side
+                // Aligned Local Port & Custom Buffer MB side-by-side
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -461,62 +483,21 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         )
                     }
 
-                    Column(modifier = Modifier.weight(1f)) {
-                        // Harmonized Label Row matching NothingTextField
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 4.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(5.dp)
-                                    .background(TextTertiary, CircleShape)
-                            )
-                            Text(
-                                text = "BUFFER CHUNK",
-                                color = TextSecondary,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                letterSpacing = 0.2.sp
-                            )
-                        }
-
-                        // Aligned segmented button row matching field height
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(56.dp)
-                                .clip(RoundedCornerShape(18.dp))
-                                .border(1.dp, BorderSubtle, RoundedCornerShape(18.dp))
-                                .background(SurfaceCardElevated)
-                                .padding(4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            listOf(512, 1024, 2048).forEach { kb ->
-                                val isSelected = selectedBufferKb == kb
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxHeight()
-                                        .clip(RoundedCornerShape(14.dp))
-                                        .background(if (isSelected) Color(0xFFFFFFFF) else Color.Transparent)
-                                        .clickable { selectedBufferKb = kb }
-                                ) {
-                                    Text(
-                                        text = if (kb >= 1024) "${kb / 1024}M" else "${kb}K",
-                                        color = if (isSelected) Color(0xFF070709) else TextSecondary,
-                                        fontSize = 12.sp,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        fontFamily = FontFamily.Monospace
-                                    )
+                    Box(modifier = Modifier.weight(1f)) {
+                        NothingTextField(
+                            value = bufferMbInput,
+                            onValueChange = { input ->
+                                if (input.isEmpty() || input.matches(Regex("""^\d*\.?\d*$"""))) {
+                                    bufferMbInput = input
                                 }
-                            }
-                        }
+                            },
+                            label = "BUFFER (MB)",
+                            badgeText = "CHUNK",
+                            placeholder = "1.0",
+                            isMonospace = true,
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                        )
                     }
                 }
 
@@ -534,9 +515,11 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
 
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "Paste Tailscale, Cloudflare Tunnel, or Ngrok public URL to stream Stremio away from home.",
+                    text = "Paste Tailscale, Cloudflare, or Ngrok public URL.",
                     color = TextTertiary,
-                    fontSize = 11.sp
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -558,9 +541,11 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Auto-wakes streaming engine when phone power is turned on.",
+                            text = "Auto-start streaming server when device boots.",
                             color = TextTertiary,
-                            fontSize = 11.sp
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
@@ -576,7 +561,9 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     text = "Save Server Settings →",
                     onClick = {
                         val parsedPort = portInput.toIntOrNull() ?: 7788
-                        viewModel.updateServerNetwork(parsedPort, selectedBufferKb, remoteUrlInput, startOnBoot)
+                        val parsedMb = bufferMbInput.toDoubleOrNull() ?: 1.0
+                        val bufferKb = (parsedMb * 1024).toInt().coerceAtLeast(64)
+                        viewModel.updateServerNetwork(parsedPort, bufferKb, remoteUrlInput, startOnBoot)
                     },
                     modifier = Modifier.fillMaxWidth(),
                     variant = NothingButtonVariant.Secondary,
@@ -617,11 +604,13 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         }
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = if (duplicateScanCount == null) "Scans for repeated media titles in your catalog."
+                            text = if (duplicateScanCount == null) "Scan library for duplicate media titles."
                             else if (duplicateScanCount == 0) "All media entries in catalog are unique."
                             else "$duplicateScanCount duplicate media entries detected in database.",
                             color = TextSecondary,
-                            fontSize = 11.sp
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
@@ -669,11 +658,13 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         }
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = if (deadFilesScanCount == null) "Checks if channel video messages were deleted."
+                            text = if (deadFilesScanCount == null) "Scan library for deleted channel videos."
                             else if (deadFilesScanCount == 0) "All indexed media files are online and valid."
                             else "$deadFilesScanCount inaccessible files detected.",
                             color = TextSecondary,
-                            fontSize = 11.sp
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
@@ -712,9 +703,11 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Instantly indexes new video messages posted to monitored channels.",
+                            text = "Auto-index new video messages in monitored channels.",
                             color = TextTertiary,
-                            fontSize = 11.sp
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
@@ -746,9 +739,11 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Replaces old copies when a newer file of identical resolution arrives.",
+                            text = "Replace older copies when identical resolution arrives.",
                             color = TextTertiary,
-                            fontSize = 11.sp
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
@@ -780,9 +775,11 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Skips re-indexing if exact file name, size, and hash already exist.",
+                            text = "Skip re-indexing if exact file hash and size exist.",
                             color = TextTertiary,
-                            fontSize = 11.sp
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
@@ -816,9 +813,11 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Periodically saves snapshots of your settings and channel catalog.",
+                            text = "Periodically save backup snapshots of server settings.",
                             color = TextTertiary,
-                            fontSize = 11.sp
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
@@ -1151,62 +1150,36 @@ private fun FallbackPipelineRow(
     category: String,
     steps: List<String>
 ) {
-    Column(
+    Row(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = category,
-                color = TextSecondary,
-                fontSize = 11.5.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                text = "${steps.size} Stages",
-                color = TextTertiary,
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace
-            )
-        }
+        Text(
+            text = category,
+            color = TextSecondary,
+            fontSize = 11.5.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.width(46.dp)
+        )
 
         Row(
-            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
         ) {
             steps.forEachIndexed { index, step ->
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(if (index == 0) SurfaceCardActive else SurfaceCardElevated)
-                        .border(
-                            0.5.dp,
-                            if (index == 0) BorderSilver else BorderSubtle,
-                            RoundedCornerShape(6.dp)
-                        )
-                        .padding(horizontal = 7.dp, vertical = 3.dp)
-                ) {
-                    Text(
-                        text = step,
-                        color = if (index == 0) TextPrimary else TextSecondary,
-                        fontSize = 10.sp,
-                        fontWeight = if (index == 0) FontWeight.Bold else FontWeight.Medium,
-                        fontFamily = FontFamily.Monospace,
-                        maxLines = 1
-                    )
-                }
-
+                Text(
+                    text = step,
+                    color = if (index == 0) TextPrimary else TextTertiary,
+                    fontSize = 11.sp,
+                    fontWeight = if (index == 0) FontWeight.SemiBold else FontWeight.Normal,
+                    fontFamily = FontFamily.Monospace
+                )
                 if (index < steps.size - 1) {
                     Text(
                         text = "→",
-                        color = TextTertiary,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
+                        color = Color(0xFF4A4A52),
+                        fontSize = 10.sp
                     )
                 }
             }
