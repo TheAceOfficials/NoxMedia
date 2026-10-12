@@ -132,7 +132,7 @@ private fun EnhancedGlassBottomNav(
         modifier = Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(horizontal = 24.dp, bottom = 8.dp, top = 4.dp),
+            .padding(start = 24.dp, end = 24.dp, top = 4.dp, bottom = 8.dp),
         contentAlignment = Alignment.Center
     ) {
         // Floating Liquid Glassmorphism Capsule Bar
