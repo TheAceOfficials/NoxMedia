@@ -109,6 +109,7 @@ fun ChannelsScreen(viewModel: MainAppViewModel) {
                     Spacer(modifier = Modifier.width(10.dp))
                     Box(
                         modifier = Modifier
+                            .height(32.dp)
                             .clip(RoundedCornerShape(10.dp))
                             .background(if (isScanningAll) Color(0xFF2E1C0A) else Color(0xFF1E1729))
                             .border(
@@ -120,7 +121,8 @@ fun ChannelsScreen(viewModel: MainAppViewModel) {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 viewModel.syncAllChannels()
                             }
-                            .padding(horizontal = 12.dp, vertical = 7.dp)
+                            .padding(horizontal = 12.dp),
+                        contentAlignment = Alignment.Center
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -130,28 +132,32 @@ fun ChannelsScreen(viewModel: MainAppViewModel) {
                                 CircularProgressIndicator(
                                     strokeWidth = 2.dp,
                                     color = Color(0xFFFBBF24),
-                                    modifier = Modifier.size(13.dp)
+                                    modifier = Modifier.size(12.dp)
                                 )
                                 Text(
                                     text = "SCANNING",
                                     color = Color(0xFFFBBF24),
                                     fontFamily = NdotFont,
                                     fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                             } else {
                                 Icon(
                                     imageVector = Icons.Default.Refresh,
                                     contentDescription = "Scan all",
                                     tint = Color(0xFFC084FC),
-                                    modifier = Modifier.size(13.dp)
+                                    modifier = Modifier.size(12.dp)
                                 )
                                 Text(
                                     text = "SCAN ALL",
                                     color = Color(0xFFC084FC),
                                     fontFamily = NdotFont,
                                     fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                             }
                         }
@@ -307,6 +313,7 @@ fun ChannelsScreen(viewModel: MainAppViewModel) {
                         // Connect Button
                         Box(
                             modifier = Modifier
+                                .height(32.dp)
                                 .clip(RoundedCornerShape(9.dp))
                                 .background(
                                     if (channelInput.isNotBlank() && !isAddingChannel)
@@ -323,7 +330,8 @@ fun ChannelsScreen(viewModel: MainAppViewModel) {
                                         }
                                     }
                                 }
-                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                                .padding(horizontal = 14.dp),
+                            contentAlignment = Alignment.Center
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -333,14 +341,16 @@ fun ChannelsScreen(viewModel: MainAppViewModel) {
                                     CircularProgressIndicator(
                                         strokeWidth = 2.dp,
                                         color = Color.White,
-                                        modifier = Modifier.size(14.dp)
+                                        modifier = Modifier.size(13.dp)
                                     )
                                     Text(
                                         text = "CONNECTING...",
                                         color = Color.White,
                                         fontFamily = NdotFont,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold
+                                        fontSize = 9.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
                                 } else {
                                     Text(
@@ -348,7 +358,9 @@ fun ChannelsScreen(viewModel: MainAppViewModel) {
                                         color = if (channelInput.isNotBlank()) Color.White else Color(0xFF7E7A8A),
                                         fontFamily = NdotFont,
                                         fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
                                 }
                             }
@@ -725,6 +737,9 @@ private fun ChannelItemCard(
             ) {
                 // Video Count and Scan Status Chips
                 Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -744,21 +759,26 @@ private fun ChannelItemCard(
                             color = if (channel.videoCount > 0) Color(0xFF34D399) else Color(0xFF94A3B8),
                             fontFamily = NdotFont,
                             fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
 
                     Text(
-                        text = channel.scanStatusText,
-                        color = Color(0xFF64748B),
+                        text = if (isScanning) "syncing..." else channel.scanStatusText,
+                        color = if (isScanning) Color(0xFFFBBF24) else Color(0xFF64748B),
                         fontFamily = FontFamily.Default,
-                        fontSize = 11.5.sp
+                        fontSize = 11.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
-                // SCAN BUTTON
+                // SCAN BUTTON (Crisp, Fixed Height, Single-Line)
                 Box(
                     modifier = Modifier
+                        .height(28.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(if (isScanning) Color(0xFF2E1C0A) else Color(0xFF1E1729))
                         .border(
@@ -767,7 +787,8 @@ private fun ChannelItemCard(
                             RoundedCornerShape(8.dp)
                         )
                         .clickable(enabled = !isScanning) { onScan() }
-                        .padding(horizontal = 11.dp, vertical = 5.dp)
+                        .padding(horizontal = 10.dp),
+                    contentAlignment = Alignment.Center
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -784,7 +805,9 @@ private fun ChannelItemCard(
                                 color = Color(0xFFFBBF24),
                                 fontFamily = NdotFont,
                                 fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         } else {
                             Icon(
@@ -798,7 +821,9 @@ private fun ChannelItemCard(
                                 color = Color(0xFFC084FC),
                                 fontFamily = NdotFont,
                                 fontSize = 9.5.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                     }

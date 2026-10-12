@@ -3,6 +3,7 @@ import json
 import threading
 import uuid
 import traceback
+import re
 from typing import List, Dict, Any, Optional, Tuple
 from pyrogram import Client, errors, raw
 from pyrogram.file_id import FileId, FileType
@@ -199,7 +200,7 @@ def resolve_channel(api_id: int, api_hash: str, session_str: str, identifier: st
     """
     async def _async_resolve():
         client = await _get_connected_stream_client(api_id, api_hash, session_str)
-        raw = identifier.strip()
+        raw = identifier.strip().strip("'\"")
 
         # 1. Private channel message link pattern: t.me/c/<channel_id>/...
         c_match = re.search(r"t\.me/c/(\d+)", raw)
@@ -228,7 +229,10 @@ def resolve_channel(api_id: int, api_hash: str, session_str: str, identifier: st
                 else:
                     chat_target = int(target)
             elif target.isdigit():
-                chat_target = int(f"-100{target}")
+                if target.startswith("100"):
+                    chat_target = int(f"-{target}")
+                else:
+                    chat_target = int(f"-100{target}")
             else:
                 if not target.startswith("@"):
                     target = f"@{target}"
@@ -261,7 +265,7 @@ def resolve_channel(api_id: int, api_hash: str, session_str: str, identifier: st
                     d_id = d_chat.id
                     d_bare = str(abs(d_id)).removeprefix("100")
 
-                    if d_id in target_id_variants or (isinstance(chat_target, int) and str(abs(chat_target)).endswith(d_bare)):
+                    if d_id in target_id_variants or (isinstance(chat_target, int) and (str(abs(chat_target)).endswith(d_bare) or d_bare.endswith(str(abs(chat_target))))):
                         chat = d_chat
                         break
 
@@ -272,7 +276,14 @@ def resolve_channel(api_id: int, api_hash: str, session_str: str, identifier: st
             except Exception:
                 pass
 
-        # 3. If still None and invite link, attempt join_chat
+        # 3. If direct matching didn't catch it, retry get_chat now that dialogs populated peer cache
+        if chat is None and isinstance(chat_target, int):
+            try:
+                chat = await client.get_chat(chat_target)
+            except Exception:
+                pass
+
+        # 4. If still None and invite link, attempt join_chat
         if chat is None and isinstance(chat_target, str) and (chat_target.startswith("+") or chat_target.startswith("joinchat/")):
             try:
                 chat = await client.join_chat(chat_target)

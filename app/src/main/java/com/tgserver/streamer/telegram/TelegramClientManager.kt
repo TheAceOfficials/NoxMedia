@@ -520,7 +520,14 @@ class TelegramClientManager(private val context: Context) {
             }
         }
 
-        val finalId = realId ?: (-1000000000000L - (clean.hashCode().toLong().let { if (it < 0) -it else it } % 1000000000L))
+        val parsedId = when {
+            clean.startsWith("-100") && clean.substring(4).all { it.isDigit() } -> clean.toLongOrNull()
+            clean.startsWith("-") && clean.substring(1).all { it.isDigit() } -> "-100${clean.substring(1).removePrefix("100")}".toLongOrNull()
+            clean.all { it.isDigit() } -> "-100${clean.removePrefix("100")}".toLongOrNull()
+            else -> null
+        }
+
+        val finalId = realId ?: parsedId ?: (-1000000000000L - (clean.hashCode().toLong().let { if (it < 0) -it else it } % 1000000000L))
         val finalTitle = realTitle ?: clean.removePrefix("@").replace("_", " ").split(" ")
             .joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }
         val finalUsername = realUsername ?: clean.removePrefix("@")
