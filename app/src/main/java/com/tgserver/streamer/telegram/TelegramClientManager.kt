@@ -704,8 +704,9 @@ class TelegramClientManager(private val context: Context) {
         val media = mediaIndex.values.find {
             (it.channelId == channelId && it.messageId == messageId) ||
             (it.channelId == channelId && it.isSplit && it.parts.any { p -> p.messageId == messageId })
-        }
+        } ?: mediaIndex.values.find { it.messageId == messageId }
 
+        val effectiveChannelId = media?.channelId ?: channelId
         val totalSize = media?.sizeBytes ?: 50_000_000L
         val effectiveEnd = if (endByte <= 0L || endByte >= totalSize) totalSize - 1 else endByte
         val contentLength = effectiveEnd - startByte + 1
@@ -743,7 +744,7 @@ class TelegramClientManager(private val context: Context) {
                     apiId,
                     apiHash,
                     sessionStr,
-                    channelId,
+                    effectiveChannelId,
                     partsJson,
                     startByte,
                     effectiveEnd

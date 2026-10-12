@@ -55,6 +55,7 @@ data class MediaItem(
     var overview: String? = null,
     var imdbId: String? = null,
     var tmdbId: Int? = null,
+    var kitsuId: Int? = null,
     val isSplit: Boolean = false,
     val parts: List<SplitPart> = emptyList()
 ) {

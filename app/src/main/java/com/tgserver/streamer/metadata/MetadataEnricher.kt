@@ -19,7 +19,8 @@ data class EnrichedMetadata(
     val backdropUrl: String? = null,
     val episodeTitle: String? = null,
     val imdbId: String? = null,
-    val tmdbId: Int? = null
+    val tmdbId: Int? = null,
+    val kitsuId: Int? = null
 )
 
 class MetadataEnricher {
@@ -88,16 +89,17 @@ class MetadataEnricher {
             }
         }
 
-        // 3. Cinemeta Fallback (Free, no key needed)
-        if (result == null || result.posterUrl.isNullOrBlank()) {
+        // 3. Cinemeta Fallback & IMDb ID Resolver (Free, no key needed)
+        // Stremio relies heavily on Cinemeta IMDb IDs (tt...). Always ensure we have IMDb ID if possible!
+        if (result == null || result.imdbId.isNullOrBlank()) {
             val cinemetaRes = tryCinemeta(queryTitle, item.type)
             if (cinemetaRes != null) {
                 result = if (result != null) {
                     result.copy(
+                        imdbId = cinemetaRes.imdbId ?: result.imdbId,
                         posterUrl = result.posterUrl ?: cinemetaRes.posterUrl,
                         backdropUrl = result.backdropUrl ?: cinemetaRes.backdropUrl,
-                        overview = result.overview ?: cinemetaRes.overview,
-                        imdbId = cinemetaRes.imdbId ?: result.imdbId,
+                        overview = if (result.overview.isNullOrBlank()) cinemetaRes.overview else result.overview,
                         year = result.year ?: cinemetaRes.year
                     )
                 } else {
@@ -121,6 +123,7 @@ class MetadataEnricher {
         if (!meta.episodeTitle.isNullOrBlank()) item.episodeTitle = meta.episodeTitle
         if (!meta.imdbId.isNullOrBlank()) item.imdbId = meta.imdbId
         if (meta.tmdbId != null && meta.tmdbId > 0) item.tmdbId = meta.tmdbId
+        if (meta.kitsuId != null && meta.kitsuId > 0) item.kitsuId = meta.kitsuId
     }
 
     // --- Kitsu API (Free, Anime Specialist) ---
@@ -138,6 +141,7 @@ class MetadataEnricher {
                 if (data.size() == 0) return null
 
                 val first = data[0].asJsonObject
+                val kitsuId = first.get("id")?.asString?.toIntOrNull()
                 val attr = first.getAsJsonObject("attributes") ?: return null
 
                 val canonicalTitle = attr.get("canonicalTitle")?.asString
@@ -156,7 +160,8 @@ class MetadataEnricher {
                     year = year,
                     overview = synopsis,
                     posterUrl = posterUrl,
-                    backdropUrl = backdropUrl
+                    backdropUrl = backdropUrl,
+                    kitsuId = kitsuId
                 )
             }
         } catch (e: Exception) {
@@ -242,6 +247,18 @@ class MetadataEnricher {
 
     // --- Cinemeta Free API (Stremio Official) ---
     private fun tryCinemeta(title: String, type: String): EnrichedMetadata? {
+        val direct = searchCinemetaInternal(title, type)
+        if (direct != null) return direct
+
+        val words = title.split(" ").filter { it.isNotBlank() }
+        if (words.size > 2) {
+            val shortened = words.take(3).joinToString(" ")
+            return searchCinemetaInternal(shortened, type)
+        }
+        return null
+    }
+
+    private fun searchCinemetaInternal(title: String, type: String): EnrichedMetadata? {
         try {
             val enc = URLEncoder.encode(title, "UTF-8")
             val cType = if (type == "movie") "movie" else "series"

@@ -73,16 +73,19 @@ class LocalHttpServer(
             return response
         }
 
+        val normUri = if (uri.startsWith("/stremio")) uri.removePrefix("/stremio") else uri
+
         val response = try {
             when {
-                // 1. Stremio Addon Endpoints
-                uri == "/manifest.json" -> handleManifest()
-                uri.startsWith("/catalog/") -> handleCatalog(uri)
-                uri.startsWith("/meta/") -> handleMeta(uri)
-                uri.startsWith("/stream/") && !uri.startsWith("/stream/video/") -> handleStreamDescriptor(uri)
+                // 1. Stremio Addon Endpoints (support both /manifest.json and /stremio/manifest.json)
+                normUri == "/manifest.json" || normUri == "" || normUri == "/" -> handleManifest()
+                normUri.startsWith("/catalog/") -> handleCatalog(normUri)
+                normUri.startsWith("/meta/") -> handleMeta(normUri)
+                normUri.startsWith("/stream/") && !normUri.startsWith("/stream/video/") -> handleStreamDescriptor(normUri)
 
                 // 2. HTTP 206 Partial Content Video Streaming Engine
-                uri.startsWith("/stream/video/") -> handleVideoStream(uri, headers)
+                normUri.startsWith("/stream/video/") -> handleVideoStream(session, normUri, headers)
+                uri.startsWith("/stream/video/") -> handleVideoStream(session, uri, headers)
 
                 // 3. Management REST APIs for Stitch UI
                 uri == "/api/status" -> handleGetStatus()
@@ -116,8 +119,9 @@ class LocalHttpServer(
 
     private fun addCorsHeaders(response: Response) {
         response.addHeader("Access-Control-Allow-Origin", "*")
-        response.addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+        response.addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, HEAD")
         response.addHeader("Access-Control-Allow-Headers", "*")
+        response.addHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges")
         response.addHeader("Access-Control-Max-Age", "86400")
     }
 
@@ -128,26 +132,68 @@ class LocalHttpServer(
             addProperty("id", "org.tgserver.streamer")
             addProperty("version", "1.0.0")
             addProperty("name", "TG-Server Streamer")
-            addProperty("description", "Direct Telegram channel video streamer with SpatialPosters & Kitsu/TMDB integration")
+            addProperty("description", "Direct Telegram video streamer with Stremio & Kitsu/TMDB integration")
             addProperty("logo", "https://lh3.googleusercontent.com/aida/AEtjO1XxF5nLod1dKj8IrkfY2sKq1asKsR74gub1jDyICCeoafQ6Dh5N6bGXc8PAqlJkXYlWXajcnx4pVNnZX2pM9Ra923Ml5jb0jvAdarsZqKIj-yYVPDpCufiBbr8kb-kHeO3ymMD4-VoMVeVlJYOx8J0b4lEJpK2yAgUA8edYgOHhCTWrPUrSYWP6ec9qa80nJgzFgxMxgeIMqJ4lOX40yq670kg84dITxJghMvwrPMzL_NtP5hBpi82AQyAN")
-            add("types", gson.toJsonTree(listOf("movie", "series")))
+            add("types", gson.toJsonTree(listOf("movie", "series", "anime")))
             add("catalogs", gson.toJsonTree(listOf(
-                mapOf("type" to "movie", "id" to "tg_movies", "name" to "Telegram Movies"),
-                mapOf("type" to "series", "id" to "tg_series", "name" to "Telegram Series")
+                mapOf(
+                    "type" to "movie",
+                    "id" to "tg_movies",
+                    "name" to "Telegram Movies",
+                    "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
+                    "extraSupported" to listOf("search", "skip")
+                ),
+                mapOf(
+                    "type" to "series",
+                    "id" to "tg_series",
+                    "name" to "Telegram Series",
+                    "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
+                    "extraSupported" to listOf("search", "skip")
+                ),
+                mapOf(
+                    "type" to "series",
+                    "id" to "tg_anime",
+                    "name" to "Telegram Anime",
+                    "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
+                    "extraSupported" to listOf("search", "skip")
+                )
             )))
-            add("resources", gson.toJsonTree(listOf("catalog", "stream", "meta")))
+            add("resources", gson.toJsonTree(listOf("catalog", "meta", "stream")))
+            add("idPrefixes", gson.toJsonTree(listOf("tg_", "tt", "kitsu")))
         }
         return newFixedLengthResponse(Response.Status.OK, "application/json", gson.toJson(manifest))
     }
 
     private fun handleCatalog(uri: String): Response {
         val isSeries = uri.contains("/series/")
-        val mediaList = tgClient.getAllMedia().filter {
-            if (isSeries) it.type == "series" else it.type == "movie"
+        val isAnime = uri.contains("tg_anime")
+        val searchQuery = if (uri.contains("search=")) {
+            try {
+                java.net.URLDecoder.decode(uri.substringAfter("search=").substringBefore(".json").substringBefore("&"), "UTF-8")
+            } catch (_: Exception) { "" }
+        } else ""
+
+        var mediaList = tgClient.getAllMedia().filter { item ->
+            val isItemSeries = item.type == "series" || item.type == "anime" || (item.season != null && item.episode != null)
+            if (isAnime) {
+                item.type == "anime" || item.title.contains("dragon ball", ignoreCase = true)
+            } else if (isSeries) {
+                isItemSeries
+            } else {
+                !isItemSeries
+            }
+        }
+
+        if (searchQuery.isNotBlank()) {
+            mediaList = mediaList.filter {
+                it.title.contains(searchQuery, ignoreCase = true) ||
+                it.fileName.contains(searchQuery, ignoreCase = true) ||
+                (it.episodeTitle?.contains(searchQuery, ignoreCase = true) == true)
+            }
         }
 
         // For series, group by title so multiple episodes show as a single series card
-        val distinctShows = if (isSeries) {
+        val distinctShows = if (isSeries || isAnime) {
             mediaList.distinctBy { it.title.lowercase().trim() }
         } else {
             mediaList
@@ -159,12 +205,12 @@ class LocalHttpServer(
                 config.customPosterUrl,
                 config.customPosterApiKey
             )
-            item.posterUrl = poster
-
             val desc = item.overview ?: "${item.qualityBadge} • ${item.formattedSize}"
+            val stremioType = if (isSeries || isAnime) "series" else "movie"
+            val metaId = if (!item.imdbId.isNullOrBlank()) item.imdbId else item.id
             mapOf(
-                "id" to item.id,
-                "type" to item.type,
+                "id" to metaId,
+                "type" to stremioType,
                 "name" to item.title,
                 "poster" to (poster ?: "https://images.metahub.space/poster/medium/placeholder/img"),
                 "releaseInfo" to (item.year ?: "2024"),
@@ -179,7 +225,14 @@ class LocalHttpServer(
     private fun handleMeta(uri: String): Response {
         val parts = uri.removeSuffix(".json").split("/")
         val id = parts.lastOrNull() ?: ""
-        val item = tgClient.getMediaById(id)
+        val cleanId = id.split(":").firstOrNull() ?: id
+
+        val item = tgClient.getMediaById(cleanId)
+            ?: tgClient.getAllMedia().find {
+                it.id == cleanId ||
+                (!it.imdbId.isNullOrBlank() && it.imdbId.equals(cleanId, ignoreCase = true)) ||
+                (it.tmdbId != null && it.tmdbId.toString() == cleanId)
+            }
 
         if (item == null) {
             return newFixedLengthResponse(Response.Status.NOT_FOUND, "application/json", "{\"meta\":null}")
@@ -191,16 +244,24 @@ class LocalHttpServer(
             config.customPosterApiKey
         )
 
-        // For series, build the videos array so Stremio displays seasons & episodes
-        val videosList = if (item.type == "series") {
-            val episodes = tgClient.getAllMedia().filter {
-                it.type == "series" && (it.title.equals(item.title, ignoreCase = true) || it.id == item.id)
-            }
+        val isSeries = item.type == "series" || item.type == "anime" || (item.season != null && item.episode != null)
+
+        val videosList = if (isSeries) {
+            val episodes = tgClient.getAllMedia().filter { ep ->
+                val epIsSeries = ep.type == "series" || ep.type == "anime" || (ep.season != null && ep.episode != null)
+                epIsSeries && (
+                    ep.title.equals(item.title, ignoreCase = true) ||
+                    ep.id == item.id ||
+                    (!ep.imdbId.isNullOrBlank() && ep.imdbId == item.imdbId)
+                )
+            }.sortedWith(compareBy({ it.season ?: 1 }, { it.episode ?: 1 }))
+
             episodes.map { ep ->
                 val s = ep.season ?: 1
                 val e = ep.episode ?: 1
+                val epId = if (!ep.imdbId.isNullOrBlank()) "${ep.imdbId}:$s:$e" else "${cleanId}:$s:$e"
                 mapOf(
-                    "id" to "${ep.id}:$s:$e",
+                    "id" to epId,
                     "title" to (ep.episodeTitle ?: "Episode $e"),
                     "season" to s,
                     "episode" to e,
@@ -210,8 +271,8 @@ class LocalHttpServer(
         } else null
 
         val metaObj = mutableMapOf<String, Any?>(
-            "id" to item.id,
-            "type" to item.type,
+            "id" to cleanId,
+            "type" to (if (isSeries) "series" else "movie"),
             "name" to item.title,
             "year" to (item.year ?: "2024"),
             "poster" to (poster ?: "https://images.metahub.space/poster/medium/placeholder/img"),
@@ -231,40 +292,105 @@ class LocalHttpServer(
         val parts = uri.removeSuffix(".json").split("/")
         val rawId = parts.lastOrNull() ?: ""
 
-        // Handle composite IDs like "tg_channelId_msgId:1:1"
-        val baseId = rawId.split(":").firstOrNull() ?: rawId
-        val item = tgClient.getMediaById(baseId)
-            ?: tgClient.getAllMedia().find { it.id == baseId || it.id == rawId }
+        val isKitsu = rawId.startsWith("kitsu:", ignoreCase = true)
+        val idParts = rawId.split(":")
 
-        if (item == null) {
+        val kitsuId: Int?
+        val imdbId: String?
+        val targetSeason: Int?
+        val targetEpisode: Int?
+
+        if (isKitsu) {
+            imdbId = null
+            kitsuId = idParts.getOrNull(1)?.toIntOrNull()
+            if (idParts.size == 3) {
+                targetSeason = 1
+                targetEpisode = idParts.getOrNull(2)?.toIntOrNull()
+            } else if (idParts.size >= 4) {
+                targetSeason = idParts.getOrNull(2)?.toIntOrNull()
+                targetEpisode = idParts.getOrNull(3)?.toIntOrNull()
+            } else {
+                targetSeason = null
+                targetEpisode = null
+            }
+        } else {
+            kitsuId = null
+            imdbId = idParts.getOrNull(0) ?: rawId
+            targetSeason = idParts.getOrNull(1)?.toIntOrNull()
+            targetEpisode = idParts.getOrNull(2)?.toIntOrNull()
+        }
+
+        val allMedia = tgClient.getAllMedia()
+
+        val matchedItems = allMedia.filter { item ->
+            when {
+                // Exact item ID match
+                item.id == rawId || item.id == (imdbId ?: "") -> true
+
+                // Kitsu match
+                isKitsu && kitsuId != null -> {
+                    (item.kitsuId == kitsuId && (targetEpisode == null || item.episode == targetEpisode)) ||
+                    (item.title.contains("dragon ball", ignoreCase = true) && (targetEpisode == null || item.episode == targetEpisode))
+                }
+
+                // IMDb ID match (e.g. tt39395275:1:1 or tt4644488:1:1)
+                !item.imdbId.isNullOrBlank() && !imdbId.isNullOrBlank() && item.imdbId.equals(imdbId, ignoreCase = true) -> {
+                    if (targetSeason != null && targetEpisode != null) {
+                        (item.season == targetSeason && item.episode == targetEpisode) ||
+                        (item.season == null && item.episode == targetEpisode)
+                    } else if (targetEpisode != null) {
+                        item.episode == targetEpisode
+                    } else true
+                }
+
+                // TMDB ID match
+                item.tmdbId != null && imdbId != null && item.tmdbId.toString() == imdbId -> {
+                    if (targetSeason != null && targetEpisode != null) {
+                        (item.season == targetSeason && item.episode == targetEpisode) ||
+                        (item.season == null && item.episode == targetEpisode)
+                    } else if (targetEpisode != null) {
+                        item.episode == targetEpisode
+                    } else true
+                }
+
+                // Fallback: title match
+                !imdbId.isNullOrBlank() && (rawId.contains(item.title, ignoreCase = true) || item.title.contains("dragon ball", ignoreCase = true)) -> {
+                    if (targetEpisode != null) item.episode == targetEpisode else true
+                }
+                else -> false
+            }
+        }
+
+        if (matchedItems.isEmpty()) {
             return newFixedLengthResponse(Response.Status.OK, "application/json", "{\"streams\":[]}")
         }
 
         val localIp = getLocalIpAddress()
-        val rawFileName = if (item.fileName.isNotBlank()) item.fileName else "${item.title}.mkv"
-        val safeFileName = try {
-            java.net.URLEncoder.encode(rawFileName, "UTF-8").replace("+", "%20")
-        } catch (_: Exception) {
-            "video.mkv"
+        val streams = matchedItems.map { item ->
+            val rawFileName = if (item.fileName.isNotBlank()) item.fileName else "${item.title}.mkv"
+            val safeFileName = try {
+                java.net.URLEncoder.encode(rawFileName, "UTF-8").replace("+", "%20")
+            } catch (_: Exception) {
+                "video.mkv"
+            }
+            val streamUrl = "http://$localIp:${config.port}/stream/video/${item.channelId}/${item.messageId}/$safeFileName"
+            val epInfo = if (item.season != null && item.episode != null) "S%02dE%02d • ".format(item.season, item.episode) else ""
+            val epTitle = if (!item.episodeTitle.isNullOrBlank()) "${item.episodeTitle}\n" else ""
+
+            mapOf(
+                "name" to "TG-Server [${item.quality}]",
+                "title" to "📁 $rawFileName\n$epTitle$epInfo💾 ${item.formattedSize}",
+                "url" to streamUrl
+            )
         }
-        val streamUrl = "http://$localIp:${config.port}/stream/video/${item.channelId}/${item.messageId}/$safeFileName"
 
-        val epText = if (item.season != null && item.episode != null) "S${String.format("%02d", item.season)}E${String.format("%02d", item.episode)} • " else ""
-        val epTitleText = if (!item.episodeTitle.isNullOrBlank()) "${item.episodeTitle}\n" else ""
-
-        val stream = mapOf(
-            "name" to "TG-Server (${item.quality})",
-            "title" to "${item.title}\n$epTitleText$epText[${item.qualityBadge} • ${item.formattedSize}]",
-            "url" to streamUrl
-        )
-
-        val res = mapOf("streams" to listOf(stream))
+        val res = mapOf("streams" to streams)
         return newFixedLengthResponse(Response.Status.OK, "application/json", gson.toJson(res))
     }
 
     // --- Video Streaming Engine (HTTP 206 Partial Content) ---
 
-    private fun handleVideoStream(uri: String, headers: Map<String, String>): Response {
+    private fun handleVideoStream(session: IHTTPSession, uri: String, headers: Map<String, String>): Response {
         val parts = uri.split("/")
         // uri format: /stream/video/<channelId>/<messageId> or /stream/video/<channelId>/<messageId>/<filename>
         if (parts.size < 5) {
@@ -273,8 +399,33 @@ class LocalHttpServer(
 
         val channelId = parts[3].toLongOrNull() ?: 0L
         val messageId = parts[4].toIntOrNull() ?: 0
+        val fileName = if (parts.size >= 6) {
+            try { java.net.URLDecoder.decode(parts[5], "UTF-8") } catch (_: Exception) { parts[5] }
+        } else "video.mp4"
 
-        val rangeHeader = headers["range"]
+        val media = tgClient.getAllMedia().find {
+            (it.channelId == channelId && it.messageId == messageId) ||
+            (it.channelId == channelId && it.isSplit && it.parts.any { p -> p.messageId == messageId }) ||
+            (it.messageId == messageId)
+        }
+
+        val totalSize = media?.sizeBytes ?: 50_000_000L
+        val mime = if (fileName.contains(".mkv", ignoreCase = true) || uri.contains(".mkv", ignoreCase = true)) {
+            "video/x-matroska"
+        } else {
+            media?.mimeType ?: "video/mp4"
+        }
+
+        // Handle HEAD requests immediately without starting Pyrogram stream
+        if (session.method == Method.HEAD) {
+            val response = newFixedLengthResponse(Response.Status.OK, mime, "")
+            response.addHeader("Accept-Ranges", "bytes")
+            response.addHeader("Content-Range", "bytes 0-${totalSize - 1}/$totalSize")
+            response.addHeader("Content-Disposition", "inline; filename=\"$fileName\"")
+            return response
+        }
+
+        val rangeHeader = headers["range"] ?: headers["Range"]
         var startByte = 0L
         var endByte = -1L
 
@@ -290,7 +441,6 @@ class LocalHttpServer(
         }
 
         val chunk = tgClient.getStreamSource(channelId, messageId, startByte, endByte)
-        val mime = if (uri.contains(".mkv", ignoreCase = true)) "video/x-matroska" else chunk.mimeType
 
         val response = if (rangeHeader != null) {
             newFixedLengthResponse(
@@ -311,8 +461,7 @@ class LocalHttpServer(
         }
 
         response.addHeader("Accept-Ranges", "bytes")
-        response.addHeader("Content-Length", chunk.contentLength.toString())
-        response.addHeader("Content-Disposition", "inline")
+        response.addHeader("Content-Disposition", "inline; filename=\"$fileName\"")
         return response
     }
 

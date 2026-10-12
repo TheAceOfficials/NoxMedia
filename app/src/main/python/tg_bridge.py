@@ -1,8 +1,12 @@
 import asyncio
 import json
+import threading
 import uuid
-from typing import List, Dict, Any, Optional
-from pyrogram import Client, errors
+import traceback
+from typing import List, Dict, Any, Optional, Tuple
+from pyrogram import Client, errors, raw
+from pyrogram.file_id import FileId, FileType
+from pyrogram.session import Session, Auth
 import media_parser
 
 # Global persistent client instances
@@ -15,19 +19,32 @@ _auth_state = {
     "phone_code_hash": ""
 }
 
-# Active streaming sessions
+# Active streaming sessions and cache
 _active_streams: Dict[str, "VirtualStreamSession"] = {}
+_file_id_cache: Dict[Tuple[int, int], FileId] = {}
+_media_session_lock = asyncio.Lock()
 
-def _get_or_create_loop():
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_closed():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    return loop
+# Dedicated persistent asyncio event loop on a background daemon thread
+_main_loop = None
+_main_thread = None
+_loop_lock = threading.Lock()
+
+def _ensure_event_loop():
+    global _main_loop, _main_thread
+    with _loop_lock:
+        if _main_loop is None or not _main_loop.is_running():
+            _main_loop = asyncio.new_event_loop()
+            def _loop_runner(l):
+                asyncio.set_event_loop(l)
+                l.run_forever()
+            _main_thread = threading.Thread(target=_loop_runner, args=(_main_loop,), daemon=True, name="PyrogramMainLoop")
+            _main_thread.start()
+    return _main_loop
+
+def run_async(coro, timeout=30):
+    loop = _ensure_event_loop()
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    return future.result(timeout=timeout)
 
 # --- Authentication Bridge ---
 
@@ -38,8 +55,6 @@ def send_code(api_id: int, api_hash: str, phone_number: str) -> str:
     _auth_state["api_id"] = int(api_id)
     _auth_state["api_hash"] = api_hash.strip()
     _auth_state["phone"] = clean_phone
-    
-    loop = _get_or_create_loop()
     
     async def _async_send():
         global _auth_client
@@ -65,7 +80,7 @@ def send_code(api_id: int, api_hash: str, phone_number: str) -> str:
         }
 
     try:
-        res = loop.run_until_complete(_async_send())
+        res = run_async(_async_send(), timeout=30)
         return json.dumps(res)
     except errors.FloodWait as e:
         return json.dumps({"status": "error", "error": f"Too many attempts. Please wait {e.value} seconds."})
@@ -78,7 +93,6 @@ def send_code(api_id: int, api_hash: str, phone_number: str) -> str:
 
 def verify_code(code: str) -> str:
     global _auth_client, _auth_state
-    loop = _get_or_create_loop()
     
     async def _async_verify():
         global _auth_client
@@ -103,7 +117,7 @@ def verify_code(code: str) -> str:
         }
 
     try:
-        res = loop.run_until_complete(_async_verify())
+        res = run_async(_async_verify(), timeout=30)
         return json.dumps(res)
     except errors.SessionPasswordNeeded:
         return json.dumps({"status": "2fa_required", "message": "2-Step verification password required"})
@@ -116,7 +130,6 @@ def verify_code(code: str) -> str:
 
 def check_password(password: str) -> str:
     global _auth_client
-    loop = _get_or_create_loop()
     
     async def _async_check_pwd():
         global _auth_client
@@ -135,7 +148,7 @@ def check_password(password: str) -> str:
         }
 
     try:
-        res = loop.run_until_complete(_async_check_pwd())
+        res = run_async(_async_check_pwd(), timeout=30)
         return json.dumps(res)
     except errors.PasswordHashInvalid:
         return json.dumps({"status": "error", "error": "Incorrect 2FA password."})
@@ -163,6 +176,14 @@ async def _get_connected_stream_client(api_id: int, api_hash: str, session_str: 
         in_memory=True
     )
     await _stream_client.start()
+
+    # Pre-cache user's dialogs into Pyrogram's memory so all channel access hashes are known
+    try:
+        async for _ in _stream_client.get_dialogs(limit=100):
+            pass
+    except Exception as e:
+        print(f"Pre-caching dialogs notice: {e}")
+
     return _stream_client
 
 def parse_media(filename: str, caption: str = "") -> str:
@@ -176,8 +197,6 @@ def resolve_channel(api_id: int, api_hash: str, session_str: str, identifier: st
     Accepts @username, t.me link, -100... ID, or bare numeric ID.
     Returns JSON with channel title, real ID, username, or error.
     """
-    loop = _get_or_create_loop()
-
     async def _async_resolve():
         client = await _get_connected_stream_client(api_id, api_hash, session_str)
         target = identifier.strip()
@@ -211,7 +230,7 @@ def resolve_channel(api_id: int, api_hash: str, session_str: str, identifier: st
         }
 
     try:
-        res = loop.run_until_complete(_async_resolve())
+        res = run_async(_async_resolve(), timeout=30)
         return json.dumps(res)
     except errors.UsernameNotOccupied:
         return json.dumps({"status": "error", "error": "Channel not found. Check username or link."})
@@ -227,14 +246,18 @@ def sync_channel_media(api_id: int, api_hash: str, session_str: str, channel_id:
     Scans recent messages from channel, extracts video and document media,
     parses filenames, groups split files into virtual items, and returns JSON.
     """
-    loop = _get_or_create_loop()
-
     async def _async_sync():
         client = await _get_connected_stream_client(api_id, api_hash, session_str)
         chat_id = int(channel_id)
         
-        items_map = {} # clean_base_name or id -> item
-        split_groups = {} # clean_base_name -> list of parts
+        # Ensure channel peer is known
+        try:
+            await client.get_chat(chat_id)
+        except Exception:
+            pass
+
+        items_map = {}
+        split_groups = {}
 
         video_exts = (".mkv", ".mp4", ".avi", ".ts", ".m4v", ".mov", ".webm")
         
@@ -242,6 +265,11 @@ def sync_channel_media(api_id: int, api_hash: str, session_str: str, channel_id:
             media = msg.video or msg.document or msg.animation
             if not media:
                 continue
+
+            try:
+                _file_id_cache[(chat_id, msg.id)] = FileId.decode(media.file_id)
+            except Exception:
+                pass
 
             file_name = getattr(media, "file_name", None) or f"video_{msg.id}.mp4"
             file_size = getattr(media, "file_size", 0)
@@ -337,12 +365,111 @@ def sync_channel_media(api_id: int, api_hash: str, session_str: str, channel_id:
         return list(items_map.values())
 
     try:
-        res = loop.run_until_complete(_async_sync())
+        res = run_async(_async_sync(), timeout=60)
         return json.dumps({"status": "success", "media": res})
     except Exception as e:
+        traceback.print_exc()
         return json.dumps({"status": "error", "error": str(e)})
 
 # --- Byte Streaming Across Single / Split Parts ---
+
+async def _get_media_session(client: Client, dc_id: int) -> Session:
+    if not hasattr(client, "media_sessions"):
+        client.media_sessions = {}
+
+    session = client.media_sessions.get(dc_id)
+    if session:
+        return session
+
+    async with _media_session_lock:
+        session = client.media_sessions.get(dc_id)
+        if session:
+            return session
+
+        test_mode = await client.storage.test_mode()
+        current_dc = await client.storage.dc_id()
+
+        if dc_id != current_dc:
+            auth_key = await Auth(client, dc_id, test_mode).create()
+        else:
+            auth_key = await client.storage.auth_key()
+
+        session = Session(client, dc_id, auth_key, test_mode, is_media=True)
+        session.no_updates = True
+        session.timeout = 30
+        session.sleep_threshold = 60
+
+        await session.start()
+
+        if dc_id != current_dc:
+            for _ in range(6):
+                try:
+                    exported = await client.invoke(raw.functions.auth.ExportAuthorization(dc_id=dc_id))
+                    await session.send(raw.functions.auth.ImportAuthorization(id=exported.id, bytes=exported.bytes))
+                    break
+                except errors.AuthBytesInvalid:
+                    await asyncio.sleep(0.5)
+                except OSError:
+                    await asyncio.sleep(1)
+                except Exception:
+                    break
+
+        client.media_sessions[dc_id] = session
+        return session
+
+def _get_location_from_file_id(file_id_obj: FileId):
+    if file_id_obj.file_type == FileType.PHOTO:
+        return raw.types.InputPhotoFileLocation(
+            id=file_id_obj.media_id,
+            access_hash=file_id_obj.access_hash,
+            file_reference=file_id_obj.file_reference,
+            thumb_size=file_id_obj.thumbnail_size
+        )
+    return raw.types.InputDocumentFileLocation(
+        id=file_id_obj.media_id,
+        access_hash=file_id_obj.access_hash,
+        file_reference=file_id_obj.file_reference,
+        thumb_size=file_id_obj.thumbnail_size
+    )
+
+async def _resolve_file_id(client: Client, chat_id: int, msg_id: int) -> Optional[FileId]:
+    key = (chat_id, msg_id)
+    cached = _file_id_cache.get(key)
+    if cached:
+        return cached
+
+    msg = None
+    try:
+        try:
+            await client.get_chat(chat_id)
+        except Exception:
+            pass
+        msg = await client.get_messages(chat_id, msg_id)
+    except errors.PeerIdInvalid:
+        try:
+            async for _ in client.get_dialogs(limit=100):
+                pass
+            msg = await client.get_messages(chat_id, msg_id)
+        except Exception as e:
+            print(f"Error fetching message after get_dialogs for {chat_id}:{msg_id}: {e}")
+            return None
+    except Exception as e:
+        print(f"Error fetching message for {chat_id}:{msg_id}: {e}")
+        return None
+
+    if not msg:
+        return None
+    media = msg.video or msg.document or msg.animation or msg.audio
+    if not media:
+        return None
+
+    try:
+        file_id_obj = FileId.decode(media.file_id)
+        _file_id_cache[key] = file_id_obj
+        return file_id_obj
+    except Exception as e:
+        print(f"Error decoding file_id for {chat_id}:{msg_id}: {e}")
+        return None
 
 class VirtualStreamSession:
     def __init__(self, client: Client, chat_id: int, parts: List[Dict[str, Any]], start_byte: int, end_byte: int):
@@ -374,37 +501,67 @@ class VirtualStreamSession:
             local_start = max(pos, cum_start) - cum_start
             local_end = min(end, cum_end) - cum_start
 
-            offset_chunk = local_start // CHUNK_SIZE
-            first_cut = local_start % CHUNK_SIZE
-            part_bytes_needed = local_end - local_start + 1
-
             msg_id = p.get("messageId") or p.get("message_id")
-            msg = await self.client.get_messages(self.chat_id, msg_id)
-            if not msg:
+            file_id_obj = await _resolve_file_id(self.client, self.chat_id, msg_id)
+            if not file_id_obj:
+                print(f"[VirtualStreamSession] Could not resolve file_id for {self.chat_id}:{msg_id}")
                 continue
 
-            media = msg.video or msg.document or msg.animation
-            if not media:
-                continue
+            dc_id = file_id_obj.dc_id
+            session = await _get_media_session(self.client, dc_id)
+            location = _get_location_from_file_id(file_id_obj)
 
-            total_chunks = ((local_end // CHUNK_SIZE) - offset_chunk) + 1
-            remaining_in_part = part_bytes_needed
+            curr_pos = local_start
+            while curr_pos <= local_end:
+                fetch_off = curr_pos - (curr_pos % CHUNK_SIZE)
+                cut = curr_pos - fetch_off
+                bytes_left_in_part = local_end - curr_pos + 1
+                fetch_limit = CHUNK_SIZE
 
-            async for raw_chunk in self.client.stream_media(msg, offset=offset_chunk, limit=total_chunks):
-                if first_cut > 0:
-                    raw_chunk = raw_chunk[first_cut:]
-                    first_cut = 0
+                try:
+                    r = await session.send(
+                        raw.functions.upload.GetFile(
+                            location=location,
+                            offset=fetch_off,
+                            limit=fetch_limit
+                        )
+                    )
+                    raw_chunk = getattr(r, "bytes", b"") if r else b""
+                except Exception as e:
+                    err_str = str(e)
+                    if "FILE_REFERENCE" in err_str or "file_reference" in err_str.lower():
+                        _file_id_cache.pop((self.chat_id, msg_id), None)
+                        refreshed = await _resolve_file_id(self.client, self.chat_id, msg_id)
+                        if refreshed:
+                            file_id_obj = refreshed
+                            location = _get_location_from_file_id(file_id_obj)
+                            r = await session.send(
+                                raw.functions.upload.GetFile(
+                                    location=location,
+                                    offset=fetch_off,
+                                    limit=fetch_limit
+                                )
+                            )
+                            raw_chunk = getattr(r, "bytes", b"") if r else b""
+                        else:
+                            break
+                    else:
+                        print(f"[VirtualStreamSession] GetFile error at offset {fetch_off}: {e}")
+                        break
 
-                if len(raw_chunk) > remaining_in_part:
-                    raw_chunk = raw_chunk[:remaining_in_part]
+                if not raw_chunk:
+                    break
+
+                if cut > 0:
+                    raw_chunk = raw_chunk[cut:]
+
+                if len(raw_chunk) > bytes_left_in_part:
+                    raw_chunk = raw_chunk[:bytes_left_in_part]
 
                 if raw_chunk:
                     yield raw_chunk
-                    remaining_in_part -= len(raw_chunk)
+                    curr_pos += len(raw_chunk)
                     pos += len(raw_chunk)
-
-                if remaining_in_part <= 0:
-                    break
 
     async def read_bytes(self, max_bytes: int) -> bytes:
         while len(self.buffer) < max_bytes:
@@ -412,6 +569,9 @@ class VirtualStreamSession:
                 chunk = await self.gen.__anext__()
                 self.buffer.extend(chunk)
             except StopAsyncIteration:
+                break
+            except Exception as e:
+                print(f"[VirtualStreamSession] read_bytes iteration error -> {e}")
                 break
 
         result = bytes(self.buffer[:max_bytes])
@@ -424,7 +584,6 @@ def create_stream(api_id: int, api_hash: str, session_str: str, chat_id: int, pa
     Initializes a virtual byte stream and returns a unique stream_id.
     """
     global _active_streams
-    loop = _get_or_create_loop()
 
     async def _async_create():
         client = await _get_connected_stream_client(api_id, api_hash, session_str)
@@ -435,12 +594,13 @@ def create_stream(api_id: int, api_hash: str, session_str: str, chat_id: int, pa
         return stream_id
 
     try:
-        return loop.run_until_complete(_async_create())
+        return run_async(_async_create(), timeout=20)
     except Exception as e:
         print(f"Error creating stream: {e}")
+        traceback.print_exc()
         return ""
 
-def read_stream_chunk(stream_id: str, max_bytes: int = 65536) -> bytes:
+def read_stream_chunk(stream_id: str, max_bytes: int = 262144) -> bytes:
     """
     Reads the next slice of bytes for the given stream_id synchronously.
     Returns bytes or empty bytes(0) when finished.
@@ -450,11 +610,11 @@ def read_stream_chunk(stream_id: str, max_bytes: int = 65536) -> bytes:
     if not session:
         return b""
 
-    loop = _get_or_create_loop()
     try:
-        return loop.run_until_complete(session.read_bytes(int(max_bytes)))
+        return run_async(session.read_bytes(int(max_bytes)), timeout=40)
     except Exception as e:
         print(f"Error reading chunk for stream {stream_id}: {e}")
+        traceback.print_exc()
         return b""
 
 def close_stream(stream_id: str):
@@ -462,4 +622,14 @@ def close_stream(stream_id: str):
     Closes and removes an active stream session.
     """
     global _active_streams
-    _active_streams.pop(stream_id, None)
+    session = _active_streams.pop(stream_id, None)
+    if session and hasattr(session, "gen"):
+        async def _close():
+            try:
+                await session.gen.aclose()
+            except Exception:
+                pass
+        try:
+            run_async(_close(), timeout=5)
+        except Exception:
+            pass
