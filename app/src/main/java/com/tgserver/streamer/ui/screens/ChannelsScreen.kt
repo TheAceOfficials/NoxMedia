@@ -8,8 +8,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,10 +24,17 @@ import com.tgserver.streamer.data.model.ChannelInfo
 import com.tgserver.streamer.theme.*
 import com.tgserver.streamer.ui.MainAppViewModel
 
+private val AccentAmber = Color(0xFFEAA23E)
+
 @Composable
 fun ChannelsScreen(viewModel: MainAppViewModel) {
     val channels by viewModel.channels.collectAsState()
-    var showAddDialog by remember { mutableStateOf(false) }
+    val isAddingChannel by viewModel.isAddingChannel.collectAsState()
+    val scanningChannelIds by viewModel.scanningChannelIds.collectAsState()
+    val isScanningAll by viewModel.isScanningAll.collectAsState()
+
+    var channelInput by remember { mutableStateOf("") }
+    var isAnimeChannel by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -36,7 +43,7 @@ fun ChannelsScreen(viewModel: MainAppViewModel) {
             .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // TOP BAR
+        // TOP HEADER
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -44,104 +51,189 @@ fun ChannelsScreen(viewModel: MainAppViewModel) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "Channels",
                     color = TextPrimary,
-                    fontSize = 22.sp,
+                    fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = (-0.5).sp
                 )
                 Text(
-                    text = "${channels.size} channels monitored for streamable media",
+                    text = "Scan once; new posts are indexed automatically while the server runs.",
                     color = TextSecondary,
-                    fontSize = 12.sp
+                    fontSize = 13.sp,
+                    lineHeight = 17.sp,
+                    modifier = Modifier.padding(top = 4.dp)
                 )
             }
 
-            Button(
-                onClick = { showAddDialog = true },
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = AccentApple),
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                modifier = Modifier.height(36.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+            if (channels.isNotEmpty()) {
+                Spacer(modifier = Modifier.width(12.dp))
+                OutlinedButton(
+                    onClick = { viewModel.syncAllChannels() },
+                    enabled = !isScanningAll && scanningChannelIds.isEmpty(),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = SurfaceCard,
+                        contentColor = TextPrimary
+                    ),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, BorderSubtle),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                    modifier = Modifier.height(36.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "Add",
-                        tint = BackgroundOled,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Text(
-                        text = "Add Channel",
-                        color = BackgroundOled,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    if (isScanningAll) {
+                        CircularProgressIndicator(
+                            strokeWidth = 2.dp,
+                            color = TextPrimary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Scanning...", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    } else {
+                        Text("Scan all", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
                 }
             }
         }
 
-        // CONTENT
-        if (channels.isEmpty()) {
-            // NOTION-STYLE EMPTY STATE
-            Box(
+        // ADD CHANNEL CARD (Inline container matching screenshots)
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = SurfaceCard),
+            border = androidx.compose.foundation.BorderStroke(1.dp, BorderSubtle)
+        ) {
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f),
-                contentAlignment = Alignment.Center
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.padding(horizontal = 32.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(56.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(SurfaceCardElevated)
-                            .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
+                // Channel Text Input
+                OutlinedTextField(
+                    value = channelInput,
+                    onValueChange = { channelInput = it },
+                    label = { Text("Channel", color = TextSecondary, fontSize = 13.sp) },
+                    placeholder = {
                         Text(
-                            text = "#",
-                            color = TextSecondary,
-                            fontSize = 24.sp,
-                            fontWeight = FontWeight.Bold
+                            text = "@name, t.me link or -100... id",
+                            color = TextTertiary,
+                            fontSize = 13.sp
+                        )
+                    },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = AccentAmber,
+                        unfocusedBorderColor = BorderSubtle,
+                        focusedContainerColor = SurfaceCardElevated,
+                        unfocusedContainerColor = SurfaceCardElevated,
+                        focusedLabelColor = AccentAmber,
+                        unfocusedLabelColor = TextSecondary
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // Anime Checkbox + Add Button Row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { isAnimeChannel = !isAnimeChannel }
+                            .padding(end = 8.dp)
+                    ) {
+                        Checkbox(
+                            checked = isAnimeChannel,
+                            onCheckedChange = { isAnimeChannel = it },
+                            colors = CheckboxDefaults.colors(
+                                checkedColor = AccentAmber,
+                                checkmarkColor = BackgroundOled,
+                                uncheckedColor = TextSecondary
+                            )
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Anime channel",
+                            color = TextPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
                         )
                     }
 
-                    Text(
-                        text = "No Channels Added",
-                        color = TextPrimary,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-
-                    Text(
-                        text = "Add Telegram public or private channels to automatically index movies and series for Stremio playback.",
-                        color = TextSecondary,
-                        fontSize = 13.sp,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        lineHeight = 18.sp
-                    )
-
-                    OutlinedButton(
-                        onClick = { showAddDialog = true },
+                    Button(
+                        onClick = {
+                            if (channelInput.isNotBlank()) {
+                                viewModel.addChannel(channelInput.trim(), isAnimeChannel) { success, _ ->
+                                    if (success) {
+                                        channelInput = ""
+                                        isAnimeChannel = false
+                                    }
+                                }
+                            }
+                        },
+                        enabled = channelInput.isNotBlank() && !isAddingChannel,
                         shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, BorderSubtle),
-                        modifier = Modifier.padding(top = 8.dp)
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AccentAmber,
+                            disabledContainerColor = AccentAmber.copy(alpha = 0.4f),
+                            contentColor = BackgroundOled
+                        ),
+                        contentPadding = PaddingValues(horizontal = 22.dp, vertical = 8.dp),
+                        modifier = Modifier.height(38.dp)
                     ) {
-                        Text("Add Your First Channel", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        if (isAddingChannel) {
+                            CircularProgressIndicator(
+                                strokeWidth = 2.dp,
+                                color = BackgroundOled,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        } else {
+                            Text(
+                                text = "Add",
+                                color = BackgroundOled,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
+
+                // Helper Subtext
+                Text(
+                    text = "Anime channels use Kitsu first and understand absolute episode numbers (One Piece 1123).",
+                    color = TextTertiary,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp
+                )
             }
+        }
+
+        // SECTION: YOUR CHANNELS
+        Text(
+            text = "YOUR CHANNELS",
+            color = TextTertiary,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.8.sp,
+            modifier = Modifier.padding(top = 8.dp)
+        )
+
+        // CHANNELS LIST OR EMPTY STATE
+        if (channels.isEmpty()) {
+            Text(
+                text = "No channels yet.",
+                color = TextSecondary,
+                fontSize = 14.sp,
+                modifier = Modifier.padding(top = 4.dp)
+            )
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -149,86 +241,32 @@ fun ChannelsScreen(viewModel: MainAppViewModel) {
                 contentPadding = PaddingValues(bottom = 80.dp)
             ) {
                 items(channels, key = { it.id }) { channel ->
-                    ChannelCard(
+                    val isScanning = channel.id in scanningChannelIds
+                    ChannelItemCard(
                         channel = channel,
-                        onToggle = { active -> viewModel.toggleChannel(channel.id, active) },
+                        isScanning = isScanning,
+                        onScan = { viewModel.syncChannel(channel.id) },
+                        onRescanFromScratch = { viewModel.rescanFromScratch(channel.id) },
+                        onToggleAnime = { viewModel.toggleAnimeChannel(channel.id) },
                         onDelete = { viewModel.removeChannel(channel.id) }
                     )
                 }
             }
         }
     }
-
-    // ADD CHANNEL MODAL DIALOG
-    if (showAddDialog) {
-        var channelInput by remember { mutableStateOf("") }
-
-        AlertDialog(
-            onDismissRequest = { showAddDialog = false },
-            containerColor = SurfaceCard,
-            shape = RoundedCornerShape(20.dp),
-            title = {
-                Text(
-                    text = "Add Monitored Channel",
-                    color = TextPrimary,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "Enter public channel username or invite link (e.g. @cinema_vault or t.me/channel)",
-                        color = TextSecondary,
-                        fontSize = 12.sp
-                    )
-                    OutlinedTextField(
-                        value = channelInput,
-                        onValueChange = { channelInput = it },
-                        placeholder = { Text("@channel_username", color = TextTertiary, fontSize = 13.sp) },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary,
-                            focusedBorderColor = AccentApple,
-                            unfocusedBorderColor = BorderSubtle,
-                            focusedContainerColor = SurfaceCardElevated,
-                            unfocusedContainerColor = SurfaceCardElevated
-                        ),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (channelInput.isNotBlank()) {
-                            viewModel.addChannel(channelInput)
-                            showAddDialog = false
-                        }
-                    },
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentApple)
-                ) {
-                    Text("Add Channel", color = BackgroundOled, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showAddDialog = false }) {
-                    Text("Cancel", color = TextSecondary)
-                }
-            }
-        )
-    }
 }
 
 @Composable
-private fun ChannelCard(
+private fun ChannelItemCard(
     channel: ChannelInfo,
-    onToggle: (Boolean) -> Unit,
+    isScanning: Boolean,
+    onScan: () -> Unit,
+    onRescanFromScratch: () -> Unit,
+    onToggleAnime: () -> Unit,
     onDelete: () -> Unit
 ) {
+    var menuExpanded by remember { mutableStateOf(false) }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -238,60 +276,176 @@ private fun ChannelCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(horizontal = 16.dp, vertical = 14.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // LEFT: Channel Details
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = channel.title,
-                    color = TextPrimary,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = channel.title,
+                        color = TextPrimary,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    if (channel.isAnime) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(AccentAmber.copy(alpha = 0.15f))
+                                .border(1.dp, AccentAmber.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "ANIME",
+                                color = AccentAmber,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.5.sp
+                            )
+                        }
+                    }
+                }
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(top = 4.dp)
                 ) {
+                    val handle = channel.username ?: "channel"
                     Text(
-                        text = "@${channel.username ?: "channel"}",
+                        text = if (handle.startsWith("-100")) handle else "@$handle",
                         color = TextSecondary,
                         fontSize = 12.sp,
                         fontFamily = FontFamily.Monospace
                     )
                     Text(text = "•", color = TextTertiary, fontSize = 10.sp)
                     Text(
-                        text = "${channel.videoCount} media files",
-                        color = if (channel.isActive) StatusGreen else TextTertiary,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium
+                        text = channel.scanStatusText,
+                        color = if (channel.videoCount > 0) StatusGreen else TextTertiary,
+                        fontSize = 12.sp
                     )
                 }
             }
 
+            // RIGHT: Scan Button & 3-Dots Menu
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Switch(
-                    checked = channel.isActive,
-                    onCheckedChange = onToggle,
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = BackgroundOled,
-                        checkedTrackColor = AccentApple,
-                        uncheckedThumbColor = TextSecondary,
-                        uncheckedTrackColor = SurfaceCardElevated
-                    )
-                )
+                // Scan Button
+                OutlinedButton(
+                    onClick = onScan,
+                    enabled = !isScanning,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = SurfaceCardElevated,
+                        contentColor = TextPrimary
+                    ),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, BorderSubtle),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                    modifier = Modifier.height(34.dp)
+                ) {
+                    if (isScanning) {
+                        CircularProgressIndicator(
+                            strokeWidth = 2.dp,
+                            color = AccentAmber,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(text = "Scanning", fontSize = 12.sp, color = AccentAmber)
+                    } else {
+                        Text(
+                            text = "Scan",
+                            color = TextPrimary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
 
-                IconButton(onClick = onDelete) {
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = "Delete",
-                        tint = StatusRed.copy(alpha = 0.8f),
-                        modifier = Modifier.size(20.dp)
-                    )
+                // 3-dots Menu
+                Box {
+                    IconButton(
+                        onClick = { menuExpanded = true },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = "Options",
+                            tint = TextSecondary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false },
+                        modifier = Modifier
+                            .background(SurfaceCardElevated)
+                            .border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))
+                    ) {
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = "Rescan from scratch",
+                                    color = TextPrimary,
+                                    fontSize = 13.sp
+                                )
+                            },
+                            onClick = {
+                                menuExpanded = false
+                                onRescanFromScratch()
+                            }
+                        )
+
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = if (channel.isAnime) "Unmark anime channel" else "Mark as anime channel",
+                                    color = TextPrimary,
+                                    fontSize = 13.sp
+                                )
+                            },
+                            onClick = {
+                                menuExpanded = false
+                                onToggleAnime()
+                            }
+                        )
+
+                        HorizontalDivider(
+                            color = BorderSubtle,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
+
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = "Remove",
+                                    color = StatusRed,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.Delete,
+                                    contentDescription = "Remove",
+                                    tint = StatusRed,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            },
+                            onClick = {
+                                menuExpanded = false
+                                onDelete()
+                            }
+                        )
+                    }
                 }
             }
         }

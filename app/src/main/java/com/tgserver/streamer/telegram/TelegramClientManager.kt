@@ -455,8 +455,63 @@ class TelegramClientManager(private val context: Context) {
 
     fun getChannels(): List<ChannelInfo> = channels.values.toList()
 
-    fun addChannel(identifier: String): Result<ChannelInfo> {
-        val clean = identifier.trim().removePrefix("@").removePrefix("https://t.me/")
+    suspend fun resolveAndAddChannel(identifier: String, isAnime: Boolean = false): Result<ChannelInfo> = withContext(Dispatchers.IO) {
+        val clean = identifier.trim().removePrefix("https://t.me/").removePrefix("t.me/")
+        if (clean.isBlank()) {
+            return@withContext Result.failure(IllegalArgumentException("Channel username, link, or ID cannot be empty"))
+        }
+
+        val apiId = getApiId()
+        val apiHash = getApiHash()
+        val sessionStr = sessionState.value.sessionString
+        val bridge = getPyBridge()
+
+        var realId: Long? = null
+        var realTitle: String? = null
+        var realUsername: String? = null
+
+        if (bridge != null && sessionStr.isNotBlank() && apiId > 0) {
+            try {
+                val resStr = bridge.callAttr("resolve_channel", apiId, apiHash, sessionStr, clean).toString()
+                val json = JSONObject(resStr)
+                if (json.optString("status") == "success") {
+                    realId = json.getLong("id")
+                    realTitle = json.getString("title")
+                    realUsername = json.optString("username", clean)
+                } else {
+                    val err = json.optString("error")
+                    if (err.isNotBlank()) {
+                        return@withContext Result.failure(Exception(err))
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not resolve channel via MTProto: ${e.message}")
+            }
+        }
+
+        val finalId = realId ?: (-1000000000000L - (clean.hashCode().toLong().let { if (it < 0) -it else it } % 1000000000L))
+        val finalTitle = realTitle ?: clean.removePrefix("@").replace("_", " ").split(" ")
+            .joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }
+        val finalUsername = realUsername ?: clean.removePrefix("@")
+
+        val newChannel = ChannelInfo(
+            id = finalId,
+            title = finalTitle,
+            username = finalUsername,
+            messageCount = 0,
+            videoCount = 0,
+            isActive = true,
+            isAnime = isAnime,
+            lastSyncTime = 0L
+        )
+
+        channels[finalId] = newChannel
+        saveChannels()
+        Result.success(newChannel)
+    }
+
+    fun addChannel(identifier: String, isAnime: Boolean = false): Result<ChannelInfo> {
+        val clean = identifier.trim().removePrefix("@").removePrefix("https://t.me/").removePrefix("t.me/")
         if (clean.isBlank()) {
             return Result.failure(IllegalArgumentException("Channel name or link cannot be empty"))
         }
@@ -471,12 +526,21 @@ class TelegramClientManager(private val context: Context) {
             username = clean,
             messageCount = 0,
             videoCount = 0,
-            isActive = true
+            isActive = true,
+            isAnime = isAnime,
+            lastSyncTime = 0L
         )
 
         channels[id] = newChannel
         saveChannels()
         return Result.success(newChannel)
+    }
+
+    fun toggleAnimeChannel(channelId: Long, isAnime: Boolean) {
+        channels[channelId]?.let {
+            channels[channelId] = it.copy(isAnime = isAnime)
+            saveChannels()
+        }
     }
 
     fun toggleChannel(channelId: Long, active: Boolean) {
@@ -492,6 +556,13 @@ class TelegramClientManager(private val context: Context) {
         val toRemove = mediaIndex.values.filter { it.channelId == channelId }.map { it.id }
         toRemove.forEach { mediaIndex.remove(it) }
         saveMediaIndex()
+    }
+
+    suspend fun rescanFromScratch(channelId: Long, limit: Int = 200): Result<Int> = withContext(Dispatchers.IO) {
+        val toRemove = mediaIndex.values.filter { it.channelId == channelId }.map { it.id }
+        toRemove.forEach { mediaIndex.remove(it) }
+        saveMediaIndex()
+        syncChannel(channelId, limit)
     }
 
     // --- Library & Stream Operations ---
@@ -536,7 +607,10 @@ class TelegramClientManager(private val context: Context) {
             val bridge = getPyBridge()
                 ?: return@withContext Result.failure(IllegalStateException("Python runtime could not be started"))
 
-            val jsonRes = bridge.callAttr("sync_channel_media", apiId, apiHash, sessionStr, channelId, limit).toString()
+            val ch = channels[channelId]
+            val isAnime = ch?.isAnime ?: false
+
+            val jsonRes = bridge.callAttr("sync_channel_media", apiId, apiHash, sessionStr, channelId, limit, isAnime).toString()
             val obj = JSONObject(jsonRes)
             if (obj.optString("status") == "success") {
                 val mediaArray = obj.getJSONArray("media")

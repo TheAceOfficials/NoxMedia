@@ -8,8 +8,24 @@ data class ChannelInfo(
     val videoCount: Int = 0,
     val isActive: Boolean = true,
     val autoIndex: Boolean = true,
-    val lastSyncTime: Long = System.currentTimeMillis()
-)
+    val lastSyncTime: Long = 0L,
+    val isAnime: Boolean = false
+) {
+    val scanStatusText: String
+        get() {
+            if (lastSyncTime <= 0L || videoCount == 0) {
+                return "never scanned"
+            }
+            val elapsedSec = (System.currentTimeMillis() - lastSyncTime) / 1000
+            val timeAgo = when {
+                elapsedSec < 60 -> "just now"
+                elapsedSec < 3600 -> "${elapsedSec / 60}m ago"
+                elapsedSec < 86400 -> "${elapsedSec / 3600}h ago"
+                else -> "${elapsedSec / 86400}d ago"
+            }
+            return "$videoCount videos • scanned $timeAgo"
+        }
+}
 
 data class SplitPart(
     val messageId: Int,

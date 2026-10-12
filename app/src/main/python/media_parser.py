@@ -71,7 +71,7 @@ def parse_split_part(filename: str) -> Optional[Tuple[str, int]]:
         return clean_name, part_num
     return None
 
-def parse_media_filename(filename: str, caption: str = "") -> Dict[str, Any]:
+def parse_media_filename(filename: str, caption: str = "", is_anime: bool = False) -> Dict[str, Any]:
     """
     Parses a Telegram file name and optional caption to extract clean metadata.
     Detects movies, TV series, anime, split files, video codecs, audio tracks, etc.
@@ -97,7 +97,7 @@ def parse_media_filename(filename: str, caption: str = "") -> Dict[str, Any]:
     # Extract Season & Episode
     season = None
     episode = None
-    media_type = "movie"
+    media_type = "series" if is_anime else "movie"
     anime_match = None
     
     s_e_match = _SXXEXX_RE.search(base_no_ext)
@@ -129,6 +129,14 @@ def parse_media_filename(filename: str, caption: str = "") -> Dict[str, Any]:
                     episode = int(anime_match.group(1))
                     season = 1
                     media_type = "series"
+                elif is_anime:
+                    bare_nums = re.findall(r"(?:^|[\s\-_])0*(\d{1,4})(?:[\s\-_]|$)", base_no_ext)
+                    if bare_nums:
+                        try:
+                            episode = int(bare_nums[-1])
+                            season = 1
+                        except ValueError:
+                            pass
                     
     # Quality / Resolution
     quality = "1080p"

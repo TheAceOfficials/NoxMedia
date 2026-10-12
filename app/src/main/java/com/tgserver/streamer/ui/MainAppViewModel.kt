@@ -98,6 +98,15 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     private val _apiValidationError = MutableStateFlow<String?>(null)
     val apiValidationError: StateFlow<String?> = _apiValidationError.asStateFlow()
 
+    private val _isAddingChannel = MutableStateFlow(false)
+    val isAddingChannel: StateFlow<Boolean> = _isAddingChannel.asStateFlow()
+
+    private val _scanningChannelIds = MutableStateFlow<Set<Long>>(emptySet())
+    val scanningChannelIds: StateFlow<Set<Long>> = _scanningChannelIds.asStateFlow()
+
+    private val _isScanningAll = MutableStateFlow(false)
+    val isScanningAll: StateFlow<Boolean> = _isScanningAll.asStateFlow()
+
     private val startTime = System.currentTimeMillis()
 
     init {
@@ -217,13 +226,84 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
 
     // --- Channels Actions ---
 
-    fun addChannel(identifier: String) {
-        val result = tgClient.addChannel(identifier)
-        if (result.isSuccess) {
-            Toast.makeText(getApplication(), "Channel added", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(getApplication(), result.exceptionOrNull()?.message ?: "Error adding channel", Toast.LENGTH_SHORT).show()
+    fun addChannel(identifier: String, isAnime: Boolean = false, onDone: (Boolean, String?) -> Unit = { _, _ -> }) {
+        viewModelScope.launch {
+            _isAddingChannel.value = true
+            val result = tgClient.resolveAndAddChannel(identifier, isAnime)
+            _isAddingChannel.value = false
+            if (result.isSuccess) {
+                val channel = result.getOrNull()!!
+                Toast.makeText(getApplication(), "✓ Connected: ${channel.title}", Toast.LENGTH_SHORT).show()
+                onDone(true, null)
+                // Auto scan newly added channel
+                syncChannel(channel.id)
+            } else {
+                val err = result.exceptionOrNull()?.message ?: "Error connecting channel"
+                Toast.makeText(getApplication(), err, Toast.LENGTH_LONG).show()
+                onDone(false, err)
+            }
         }
+    }
+
+    fun syncChannel(channelId: Long) {
+        viewModelScope.launch {
+            _scanningChannelIds.value = _scanningChannelIds.value + channelId
+            val ch = channels.value.find { it.id == channelId }
+            val res = tgClient.syncChannel(channelId)
+            _scanningChannelIds.value = _scanningChannelIds.value - channelId
+            if (res.isSuccess) {
+                val count = res.getOrDefault(0)
+                Toast.makeText(getApplication(), "✓ Scanned $count videos from ${ch?.title ?: "channel"}", Toast.LENGTH_SHORT).show()
+            } else {
+                val err = res.exceptionOrNull()?.message ?: "Scan failed"
+                Toast.makeText(getApplication(), "Error: $err", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    fun syncAllChannels() {
+        viewModelScope.launch {
+            val activeChannels = channels.value.filter { it.isActive }
+            if (activeChannels.isEmpty()) {
+                Toast.makeText(getApplication(), "No active channels to scan", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            _isScanningAll.value = true
+            var total = 0
+            for (ch in activeChannels) {
+                _scanningChannelIds.value = _scanningChannelIds.value + ch.id
+                val res = tgClient.syncChannel(ch.id)
+                _scanningChannelIds.value = _scanningChannelIds.value - ch.id
+                if (res.isSuccess) {
+                    total += res.getOrDefault(0)
+                }
+            }
+            _isScanningAll.value = false
+            Toast.makeText(getApplication(), "✓ Scan complete: $total total videos indexed", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun rescanFromScratch(channelId: Long) {
+        viewModelScope.launch {
+            _scanningChannelIds.value = _scanningChannelIds.value + channelId
+            val ch = channels.value.find { it.id == channelId }
+            val res = tgClient.rescanFromScratch(channelId)
+            _scanningChannelIds.value = _scanningChannelIds.value - channelId
+            if (res.isSuccess) {
+                val count = res.getOrDefault(0)
+                Toast.makeText(getApplication(), "✓ Clean rescan: $count videos found for ${ch?.title ?: "channel"}", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(getApplication(), "Rescan failed: ${res.exceptionOrNull()?.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    fun toggleAnimeChannel(channelId: Long) {
+        val ch = channels.value.find { it.id == channelId } ?: return
+        val newState = !ch.isAnime
+        tgClient.toggleAnimeChannel(channelId, newState)
+        val msg = if (newState) "✓ Marked as Anime channel (Kitsu absolute matching enabled)" else "✓ Unmarked Anime channel"
+        Toast.makeText(getApplication(), msg, Toast.LENGTH_SHORT).show()
     }
 
     fun toggleChannel(channelId: Long, active: Boolean) {

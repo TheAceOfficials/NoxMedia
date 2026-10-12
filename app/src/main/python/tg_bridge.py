@@ -170,7 +170,59 @@ def parse_media(filename: str, caption: str = "") -> str:
     res = media_parser.parse_media_filename(filename, caption)
     return json.dumps(res)
 
-def sync_channel_media(api_id: int, api_hash: str, session_str: str, channel_id: int, limit: int = 150) -> str:
+def resolve_channel(api_id: int, api_hash: str, session_str: str, identifier: str) -> str:
+    """
+    Connects to Telegram via Pyrogram and verifies/resolves the channel.
+    Accepts @username, t.me link, -100... ID, or bare numeric ID.
+    Returns JSON with channel title, real ID, username, or error.
+    """
+    loop = _get_or_create_loop()
+
+    async def _async_resolve():
+        client = await _get_connected_stream_client(api_id, api_hash, session_str)
+        target = identifier.strip()
+        if target.startswith("https://t.me/"):
+            target = target.replace("https://t.me/", "").replace("/", "").strip()
+        elif target.startswith("t.me/"):
+            target = target.replace("t.me/", "").replace("/", "").strip()
+
+        # Handle numeric chat id (e.g. -100..., or bare id)
+        if target.startswith("-100") and target[4:].isdigit():
+            chat_target = int(target)
+        elif target.startswith("-") and target[1:].isdigit():
+            chat_target = int(target)
+        elif target.isdigit():
+            chat_target = int(f"-100{target}")
+        else:
+            if not target.startswith("@"):
+                target = f"@{target}"
+            chat_target = target
+
+        chat = await client.get_chat(chat_target)
+        title = chat.title or getattr(chat, "first_name", None) or "Telegram Channel"
+        uname = getattr(chat, "username", None) or str(chat.id)
+
+        return {
+            "status": "success",
+            "id": chat.id,
+            "title": title,
+            "username": uname,
+            "type": str(getattr(chat, "type", "channel"))
+        }
+
+    try:
+        res = loop.run_until_complete(_async_resolve())
+        return json.dumps(res)
+    except errors.UsernameNotOccupied:
+        return json.dumps({"status": "error", "error": "Channel not found. Check username or link."})
+    except errors.ChatIdInvalid:
+        return json.dumps({"status": "error", "error": "Invalid Telegram channel ID."})
+    except errors.ChannelPrivate:
+        return json.dumps({"status": "error", "error": "Channel is private and your account is not a member."})
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)})
+
+def sync_channel_media(api_id: int, api_hash: str, session_str: str, channel_id: int, limit: int = 150, is_anime: bool = False) -> str:
     """
     Scans recent messages from channel, extracts video and document media,
     parses filenames, groups split files into virtual items, and returns JSON.
@@ -206,7 +258,7 @@ def sync_channel_media(api_id: int, api_hash: str, session_str: str, channel_id:
                 continue
 
             caption = msg.caption or ""
-            parsed = media_parser.parse_media_filename(file_name, caption)
+            parsed = media_parser.parse_media_filename(file_name, caption, is_anime=bool(is_anime))
             
             clean_base = parsed["clean_base_name"]
             is_split = parsed["is_split"]
