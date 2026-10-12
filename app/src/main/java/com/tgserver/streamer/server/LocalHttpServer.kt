@@ -77,6 +77,7 @@ class LocalHttpServer(
                 uri == "/api/channels" -> handleGetChannels()
                 uri == "/api/channels/add" && method == Method.POST -> handleAddChannel(session)
                 uri == "/api/channels/toggle" && method == Method.POST -> handleToggleChannel(session)
+                uri.startsWith("/api/channels/sync") && method == Method.POST -> handleSyncChannel(uri)
                 uri.startsWith("/api/channels/") && method == Method.DELETE -> handleDeleteChannel(uri)
                 uri.startsWith("/api/library") -> handleGetLibrary(session)
                 uri == "/api/settings" && method == Method.GET -> handleGetSettings()
@@ -140,7 +141,7 @@ class LocalHttpServer(
                 "name" to item.title,
                 "poster" to (poster ?: "https://images.metahub.space/poster/medium/placeholder/img"),
                 "releaseInfo" to (item.year ?: "2024"),
-                "description" to (item.overview ?: "${item.quality} • ${item.formattedSize}")
+                "description" to (item.overview ?: "${item.qualityBadge} • ${item.formattedSize}")
             )
         }
 
@@ -169,7 +170,7 @@ class LocalHttpServer(
             "name" to item.title,
             "year" to (item.year ?: "2024"),
             "poster" to (poster ?: "https://images.metahub.space/poster/medium/placeholder/img"),
-            "description" to (item.overview ?: "${item.quality} • ${item.formattedSize} • ${item.formattedDuration}"),
+            "description" to (item.overview ?: "${item.qualityBadge} • ${item.formattedSize} • ${item.formattedDuration}"),
             "genres" to listOf("Telegram", item.quality)
         )
 
@@ -191,7 +192,7 @@ class LocalHttpServer(
 
         val stream = mapOf(
             "name" to "TG-Server (${item.quality})",
-            "title" to "${item.title} [${item.quality} • ${item.formattedSize}]",
+            "title" to "${item.title} [${item.qualityBadge} • ${item.formattedSize}]",
             "url" to streamUrl
         )
 
@@ -392,6 +393,36 @@ class LocalHttpServer(
         val id = uri.substringAfterLast("/").toLongOrNull() ?: 0L
         tgClient.removeChannel(id)
         return newFixedLengthResponse(Response.Status.OK, "application/json", "{\"success\":true}")
+    }
+
+    private fun handleSyncChannel(uri: String): Response = runBlocking {
+        val id = uri.substringAfterLast("/").toLongOrNull()
+        val channelsToSync = if (id != null && id != 0L) {
+            tgClient.getChannels().filter { it.id == id }
+        } else {
+            tgClient.getChannels().filter { it.isActive }
+        }
+
+        var totalAdded = 0
+        val errors = mutableListOf<String>()
+
+        for (ch in channelsToSync) {
+            val res = tgClient.syncChannel(ch.id)
+            if (res.isSuccess) {
+                totalAdded += res.getOrDefault(0)
+            } else {
+                errors.add("${ch.title}: ${res.exceptionOrNull()?.message}")
+            }
+        }
+
+        val json = JsonObject().apply {
+            addProperty("success", errors.isEmpty())
+            addProperty("totalMediaAdded", totalAdded)
+            if (errors.isNotEmpty()) {
+                add("errors", gson.toJsonTree(errors))
+            }
+        }
+        newFixedLengthResponse(Response.Status.OK, "application/json", gson.toJson(json))
     }
 
     private fun handleGetLibrary(session: IHTTPSession): Response {

@@ -524,16 +524,147 @@ class TelegramClientManager(private val context: Context) {
         }
     }
 
+    suspend fun syncChannel(channelId: Long, limit: Int = 150): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            val apiId = getApiId()
+            val apiHash = getApiHash()
+            val sessionStr = sessionState.value.sessionString
+            if (sessionStr.isBlank() || apiId <= 0) {
+                return@withContext Result.failure(IllegalStateException("Must be logged in to sync channel"))
+            }
+
+            val bridge = getPyBridge()
+                ?: return@withContext Result.failure(IllegalStateException("Python runtime could not be started"))
+
+            val jsonRes = bridge.callAttr("sync_channel_media", apiId, apiHash, sessionStr, channelId, limit).toString()
+            val obj = JSONObject(jsonRes)
+            if (obj.optString("status") == "success") {
+                val mediaArray = obj.getJSONArray("media")
+                var added = 0
+                for (i in 0 until mediaArray.length()) {
+                    val mObj = mediaArray.getJSONObject(i)
+                    val partsList = mutableListOf<com.tgserver.streamer.data.model.SplitPart>()
+                    if (mObj.has("parts")) {
+                        val pArr = mObj.getJSONArray("parts")
+                        for (j in 0 until pArr.length()) {
+                            val p = pArr.getJSONObject(j)
+                            partsList.add(
+                                com.tgserver.streamer.data.model.SplitPart(
+                                    messageId = p.getInt("messageId"),
+                                    partNumber = p.getInt("partNumber"),
+                                    sizeBytes = p.getLong("sizeBytes"),
+                                    cumStart = p.getLong("cumStart")
+                                )
+                            )
+                        }
+                    }
+
+                    val item = MediaItem(
+                        id = mObj.getString("id"),
+                        channelId = mObj.getLong("channelId"),
+                        messageId = mObj.getInt("messageId"),
+                        title = mObj.getString("title"),
+                        type = mObj.getString("type"),
+                        year = if (mObj.isNull("year")) null else mObj.getString("year"),
+                        season = if (mObj.isNull("season")) null else mObj.getInt("season"),
+                        episode = if (mObj.isNull("episode")) null else mObj.getInt("episode"),
+                        quality = mObj.getString("quality"),
+                        qualityBadge = mObj.optString("qualityBadge", mObj.getString("quality")),
+                        sizeBytes = mObj.getLong("sizeBytes"),
+                        durationSeconds = mObj.optInt("durationSeconds", 0),
+                        mimeType = mObj.optString("mimeType", "video/mp4"),
+                        fileName = mObj.getString("fileName"),
+                        isSplit = mObj.optBoolean("isSplit", false),
+                        parts = partsList
+                    )
+                    mediaIndex[item.id] = item
+                    added++
+                }
+                saveMediaIndex()
+                channels[channelId]?.let { ch ->
+                    channels[channelId] = ch.copy(videoCount = added, lastSyncTime = System.currentTimeMillis())
+                    saveChannels()
+                }
+                Result.success(added)
+            } else {
+                val err = obj.optString("error", "Failed to sync channel")
+                Result.failure(Exception(err))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error syncing channel $channelId: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
     fun getStreamSource(
         channelId: Long,
         messageId: Int,
         startByte: Long,
         endByte: Long
     ): StreamChunkResult {
-        val media = mediaIndex.values.find { it.channelId == channelId && it.messageId == messageId }
+        val media = mediaIndex.values.find {
+            (it.channelId == channelId && it.messageId == messageId) ||
+            (it.channelId == channelId && it.isSplit && it.parts.any { p -> p.messageId == messageId })
+        }
+
         val totalSize = media?.sizeBytes ?: 50_000_000L
         val effectiveEnd = if (endByte <= 0L || endByte >= totalSize) totalSize - 1 else endByte
         val contentLength = effectiveEnd - startByte + 1
+
+        val apiId = getApiId()
+        val apiHash = getApiHash()
+        val sessionStr = sessionState.value.sessionString
+        val bridge = getPyBridge()
+
+        if (bridge != null && sessionStr.isNotBlank() && apiId > 0) {
+            try {
+                val partsList = if (media != null && media.isSplit && media.parts.isNotEmpty()) {
+                    media.parts.map {
+                        mapOf(
+                            "messageId" to it.messageId,
+                            "partNumber" to it.partNumber,
+                            "sizeBytes" to it.sizeBytes,
+                            "cumStart" to it.cumStart
+                        )
+                    }
+                } else {
+                    listOf(
+                        mapOf(
+                            "messageId" to messageId,
+                            "partNumber" to 1,
+                            "sizeBytes" to totalSize,
+                            "cumStart" to 0L
+                        )
+                    )
+                }
+
+                val partsJson = gson.toJson(partsList)
+                val streamId = bridge.callAttr(
+                    "create_stream",
+                    apiId,
+                    apiHash,
+                    sessionStr,
+                    channelId,
+                    partsJson,
+                    startByte,
+                    effectiveEnd
+                )?.toString() ?: ""
+
+                if (streamId.isNotBlank()) {
+                    val stream = TgMediaInputStream(bridge, streamId, contentLength)
+                    return StreamChunkResult(
+                        inputStream = stream,
+                        contentLength = contentLength,
+                        startByte = startByte,
+                        endByte = effectiveEnd,
+                        totalSize = totalSize,
+                        mimeType = media?.mimeType ?: "video/mp4"
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error creating live MTProto stream: ${e.message}", e)
+            }
+        }
 
         val bufferSize = minOf(contentLength, 65536L).toInt()
         val dummyBytes = ByteArray(bufferSize)
