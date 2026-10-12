@@ -30,20 +30,23 @@ _AUDIO_CODEC_RE = re.compile(r"(?i)\b(truehd|atmos|ddp(?:\s*5\.1|\s*2\.0|\s*7\.1
 _AUDIO_CHANNELS_RE = re.compile(r"(?i)\b(7\.1|5\.1|2\.0)\b")
 
 _LANGUAGES_MAP = {
-    "hin": "Hindi", "hindi": "Hindi",
-    "tam": "Tamil", "tamil": "Tamil",
-    "tel": "Telugu", "telugu": "Telugu",
-    "mal": "Malayalam", "malayalam": "Malayalam",
-    "kan": "Kannada", "kannada": "Kannada",
-    "eng": "English", "english": "English",
-    "jap": "Japanese", "japanese": "Japanese", "jpn": "Japanese",
-    "kor": "Korean", "korean": "Korean",
-    "spa": "Spanish", "spanish": "Spanish",
-    "fre": "French", "french": "French",
-    "ger": "German", "german": "German",
-    "ita": "Italian", "italian": "Italian",
-    "multi": "Multi Audio", "dual": "Dual Audio"
+    "hin": "Hin", "hindi": "Hin",
+    "tam": "Tam", "tamil": "Tam",
+    "tel": "Tel", "telugu": "Tel",
+    "mal": "Mal", "malayalam": "Mal",
+    "kan": "Kan", "kannada": "Kan",
+    "eng": "Eng", "english": "Eng",
+    "jap": "Jap", "japanese": "Jap", "jpn": "Jap",
+    "kor": "Kor", "korean": "Kor",
+    "spa": "Spa", "spanish": "Spa",
+    "fre": "Fre", "french": "Fre",
+    "ger": "Ger", "german": "Ger",
+    "ita": "Ita", "italian": "Ita",
+    "rus": "Rus", "russian": "Rus",
+    "chi": "Chi", "chinese": "Chi",
+    "multi": "Multi", "dual": "Dual"
 }
+
 
 # Season & Episode patterns
 _SXXEXX_RE = re.compile(r"(?i)\b(?:s|season\s*)(\d{1,2})[\s._-]*(?:e|ep|episode\s*)(\d{1,3})\b")
