@@ -8,7 +8,9 @@ import com.google.gson.reflect.TypeToken
 import com.tgserver.streamer.data.model.AuthSession
 import com.tgserver.streamer.data.model.ChannelInfo
 import com.tgserver.streamer.data.model.MediaItem
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -192,6 +194,33 @@ class TelegramClientManager(private val context: Context) {
             list.forEach { mediaIndex[it.id] = it }
         }
         _mediaState.value = mediaIndex.values.toList()
+
+        autoEnrichMissingMetadata()
+    }
+
+    private fun autoEnrichMissingMetadata() {
+        val itemsToEnrich = mediaIndex.values.filter { it.imdbId.isNullOrBlank() && it.kitsuId == null }
+        if (itemsToEnrich.isEmpty()) return
+
+        CoroutineScope(Dispatchers.IO).launch {
+            val tmdbKey = prefs.getString("tmdb_api_key", "") ?: ""
+            val tvdbKey = prefs.getString("tvdb_api_key", "") ?: ""
+            var changed = false
+            for (item in itemsToEnrich) {
+                val ch = channels[item.channelId]
+                val isAnime = ch?.isAnime ?: false
+                metadataEnricher.enrich(
+                    item = item,
+                    isAnimeChannel = isAnime,
+                    tmdbKey = tmdbKey,
+                    tvdbKey = tvdbKey
+                )
+                changed = true
+            }
+            if (changed) {
+                saveMediaIndex()
+            }
+        }
     }
 
     private fun saveMediaIndex() {
@@ -455,6 +484,7 @@ class TelegramClientManager(private val context: Context) {
     // --- Channel Management ---
 
     fun getChannels(): List<ChannelInfo> = channels.values.toList()
+    fun getChannel(id: Long): ChannelInfo? = channels[id]
 
     suspend fun resolveAndAddChannel(identifier: String, isAnime: Boolean = false): Result<ChannelInfo> = withContext(Dispatchers.IO) {
         val clean = identifier.trim().removePrefix("https://t.me/").removePrefix("t.me/")

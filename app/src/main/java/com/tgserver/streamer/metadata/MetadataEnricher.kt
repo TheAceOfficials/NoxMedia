@@ -81,6 +81,7 @@ class MetadataEnricher {
                         overview = tmdbRes.overview ?: result.overview,
                         episodeTitle = tmdbRes.episodeTitle ?: result.episodeTitle,
                         tmdbId = tmdbRes.tmdbId,
+                        imdbId = tmdbRes.imdbId ?: result.imdbId,
                         year = tmdbRes.year ?: result.year
                     )
                 } else {
@@ -229,6 +230,23 @@ class MetadataEnricher {
                     } catch (_: Exception) {}
                 }
 
+                // Resolve IMDb ID from TMDB external_ids
+                var tmdbImdbId: String? = null
+                try {
+                    val extEndpoint = if (type == "movie") "movie" else "tv"
+                    val extUrl = "https://api.themoviedb.org/3/$extEndpoint/$tmdbId/external_ids?api_key=$apiKey"
+                    val extReq = Request.Builder().url(extUrl).build()
+                    httpClient.newCall(extReq).execute().use { extResp ->
+                        if (extResp.isSuccessful) {
+                            val extBody = extResp.body?.string()
+                            if (!extBody.isNullOrBlank()) {
+                                val extObj = JsonParser.parseString(extBody).asJsonObject
+                                tmdbImdbId = extObj.get("imdb_id")?.asString
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+
                 return EnrichedMetadata(
                     title = officialTitle,
                     year = year,
@@ -236,7 +254,8 @@ class MetadataEnricher {
                     posterUrl = posterUrl,
                     backdropUrl = backdropUrl,
                     episodeTitle = epTitle,
-                    tmdbId = tmdbId
+                    tmdbId = tmdbId,
+                    imdbId = tmdbImdbId
                 )
             }
         } catch (e: Exception) {

@@ -10,9 +10,13 @@ import com.tgserver.streamer.posters.SpatialPosterService
 import com.tgserver.streamer.telegram.TelegramClientManager
 import fi.iki.elonen.NanoHTTPD
 import kotlinx.coroutines.runBlocking
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.io.InputStream
 import java.net.Inet4Address
 import java.net.NetworkInterface
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 
 class LocalHttpServer(
     private val context: Context,
@@ -23,6 +27,11 @@ class LocalHttpServer(
 
     private val gson = Gson()
     private val startTime = System.currentTimeMillis()
+    private val idTitleCache = ConcurrentHashMap<String, String>()
+    private val streamHttpClient = OkHttpClient.Builder()
+        .connectTimeout(3, TimeUnit.SECONDS)
+        .readTimeout(3, TimeUnit.SECONDS)
+        .build()
 
     fun getLocalIpAddress(): String = Companion.getLocalIpAddress()
 
@@ -176,7 +185,7 @@ class LocalHttpServer(
         var mediaList = tgClient.getAllMedia().filter { item ->
             val isItemSeries = item.type == "series" || item.type == "anime" || (item.season != null && item.episode != null)
             if (isAnime) {
-                item.type == "anime" || item.title.contains("dragon ball", ignoreCase = true)
+                item.type == "anime" || item.kitsuId != null || (tgClient.getChannel(item.channelId)?.isAnime == true)
             } else if (isSeries) {
                 isItemSeries
             } else {
@@ -288,6 +297,59 @@ class LocalHttpServer(
         return newFixedLengthResponse(Response.Status.OK, "application/json", gson.toJson(res))
     }
 
+    private fun resolveTitleForId(imdbId: String?, kitsuId: Int?, mediaType: String): String? {
+        if (kitsuId != null) {
+            val key = "kitsu:$kitsuId"
+            idTitleCache[key]?.let { return it }
+            try {
+                val url = "https://kitsu.io/api/edge/anime/$kitsuId"
+                val req = Request.Builder().url(url).header("User-Agent", "TG-Server/1.0").build()
+                streamHttpClient.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string() ?: return null
+                        val root = JsonParser.parseString(body).asJsonObject
+                        val title = root.getAsJsonObject("data")
+                            ?.getAsJsonObject("attributes")
+                            ?.get("canonicalTitle")?.asString
+                        if (!title.isNullOrBlank()) {
+                            idTitleCache[key] = title
+                            return title
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        } else if (!imdbId.isNullOrBlank() && imdbId.startsWith("tt", ignoreCase = true)) {
+            val key = "imdb:$imdbId"
+            idTitleCache[key]?.let { return it }
+            try {
+                val cType = if (mediaType == "movie") "movie" else "series"
+                val url = "https://v3-cinemeta.strem.io/meta/$cType/$imdbId.json"
+                val req = Request.Builder().url(url).header("User-Agent", "Mozilla/5.0").build()
+                streamHttpClient.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string() ?: return null
+                        val root = JsonParser.parseString(body).asJsonObject
+                        val title = root.getAsJsonObject("meta")?.get("name")?.asString
+                        if (!title.isNullOrBlank()) {
+                            idTitleCache[key] = title
+                            return title
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+        return null
+    }
+
+    private fun cleanTitleForMatch(t: String): String {
+        return t.lowercase()
+            .replace(Regex("(?i)\\.(mkv|mp4|avi|mov|webm)$"), "")
+            .replace(Regex("(?i)(2160p|1080p|720p|480p|4k|uhd|hdr|hevc|x264|x265|aac|dts|bluray|web-dl|webrip|proper|repack)"), "")
+            .replace(Regex("[^a-z0-9]"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+    }
+
     private fun handleStreamDescriptor(uri: String): Response {
         val parts = uri.removeSuffix(".json").split("/")
         val rawId = parts.lastOrNull() ?: ""
@@ -322,42 +384,76 @@ class LocalHttpServer(
 
         val allMedia = tgClient.getAllMedia()
 
-        val matchedItems = allMedia.filter { item ->
+        // 1. Direct ID matching (IMDb ID, Kitsu ID, TMDB ID, local tg_ ID)
+        var matchedItems = allMedia.filter { item ->
             when {
-                // Exact item ID match
-                item.id == rawId || item.id == (imdbId ?: "") -> true
-
-                // Kitsu match
-                isKitsu && kitsuId != null -> {
-                    (item.kitsuId == kitsuId && (targetEpisode == null || item.episode == targetEpisode)) ||
-                    (item.title.contains("dragon ball", ignoreCase = true) && (targetEpisode == null || item.episode == targetEpisode))
+                // Exact item ID match (e.g. tg_-1004424883082_2)
+                item.id == rawId || item.id == (imdbId ?: "") || item.id == idParts.getOrNull(0) -> {
+                    if (targetSeason != null && targetEpisode != null) {
+                        (item.season == null || item.season == targetSeason) && (item.episode == null || item.episode == targetEpisode)
+                    } else if (targetEpisode != null) {
+                        (item.episode == null || item.episode == targetEpisode)
+                    } else true
                 }
 
-                // IMDb ID match (e.g. tt39395275:1:1 or tt4644488:1:1)
+                // Exact Kitsu ID match
+                isKitsu && kitsuId != null && item.kitsuId == kitsuId -> {
+                    if (targetSeason != null && targetEpisode != null) {
+                        (item.season == null || item.season == targetSeason) && (item.episode == null || item.episode == targetEpisode)
+                    } else if (targetEpisode != null) {
+                        (item.episode == null || item.episode == targetEpisode)
+                    } else true
+                }
+
+                // Exact IMDb ID match (e.g. tt4644488, tt39395275)
                 !item.imdbId.isNullOrBlank() && !imdbId.isNullOrBlank() && item.imdbId.equals(imdbId, ignoreCase = true) -> {
                     if (targetSeason != null && targetEpisode != null) {
-                        (item.season == targetSeason && item.episode == targetEpisode) ||
-                        (item.season == null && item.episode == targetEpisode)
+                        (item.season == null || item.season == targetSeason) && item.episode == targetEpisode
                     } else if (targetEpisode != null) {
                         item.episode == targetEpisode
-                    } else true
+                    } else {
+                        item.type == "movie" || (item.season == null && item.episode == null)
+                    }
                 }
 
-                // TMDB ID match
-                item.tmdbId != null && imdbId != null && item.tmdbId.toString() == imdbId -> {
+                // Exact TMDB ID match
+                item.tmdbId != null && !imdbId.isNullOrBlank() && (item.tmdbId.toString() == imdbId || item.tmdbId.toString() == imdbId.removePrefix("tmdb:").removePrefix("TMDB:")) -> {
                     if (targetSeason != null && targetEpisode != null) {
-                        (item.season == targetSeason && item.episode == targetEpisode) ||
-                        (item.season == null && item.episode == targetEpisode)
+                        (item.season == null || item.season == targetSeason) && item.episode == targetEpisode
                     } else if (targetEpisode != null) {
                         item.episode == targetEpisode
-                    } else true
+                    } else {
+                        item.type == "movie" || (item.season == null && item.episode == null)
+                    }
                 }
 
-                // Fallback: title match
-                !imdbId.isNullOrBlank() && (rawId.contains(item.title, ignoreCase = true) || item.title.contains("dragon ball", ignoreCase = true)) -> {
-                    if (targetEpisode != null) item.episode == targetEpisode else true
-                }
                 else -> false
+            }
+        }
+
+        // 2. Title-based resolution if direct ID didn't match (resolves IMDb/Kitsu ID to official title and matches strictly)
+        if (matchedItems.isEmpty()) {
+            val mediaType = parts.getOrNull(2) ?: "series"
+            val expectedTitle = resolveTitleForId(imdbId, kitsuId, mediaType)
+            if (!expectedTitle.isNullOrBlank()) {
+                val cleanExpected = cleanTitleForMatch(expectedTitle)
+                if (cleanExpected.isNotBlank()) {
+                    matchedItems = allMedia.filter { item ->
+                        val cleanItem = cleanTitleForMatch(item.title)
+                        val titleMatches = cleanItem == cleanExpected ||
+                                cleanItem.startsWith(cleanExpected) ||
+                                cleanExpected.startsWith(cleanItem)
+                        if (!titleMatches) return@filter false
+
+                        if (targetSeason != null && targetEpisode != null) {
+                            (item.season == null || item.season == targetSeason) && item.episode == targetEpisode
+                        } else if (targetEpisode != null) {
+                            item.episode == targetEpisode
+                        } else {
+                            item.type == "movie" || (item.season == null && item.episode == null)
+                        }
+                    }
+                }
             }
         }
 
