@@ -335,6 +335,7 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                         val firstItem = currentGroup.items.firstOrNull()
                         if (firstItem != null) {
                             viewModel.refreshMediaMetadata(firstItem)
+                            viewModel.syncChannel(firstItem.channelId)
                         }
                     }
                 )

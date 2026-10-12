@@ -276,17 +276,19 @@ def sync_channel_media(api_id: int, api_hash: str, session_str: str, channel_id:
             mime_type = getattr(media, "mime_type", "video/mp4") or "video/mp4"
             duration = getattr(media, "duration", 0) or 0
 
+            caption = msg.caption or ""
+            best_file_name = media_parser.extract_best_filename(file_name, caption)
+
             # Only process if video mime or video extension
             is_video = (
                 mime_type.startswith("video/") or
-                any(file_name.lower().endswith(ext) for ext in video_exts) or
-                media_parser.parse_split_part(file_name) is not None
+                any(best_file_name.lower().endswith(ext) for ext in video_exts) or
+                media_parser.parse_split_part(best_file_name) is not None
             )
             if not is_video or file_size <= 0:
                 continue
 
-            caption = msg.caption or ""
-            parsed = media_parser.parse_media_filename(file_name, caption, is_anime=bool(is_anime))
+            parsed = media_parser.parse_media_filename(best_file_name, caption, is_anime=bool(is_anime))
             
             clean_base = parsed["clean_base_name"]
             is_split = parsed["is_split"]
@@ -321,7 +323,7 @@ def sync_channel_media(api_id: int, api_hash: str, session_str: str, channel_id:
                     "sizeBytes": file_size,
                     "durationSeconds": duration,
                     "mimeType": mime_type,
-                    "fileName": file_name,
+                    "fileName": parsed["clean_base_name"],
                     "isSplit": False,
                     "parts": []
                 }
