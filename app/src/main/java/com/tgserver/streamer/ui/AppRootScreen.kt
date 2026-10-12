@@ -135,35 +135,29 @@ private fun EnhancedGlassBottomNav(
             .padding(start = 24.dp, end = 24.dp, top = 4.dp, bottom = 8.dp),
         contentAlignment = Alignment.Center
     ) {
-        // Floating Liquid Glassmorphism Capsule Bar
+        // Floating Transparent Liquid Glass Capsule Bar
         Box(
             modifier = Modifier
                 .widthIn(max = 480.dp)
                 .fillMaxWidth()
                 .height(56.dp)
-                .shadow(
-                    elevation = 16.dp,
-                    shape = RoundedCornerShape(28.dp),
-                    spotColor = Color(0x33000000),
-                    ambientColor = Color(0x1F000000)
-                )
                 .clip(RoundedCornerShape(28.dp))
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            Color(0x38181D2A),
-                            Color(0x4D0E121B)
+                            Color(0x18FFFFFF),
+                            Color(0x0AFFFFFF)
                         )
                     )
                 )
                 .border(
                     BorderStroke(
-                        1.2.dp,
+                        1.dp,
                         Brush.verticalGradient(
                             colors = listOf(
-                                Color(0x66FFFFFF),
-                                Color(0x24FFFFFF),
-                                Color(0x0EFFFFFF)
+                                Color(0x59FFFFFF),
+                                Color(0x1FFFFFFF),
+                                Color(0x0DFFFFFF)
                             )
                         )
                     ),
@@ -195,22 +189,6 @@ private fun EnhancedGlassBottomNav(
                     )
                 }
         ) {
-            // Liquid top sheen reflection
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(26.dp)
-                    .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color(0x22FFFFFF),
-                                Color(0x00FFFFFF)
-                            )
-                        )
-                    )
-            )
-
             Row(
                 modifier = Modifier
                     .fillMaxSize()
