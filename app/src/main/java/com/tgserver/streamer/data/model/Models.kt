@@ -57,7 +57,8 @@ data class MediaItem(
     var tmdbId: Int? = null,
     var kitsuId: Int? = null,
     val isSplit: Boolean = false,
-    val parts: List<SplitPart> = emptyList()
+    val parts: List<SplitPart> = emptyList(),
+    var isHidden: Boolean = false
 ) {
     val formattedSize: String
         get() {

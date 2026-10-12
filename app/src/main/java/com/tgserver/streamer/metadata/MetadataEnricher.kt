@@ -37,6 +37,14 @@ class MetadataEnricher {
             defaultInstance.enrich(item, isAnimeChannel, tmdbKey, tvdbKey)
             return item
         }
+
+        fun searchCandidates(
+            query: String,
+            type: String,
+            tmdbKey: String = ""
+        ): List<EnrichedMetadata> {
+            return defaultInstance.searchCandidates(query, type, tmdbKey)
+        }
     }
 
     private val httpClient = OkHttpClient.Builder()
@@ -312,6 +320,142 @@ class MetadataEnricher {
             Log.d(TAG, "Cinemeta lookup skipped: ${e.message}")
             return null
         }
+    }
+
+    fun searchCandidates(
+        query: String,
+        type: String,
+        tmdbKey: String = ""
+    ): List<EnrichedMetadata> {
+        val cleanQuery = query.trim()
+        if (cleanQuery.isBlank()) return emptyList()
+
+        val results = mutableListOf<EnrichedMetadata>()
+        val seenImdb = mutableSetOf<String>()
+        val cType = if (type == "movie") "movie" else "series"
+
+        // 1. Direct IMDb ID lookup if input looks like tt1234567
+        if (cleanQuery.matches(Regex("(?i)^tt\\d+$"))) {
+            try {
+                val url = "https://v3-cinemeta.strem.io/meta/$cType/$cleanQuery.json"
+                val req = Request.Builder().url(url).header("User-Agent", "TG-Server/1.0").build()
+                httpClient.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string()
+                        if (!body.isNullOrBlank()) {
+                            val root = JsonParser.parseString(body).asJsonObject
+                            val metaObj = root.getAsJsonObject("meta")
+                            if (metaObj != null) {
+                                val name = metaObj.get("name")?.asString
+                                val year = metaObj.get("year")?.asString
+                                val poster = metaObj.get("poster")?.asString
+                                val bg = metaObj.get("background")?.asString
+                                val desc = metaObj.get("description")?.asString
+                                val imdbId = metaObj.get("imdb_id")?.asString ?: cleanQuery
+                                val candidate = EnrichedMetadata(
+                                    title = name,
+                                    year = year,
+                                    overview = desc,
+                                    posterUrl = poster,
+                                    backdropUrl = bg,
+                                    imdbId = imdbId
+                                )
+                                results.add(candidate)
+                                seenImdb.add(imdbId.lowercase())
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        // 2. Cinemeta catalog search
+        try {
+            val enc = URLEncoder.encode(cleanQuery, "UTF-8")
+            val url = "https://v3-cinemeta.strem.io/catalog/$cType/top/search=$enc.json"
+            val req = Request.Builder().url(url).header("User-Agent", "TG-Server/1.0").build()
+            httpClient.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string()
+                    if (!body.isNullOrBlank()) {
+                        val root = JsonParser.parseString(body).asJsonObject
+                        val metas = root.getAsJsonArray("metas")
+                        if (metas != null) {
+                            for (i in 0 until minOf(metas.size(), 12)) {
+                                val obj = metas[i].asJsonObject
+                                val name = obj.get("name")?.asString ?: continue
+                                val year = obj.get("year")?.asString
+                                val poster = obj.get("poster")?.asString
+                                val bg = obj.get("background")?.asString
+                                val desc = obj.get("description")?.asString
+                                val imdbId = obj.get("imdb_id")?.asString ?: obj.get("id")?.asString
+                                if (imdbId != null && !seenImdb.add(imdbId.lowercase())) {
+                                    continue
+                                }
+                                results.add(
+                                    EnrichedMetadata(
+                                        title = name,
+                                        year = year,
+                                        overview = desc,
+                                        posterUrl = poster,
+                                        backdropUrl = bg,
+                                        imdbId = imdbId
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        // 3. TMDB search if api key available
+        if (tmdbKey.isNotBlank()) {
+            try {
+                val enc = URLEncoder.encode(cleanQuery, "UTF-8")
+                val endpoint = if (type == "movie") "search/movie" else "search/tv"
+                val url = "https://api.themoviedb.org/3/$endpoint?api_key=$tmdbKey&query=$enc"
+                val req = Request.Builder().url(url).build()
+                httpClient.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string()
+                        if (!body.isNullOrBlank()) {
+                            val root = JsonParser.parseString(body).asJsonObject
+                            val items = root.getAsJsonArray("results")
+                            if (items != null) {
+                                for (i in 0 until minOf(items.size(), 8)) {
+                                    val obj = items[i].asJsonObject
+                                    val tmdbId = obj.get("id").asInt
+                                    val name = if (type == "movie") obj.get("title")?.asString else obj.get("name")?.asString
+                                    if (name.isNullOrBlank()) continue
+                                    val overview = obj.get("overview")?.asString
+                                    val posterPath = obj.get("poster_path")?.asString
+                                    val bgPath = obj.get("backdrop_path")?.asString
+                                    val relDate = if (type == "movie") obj.get("release_date")?.asString else obj.get("first_air_date")?.asString
+                                    val year = relDate?.split("-")?.firstOrNull()
+
+                                    val posterUrl = if (!posterPath.isNullOrBlank()) "https://image.tmdb.org/t/p/w500$posterPath" else null
+                                    val bgUrl = if (!bgPath.isNullOrBlank()) "https://image.tmdb.org/t/p/original$bgPath" else null
+
+                                    results.add(
+                                        EnrichedMetadata(
+                                            title = name,
+                                            year = year,
+                                            overview = overview,
+                                            posterUrl = posterUrl,
+                                            backdropUrl = bgUrl,
+                                            tmdbId = tmdbId
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        return results
     }
 
     private fun sanitizeTitle(name: String): String {

@@ -14,6 +14,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -22,16 +23,21 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -54,9 +60,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tgserver.streamer.R
 import com.tgserver.streamer.data.model.MediaItem
+import com.tgserver.streamer.metadata.EnrichedMetadata
 import com.tgserver.streamer.theme.*
 import com.tgserver.streamer.ui.MainAppViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -193,13 +201,6 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
     val telemetry by viewModel.telemetry.collectAsState()
     val haptic = LocalHapticFeedback.current
 
-    var selectedGroup by remember { mutableStateOf<MediaGroup?>(null) }
-
-    // Intercept hardware / gesture back navigation when inside details view
-    BackHandler(enabled = selectedGroup != null) {
-        selectedGroup = null
-    }
-
     // Group raw files into distinct titles (Movies and Series entities)
     val mediaGroups = remember(allMedia) {
         allMedia.groupBy { item ->
@@ -238,6 +239,14 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                 items = items.sortedWith(compareBy({ it.season ?: 1 }, { it.episode ?: 1 }))
             )
         }.sortedBy { it.title.lowercase() }
+    }
+
+    var selectedGroupKey by remember { mutableStateOf<String?>(null) }
+    val selectedGroup = mediaGroups.find { it.key == selectedGroupKey }
+
+    // Intercept hardware / gesture back navigation when inside details view
+    BackHandler(enabled = selectedGroup != null) {
+        selectedGroupKey = null
     }
 
     // Filter media groups by category & search
@@ -285,10 +294,11 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                 // FULL SCREEN CONTENT DETAILS VIEW
                 ContentDetailsScreen(
                     group = currentGroup,
+                    viewModel = viewModel,
                     streamBaseUrl = streamBaseUrl,
                     onBack = {
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        selectedGroup = null
+                        selectedGroupKey = null
                     },
                     onCopyStream = { url ->
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -307,7 +317,7 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 20.dp, vertical = 14.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     // TOP BAR
                     Row(
@@ -354,50 +364,62 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                         }
                     }
 
-                    // SEARCH INPUT
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = { viewModel.setSearchQuery(it) },
-                        placeholder = {
-                            Text(
-                                text = "Search title, IMDb, resolution...",
-                                color = Color(0xFF6B6E7B),
-                                fontSize = 12.5.sp,
-                                fontFamily = NdotFont
-                            )
-                        },
-                        leadingIcon = {
+                    // MINIMAL & COMPACT SEARCH BAR (42dp height, sleek border)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(42.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF14151B))
+                            .border(1.dp, Color(0xFF25262F), RoundedCornerShape(12.dp))
+                            .padding(horizontal = 12.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.Search,
                                 contentDescription = "Search",
                                 tint = Color(0xFF888B98),
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(16.dp)
                             )
-                        },
-                        trailingIcon = {
-                            if (searchQuery.isNotBlank()) {
-                                IconButton(onClick = { viewModel.setSearchQuery("") }) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Clear",
-                                        tint = Color(0xFF888B98),
-                                        modifier = Modifier.size(16.dp)
+                            Box(modifier = Modifier.weight(1f)) {
+                                if (searchQuery.isEmpty()) {
+                                    Text(
+                                        text = "Search title, IMDb, resolution...",
+                                        color = Color(0xFF6B6E7B),
+                                        fontSize = 12.sp,
+                                        fontFamily = FontFamily.Default
                                     )
                                 }
+                                BasicTextField(
+                                    value = searchQuery,
+                                    onValueChange = { viewModel.setSearchQuery(it) },
+                                    singleLine = true,
+                                    textStyle = androidx.compose.ui.text.TextStyle(
+                                        color = Color.White,
+                                        fontSize = 12.5.sp,
+                                        fontFamily = FontFamily.Default
+                                    ),
+                                    cursorBrush = androidx.compose.ui.graphics.SolidColor(Color(0xFFA855F7)),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
                             }
-                        },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = Color(0xFFA855F7),
-                            unfocusedBorderColor = Color(0xFF25262F),
-                            focusedContainerColor = Color(0xFF14151B),
-                            unfocusedContainerColor = Color(0xFF14151B)
-                        ),
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                            if (searchQuery.isNotBlank()) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Clear",
+                                    tint = Color(0xFF888B98),
+                                    modifier = Modifier
+                                        .size(16.dp)
+                                        .clickable { viewModel.setSearchQuery("") }
+                                )
+                            }
+                        }
+                    }
 
                     // CATEGORY CHIPS
                     val categories = listOf(
@@ -478,7 +500,7 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                                     group = group,
                                     onClick = {
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        selectedGroup = group
+                                        selectedGroupKey = group.key
                                     }
                                 )
                             }
@@ -491,7 +513,7 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
 }
 
 /**
- * Minimalist Poster Grid Item (Aspect 2:3 with Title & Year/Type)
+ * Minimalist Poster Grid Item (Clean Poster without messy overlay badges, normal title font)
  */
 @Composable
 private fun PosterCard(
@@ -505,7 +527,7 @@ private fun PosterCard(
             .clickable { onClick() },
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        // Poster with badges
+        // Clean Poster art (Overlay quality pills removed as requested to avoid messy look)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -520,25 +542,7 @@ private fun PosterCard(
                 modifier = Modifier.fillMaxSize()
             )
 
-            // Quality Pill (Top Right)
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(6.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color.Black.copy(alpha = 0.75f))
-                    .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(6.dp))
-                    .padding(horizontal = 5.dp, vertical = 2.dp)
-            ) {
-                Text(
-                    text = group.qualityBadge,
-                    color = Color.White,
-                    fontFamily = NdotFont,
-                    fontSize = 9.sp
-                )
-            }
-
-            // Episode Count if Series (Bottom Left)
+            // Clean Episode Count badge for Series/Anime (Bottom Left)
             if (group.type == "series" || group.type == "anime") {
                 Box(
                     modifier = Modifier
@@ -558,12 +562,13 @@ private fun PosterCard(
             }
         }
 
-        // Title
+        // Title in NORMAL FONT (SemiBold, clear and legible)
         Text(
             text = group.title,
             color = Color.White,
-            fontFamily = NdotFont,
-            fontSize = 13.sp,
+            fontFamily = FontFamily.Default,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 13.5.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -573,8 +578,9 @@ private fun PosterCard(
         Text(
             text = "$yearText · ${group.type.uppercase()}",
             color = Color(0xFFA855F7),
-            fontFamily = NdotFont,
-            fontSize = 10.5.sp,
+            fontFamily = FontFamily.Default,
+            fontWeight = FontWeight.Medium,
+            fontSize = 11.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -587,14 +593,15 @@ private fun PosterCard(
 @Composable
 private fun ContentDetailsScreen(
     group: MediaGroup,
+    viewModel: MainAppViewModel,
     streamBaseUrl: String,
     onBack: () -> Unit,
     onCopyStream: (String) -> Unit,
     onRefreshMetadata: () -> Unit
 ) {
-    val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val isSeries = group.type == "series" || group.type == "anime"
+    var showRescanDialog by remember { mutableStateOf(false) }
 
     // Group episodes by Season for series
     val seasonMap = remember(group.items) {
@@ -603,6 +610,17 @@ private fun ContentDetailsScreen(
         } else {
             emptyMap()
         }
+    }
+
+    if (showRescanDialog) {
+        RescanMetadataDialog(
+            group = group,
+            viewModel = viewModel,
+            onDismiss = { showRescanDialog = false },
+            onSynced = {
+                showRescanDialog = false
+            }
+        )
     }
 
     Column(
@@ -680,10 +698,12 @@ private fun ContentDetailsScreen(
                     )
                 }
 
+                // Top bar Title in NORMAL FONT (SemiBold, clear and legible)
                 Text(
                     text = group.title,
                     color = Color.White,
-                    fontFamily = NdotFont,
+                    fontFamily = FontFamily.Default,
+                    fontWeight = FontWeight.SemiBold,
                     fontSize = 15.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -692,19 +712,39 @@ private fun ContentDetailsScreen(
                         .padding(horizontal = 12.dp)
                 )
 
-                IconButton(
-                    onClick = onRefreshMetadata,
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.6f))
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = "Refresh",
-                        tint = Color.White,
-                        modifier = Modifier.size(16.dp)
-                    )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    IconButton(
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            showRescanDialog = true
+                        },
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.6f))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Rescan Metadata",
+                            tint = Color(0xFFD8B4FE),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+
+                    IconButton(
+                        onClick = onRefreshMetadata,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.6f))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Refresh",
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
             }
         }
@@ -734,16 +774,18 @@ private fun ContentDetailsScreen(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                // Header Title in NORMAL FONT (Bold, clear and prominent)
                 Text(
                     text = group.title,
                     color = Color.White,
-                    fontFamily = NdotFont,
-                    fontSize = 18.sp,
+                    fontFamily = FontFamily.Default,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.5.sp,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
 
-                // Meta row: Year · Duration / Quality
+                // Meta row: Year · Quality · Rating
                 val year = group.year?.takeIf { it.isNotBlank() } ?: "2026"
                 Text(
                     text = "$year · ${group.qualityBadge} · ★ 8.2",
@@ -752,20 +794,56 @@ private fun ContentDetailsScreen(
                     fontSize = 11.5.sp
                 )
 
-                // Type Badge
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Color(0xFF28103F))
-                        .border(1.dp, Color(0xFF4C1D7C), RoundedCornerShape(6.dp))
-                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = group.type.uppercase(),
-                        color = Color(0xFFC084FC),
-                        fontFamily = NdotFont,
-                        fontSize = 10.sp
-                    )
+                    // Type Badge
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFF28103F))
+                            .border(1.dp, Color(0xFF4C1D7C), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = group.type.uppercase(),
+                            color = Color(0xFFC084FC),
+                            fontFamily = NdotFont,
+                            fontSize = 10.sp
+                        )
+                    }
+
+                    // Rescan Metadata pill button
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFF1E1729))
+                            .border(1.dp, Color(0xFF5B21B6), RoundedCornerShape(6.dp))
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                showRescanDialog = true
+                            }
+                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = null,
+                                tint = Color(0xFFC084FC),
+                                modifier = Modifier.size(11.dp)
+                            )
+                            Text(
+                                text = "RESCAN",
+                                color = Color(0xFFC084FC),
+                                fontFamily = NdotFont,
+                                fontSize = 9.sp
+                            )
+                        }
+                    }
                 }
 
                 // External IDs (IMDb / TMDb)
@@ -815,7 +893,7 @@ private fun ContentDetailsScreen(
 
         // STREAMS & EPISODES SECTION
         if (!isSeries) {
-            // MOVIE STREAMS
+            // MOVIE STREAMS (Multi-format listing with Hide/Unhide toggle)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -830,25 +908,25 @@ private fun ContentDetailsScreen(
                 )
 
                 group.items.forEach { streamItem ->
-                    val encodedName = try {
-                        URLEncoder.encode(streamItem.fileName.ifBlank { "movie.mp4" }, "UTF-8").replace("+", "%20")
-                    } catch (_: Exception) {
-                        "movie.mp4"
-                    }
-                    val streamUrl = "$streamBaseUrl/stream/video/${streamItem.channelId}/${streamItem.messageId}/$encodedName"
-
-                    StreamItemRow(
+                    MovieStreamItemRow(
                         item = streamItem,
-                        streamUrl = streamUrl,
-                        onCopy = { onCopyStream(streamUrl) },
-                        onPlay = {
-                            playInExternalPlayer(context, streamUrl)
+                        onToggleHide = {
+                            viewModel.toggleHideMedia(streamItem.id)
+                        },
+                        onCopy = {
+                            val encodedName = try {
+                                URLEncoder.encode(streamItem.fileName.ifBlank { "movie.mp4" }, "UTF-8").replace("+", "%20")
+                            } catch (_: Exception) {
+                                "movie.mp4"
+                            }
+                            val streamUrl = "$streamBaseUrl/stream/video/${streamItem.channelId}/${streamItem.messageId}/$encodedName"
+                            onCopyStream(streamUrl)
                         }
                     )
                 }
             }
         } else {
-            // SERIES SEASONS & EPISODES (Only existing episodes from user library)
+            // SERIES SEASONS & EPISODES (Multi-quality grouping per episode: E01 | Title | 1080p | 4K)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -862,17 +940,17 @@ private fun ContentDetailsScreen(
                     fontSize = 11.5.sp
                 )
 
-                seasonMap.forEach { (seasonNum, episodes) ->
+                seasonMap.forEach { (seasonNum, seasonItems) ->
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(16.dp))
                             .background(Color(0xFF14151B))
                             .border(1.dp, Color(0xFF262832), RoundedCornerShape(16.dp))
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        // Season Header
+                        // Season Header in NORMAL FONT (SemiBold, clear and legible)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -881,11 +959,13 @@ private fun ContentDetailsScreen(
                             Text(
                                 text = "Season $seasonNum",
                                 color = Color.White,
-                                fontFamily = NdotFont,
-                                fontSize = 14.sp
+                                fontFamily = FontFamily.Default,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 15.sp
                             )
+                            val distinctEpCount = seasonItems.map { it.episode ?: 1 }.distinct().size
                             Text(
-                                text = "${episodes.size} eps",
+                                text = "$distinctEpCount eps",
                                 color = Color(0xFF8E909A),
                                 fontFamily = NdotFont,
                                 fontSize = 11.sp
@@ -894,22 +974,22 @@ private fun ContentDetailsScreen(
 
                         HorizontalDivider(color = Color(0xFF22242D), thickness = 1.dp)
 
-                        // Episodes in library
-                        episodes.forEach { ep ->
-                            val encodedName = try {
-                                URLEncoder.encode(ep.fileName.ifBlank { "episode.mp4" }, "UTF-8").replace("+", "%20")
-                            } catch (_: Exception) {
-                                "episode.mp4"
-                            }
-                            val streamUrl = "$streamBaseUrl/stream/video/${ep.channelId}/${ep.messageId}/$encodedName"
+                        // Group files by Episode number so multi-qualities don't duplicate the row
+                        val episodesGrouped = remember(seasonItems) {
+                            seasonItems.groupBy { it.episode ?: 1 }.toSortedMap()
+                        }
 
-                            EpisodeItemRow(
-                                episode = ep,
-                                streamUrl = streamUrl,
-                                onCopy = { onCopyStream(streamUrl) },
-                                onPlay = {
-                                    playInExternalPlayer(context, streamUrl)
-                                }
+                        episodesGrouped.forEach { (epNum, epItems) ->
+                            EpisodeGroupAccordionRow(
+                                epNum = epNum,
+                                epItems = epItems,
+                                onToggleHide = { item ->
+                                    viewModel.toggleHideMedia(item.id)
+                                },
+                                onCopyStream = { streamUrl ->
+                                    onCopyStream(streamUrl)
+                                },
+                                streamBaseUrl = streamBaseUrl
                             )
                         }
                     }
@@ -923,224 +1003,677 @@ private fun ContentDetailsScreen(
 }
 
 /**
- * Stream item row for Movies
+ * Grouped Episode Row with multi-quality badges and expandable dropdown details
+ * Displays: "E01 | A Whole New Whirled | 1080p | 4K"
+ * Clicking expands dropdown to show full Telegram filename, specs, size, and Hide/Unhide toggle
  */
 @Composable
-private fun StreamItemRow(
-    item: MediaItem,
-    streamUrl: String,
-    onCopy: () -> Unit,
-    onPlay: () -> Unit
+private fun EpisodeGroupAccordionRow(
+    epNum: Int,
+    epItems: List<MediaItem>,
+    streamBaseUrl: String,
+    onToggleHide: (MediaItem) -> Unit,
+    onCopyStream: (String) -> Unit
 ) {
+    var isExpanded by remember { mutableStateOf(false) }
+    val primary = epItems.first()
+    val epTitle = epItems.firstOrNull { !it.episodeTitle.isNullOrBlank() }?.episodeTitle
+        ?.ifBlank { primary.title } ?: primary.title
+
+    // Distinct available qualities: e.g. ["1080p", "4K 2160p"]
+    val qualities = remember(epItems) {
+        epItems.map { it.quality.ifBlank { "1080p" } }.distinct()
+    }
+    val allHidden = epItems.all { it.isHidden }
+    val anyHidden = epItems.any { it.isHidden }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (isExpanded) Color(0xFF181A22) else Color(0xFF13141B))
+            .border(
+                1.dp,
+                if (isExpanded) Color(0xFF3B235E) else Color(0xFF22242E),
+                RoundedCornerShape(12.dp)
+            )
+    ) {
+        // SUMMARY HEADER ROW (Clickable to expand/collapse)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { isExpanded = !isExpanded }
+                .padding(horizontal = 12.dp, vertical = 11.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Episode Number (e.g. E01)
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color(0xFF2E230A))
+                        .border(1.dp, Color(0xFFD97706), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "E%02d".format(epNum),
+                        color = Color(0xFFFBBF24),
+                        fontFamily = NdotFont,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                // Episode Title in NORMAL FONT (SemiBold, clear and legible)
+                Text(
+                    text = epTitle,
+                    color = if (allHidden) Color(0xFF6B7280) else Color.White,
+                    fontFamily = FontFamily.Default,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+
+                Text(
+                    text = "|",
+                    color = Color(0xFF3E4150),
+                    fontSize = 12.sp
+                )
+
+                // Available Qualities Pills (e.g. 1080p | 4K)
+                qualities.forEach { q ->
+                    val is4k = q.contains("4K", ignoreCase = true) || q.contains("2160", ignoreCase = true)
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(if (is4k) Color(0xFF38155E) else Color(0xFF1E212E))
+                            .border(1.dp, if (is4k) Color(0xFF7C3AED) else Color(0xFF3B3E52), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 5.dp, vertical = 1.5.dp)
+                    ) {
+                        Text(
+                            text = q,
+                            color = if (is4k) Color(0xFFE9D5FF) else Color(0xFFCBD5E1),
+                            fontSize = 9.sp,
+                            fontFamily = NdotFont,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (anyHidden) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color(0xFF3F1318))
+                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                    ) {
+                        Text(
+                            text = if (allHidden) "HIDDEN" else "PARTIAL",
+                            color = Color(0xFFF87171),
+                            fontSize = 8.sp,
+                            fontFamily = NdotFont
+                        )
+                    }
+                }
+
+                Icon(
+                    imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = if (isExpanded) "Collapse" else "Expand",
+                    tint = Color(0xFF94A3B8),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+
+        // EXPANDED ACCORDION DETAILS (Full Telegram filename, specs, size, Hide/Unhide toggle)
+        AnimatedVisibility(
+            visible = isExpanded,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 12.dp, end = 12.dp, bottom = 12.dp, top = 2.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                HorizontalDivider(color = Color(0xFF252733), thickness = 1.dp)
+
+                epItems.forEach { item ->
+                    val isHidden = item.isHidden
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (isHidden) Color(0xFF131014) else Color(0xFF1A1C25))
+                            .border(
+                                1.dp,
+                                if (isHidden) Color(0xFF4A1924) else Color(0xFF2A2D3C),
+                                RoundedCornerShape(10.dp)
+                            )
+                            .padding(10.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            // Top Row: Quality pill, Size, Hide/Unhide Button, and Copy icon
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(5.dp))
+                                            .background(Color(0xFF2E1C0A))
+                                            .border(1.dp, Color(0xFFF59E0B), RoundedCornerShape(5.dp))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = item.qualityBadge.ifBlank { item.quality },
+                                            color = Color(0xFFFBBF24),
+                                            fontFamily = NdotFont,
+                                            fontSize = 9.5.sp
+                                        )
+                                    }
+
+                                    Text(
+                                        text = item.formattedSize,
+                                        color = Color(0xFF94A3B8),
+                                        fontFamily = NdotFont,
+                                        fontSize = 10.sp
+                                    )
+                                }
+
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Copy Stream Link Icon
+                                    val safeName = try {
+                                        URLEncoder.encode(item.fileName.ifBlank { "video.mp4" }, "UTF-8").replace("+", "%20")
+                                    } catch (_: Exception) { "video.mp4" }
+                                    val streamUrl = "$streamBaseUrl/stream/video/${item.channelId}/${item.messageId}/$safeName"
+
+                                    IconButton(
+                                        onClick = { onCopyStream(streamUrl) },
+                                        modifier = Modifier.size(26.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.ContentCopy,
+                                            contentDescription = "Copy Stream",
+                                            tint = Color(0xFF888B98),
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                    }
+
+                                    // HIDE / UNHIDE BUTTON (Replaces play/copy row as requested)
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(7.dp))
+                                            .background(if (isHidden) Color(0xFF3F1318) else Color(0xFF232532))
+                                            .border(
+                                                1.dp,
+                                                if (isHidden) Color(0xFFDC2626) else Color(0xFF3E4358),
+                                                RoundedCornerShape(7.dp)
+                                            )
+                                            .clickable { onToggleHide(item) }
+                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = if (isHidden) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                                contentDescription = if (isHidden) "Unhide" else "Hide",
+                                                tint = if (isHidden) Color(0xFFFCA5A5) else Color(0xFFCBD5E1),
+                                                modifier = Modifier.size(12.dp)
+                                            )
+                                            Text(
+                                                text = if (isHidden) "UNHIDE" else "HIDE",
+                                                color = if (isHidden) Color(0xFFFCA5A5) else Color(0xFFCBD5E1),
+                                                fontFamily = NdotFont,
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Full Telegram File Name (e.g. Peacemaker.S01E01.1080p.HEVC.Hindi-Eng.mkv)
+                            Text(
+                                text = item.fileName.ifBlank { item.title },
+                                color = if (isHidden) Color(0xFF6B7280) else Color(0xFFE2E8F0),
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                lineHeight = 15.sp,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis
+                            )
+
+                            // Status Indicator
+                            if (isHidden) {
+                                Text(
+                                    text = "Hidden: excluded from Stremio addon stream list",
+                                    color = Color(0xFFEF4444),
+                                    fontSize = 9.5.sp,
+                                    fontFamily = FontFamily.Default
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Stream item row for Movies with Hide/Unhide toggle and full filename
+ */
+@Composable
+private fun MovieStreamItemRow(
+    item: MediaItem,
+    onToggleHide: (MediaItem) -> Unit,
+    onCopy: () -> Unit
+) {
+    val isHidden = item.isHidden
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color(0xFF14151B))
-            .border(1.dp, Color(0xFF262832), RoundedCornerShape(14.dp))
-            .padding(14.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (isHidden) Color(0xFF131014) else Color(0xFF14151B))
+            .border(
+                1.dp,
+                if (isHidden) Color(0xFF4A1924) else Color(0xFF262832),
+                RoundedCornerShape(12.dp)
+            )
+            .padding(12.dp)
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Resolution Badge
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Color(0xFF2E1C0A))
-                        .border(1.dp, Color(0xFFF59E0B), RoundedCornerShape(6.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFF2E1C0A))
+                            .border(1.dp, Color(0xFFF59E0B), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = item.qualityBadge.ifBlank { item.quality },
+                            color = Color(0xFFFBBF24),
+                            fontFamily = NdotFont,
+                            fontSize = 10.sp
+                        )
+                    }
+
                     Text(
-                        text = item.qualityBadge,
-                        color = Color(0xFFFBBF24),
+                        text = item.formattedSize,
+                        color = Color(0xFF888A96),
                         fontFamily = NdotFont,
-                        fontSize = 10.sp
+                        fontSize = 10.5.sp
                     )
                 }
 
-                Text(
-                    text = item.fileName.ifBlank { item.title },
-                    color = Color.White,
-                    fontFamily = NdotFont,
-                    fontSize = 11.5.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = onCopy,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ContentCopy,
+                            contentDescription = "Copy",
+                            tint = Color(0xFF888B98),
+                            modifier = Modifier.size(13.dp)
+                        )
+                    }
+
+                    // Hide / Unhide Button
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isHidden) Color(0xFF3F1318) else Color(0xFF232532))
+                            .border(
+                                1.dp,
+                                if (isHidden) Color(0xFFDC2626) else Color(0xFF3E4358),
+                                RoundedCornerShape(8.dp)
+                            )
+                            .clickable { onToggleHide(item) }
+                            .padding(horizontal = 9.dp, vertical = 4.5.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isHidden) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = if (isHidden) "Unhide" else "Hide",
+                                tint = if (isHidden) Color(0xFFFCA5A5) else Color(0xFFCBD5E1),
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Text(
+                                text = if (isHidden) "UNHIDE" else "HIDE",
+                                color = if (isHidden) Color(0xFFFCA5A5) else Color(0xFFCBD5E1),
+                                fontFamily = NdotFont,
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
             }
 
+            // Full file name
+            Text(
+                text = item.fileName.ifBlank { item.title },
+                color = if (isHidden) Color(0xFF6B7280) else Color.White,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 11.5.sp,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            if (isHidden) {
+                Text(
+                    text = "Hidden: excluded from Stremio addon stream list",
+                    color = Color(0xFFEF4444),
+                    fontSize = 9.5.sp,
+                    fontFamily = FontFamily.Default
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Interactive Rescan & Metadata Re-sync Modal Dialog
+ * Allows searching Cinemeta / IMDb ID manually and re-linking correct title/posters
+ */
+@Composable
+private fun RescanMetadataDialog(
+    group: MediaGroup,
+    viewModel: MainAppViewModel,
+    onDismiss: () -> Unit,
+    onSynced: (EnrichedMetadata) -> Unit
+) {
+    var searchQuery by remember { mutableStateOf(group.title) }
+    var isLoading by remember { mutableStateOf(false) }
+    var results by remember { mutableStateOf<List<EnrichedMetadata>>(emptyList()) }
+    var searchAttempted by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        isLoading = true
+        searchAttempted = true
+        results = viewModel.searchMetadataCandidates(searchQuery, group.type)
+        isLoading = false
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF13141B),
+        titleContentColor = Color.White,
+        shape = RoundedCornerShape(18.dp),
+        title = {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "${item.formattedSize} ${if (item.isSplit) "· split" else ""}",
-                    color = Color(0xFF888A96),
+                    text = "Rescan Metadata",
+                    color = Color.White,
                     fontFamily = NdotFont,
-                    fontSize = 10.5.sp
+                    fontSize = 17.sp,
+                    letterSpacing = 0.5.sp
                 )
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // Copy URL
-                    Button(
-                        onClick = onCopy,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F2129)),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                        modifier = Modifier.height(30.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ContentCopy,
-                                contentDescription = "Copy",
-                                tint = Color.White,
-                                modifier = Modifier.size(12.dp)
-                            )
-                            Text(
-                                text = "COPY",
-                                color = Color.White,
-                                fontFamily = NdotFont,
-                                fontSize = 9.5.sp
-                            )
-                        }
-                    }
-
-                    // Play Stream
-                    Button(
-                        onClick = onPlay,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFA855F7)),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                        modifier = Modifier.height(30.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.PlayArrow,
-                                contentDescription = "Play",
-                                tint = Color.White,
-                                modifier = Modifier.size(13.dp)
-                            )
-                            Text(
-                                text = "PLAY",
-                                color = Color.White,
-                                fontFamily = NdotFont,
-                                fontSize = 9.5.sp
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * Episode item row for Series
- */
-@Composable
-private fun EpisodeItemRow(
-    episode: MediaItem,
-    streamUrl: String,
-    onCopy: () -> Unit,
-    onPlay: () -> Unit
-) {
-    val epNumber = episode.episode ?: 1
-    val epTitle = episode.episodeTitle?.takeIf { it.isNotBlank() } ?: episode.title
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(
-                modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "E%02d".format(epNumber),
-                    color = Color(0xFFFBBF24),
-                    fontFamily = NdotFont,
-                    fontSize = 13.sp
-                )
-
-                Column {
-                    Text(
-                        text = epTitle,
-                        color = Color.White,
-                        fontFamily = NdotFont,
-                        fontSize = 12.5.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = "1 stream · ${episode.qualityBadge} · ${episode.formattedSize}",
-                        color = Color(0xFF888A96),
-                        fontFamily = NdotFont,
-                        fontSize = 10.sp
-                    )
-                }
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                IconButton(
-                    onClick = onCopy,
-                    modifier = Modifier.size(32.dp)
-                ) {
+                IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
                     Icon(
-                        imageVector = Icons.Default.ContentCopy,
-                        contentDescription = "Copy URL",
-                        tint = Color(0xFFC4C6D0),
-                        modifier = Modifier.size(15.dp)
-                    )
-                }
-
-                IconButton(
-                    onClick = onPlay,
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF2D1645))
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "Play",
-                        tint = Color(0xFFD8B4FE),
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close",
+                        tint = Color(0xFF888B98),
                         modifier = Modifier.size(16.dp)
                     )
                 }
             }
-        }
-    }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 460.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "Search Cinemeta or enter IMDb ID (e.g. tt39395275) to re-sync correct title, poster, and stream mappings.",
+                    color = Color(0xFF8E909A),
+                    fontSize = 11.5.sp,
+                    lineHeight = 16.sp
+                )
+
+                // Search field + Search button
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(40.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF1A1C25))
+                            .border(1.dp, Color(0xFF2E3242), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 10.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        BasicTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            singleLine = true,
+                            textStyle = androidx.compose.ui.text.TextStyle(
+                                color = Color.White,
+                                fontSize = 12.5.sp,
+                                fontFamily = FontFamily.Default
+                            ),
+                            cursorBrush = androidx.compose.ui.graphics.SolidColor(Color(0xFFA855F7)),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                isLoading = true
+                                searchAttempted = true
+                                results = viewModel.searchMetadataCandidates(searchQuery, group.type)
+                                isLoading = false
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFA855F7)),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                        modifier = Modifier.height(40.dp)
+                    ) {
+                        Text(
+                            text = "SEARCH",
+                            color = Color.White,
+                            fontFamily = NdotFont,
+                            fontSize = 10.sp,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
+                }
+
+                // Results list
+                if (isLoading) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(140.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            color = Color(0xFFA855F7),
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.dp
+                        )
+                    }
+                } else if (results.isEmpty() && searchAttempted) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(100.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "No matches found. Try entering an IMDb ID (e.g. tt1234567)",
+                            color = Color(0xFF717482),
+                            fontSize = 11.5.sp,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(results) { candidate ->
+                            CandidateCard(
+                                candidate = candidate,
+                                onSelect = {
+                                    viewModel.applyManualMetadata(group.items, candidate)
+                                    onSynced(candidate)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {}
+    )
 }
 
-/**
- * Launch external video player (VLC, MX Player, Just Player, etc.) via Android Intent
- */
-private fun playInExternalPlayer(context: Context, streamUrl: String) {
-    try {
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(Uri.parse(streamUrl), "video/*")
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+@Composable
+private fun CandidateCard(
+    candidate: EnrichedMetadata,
+    onSelect: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF181A22))
+            .border(1.dp, Color(0xFF282A36), RoundedCornerShape(12.dp))
+            .clickable { onSelect() }
+            .padding(10.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Poster thumbnail
+            RemoteImage(
+                url = candidate.posterUrl,
+                contentDescription = candidate.title,
+                modifier = Modifier
+                    .width(42.dp)
+                    .height(60.dp)
+                    .clip(RoundedCornerShape(6.dp))
+            )
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                Text(
+                    text = candidate.title ?: "Unknown",
+                    color = Color.White,
+                    fontFamily = FontFamily.Default,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (!candidate.year.isNullOrBlank()) {
+                        Text(
+                            text = candidate.year,
+                            color = Color(0xFFA855F7),
+                            fontFamily = NdotFont,
+                            fontSize = 10.sp
+                        )
+                    }
+                    if (!candidate.imdbId.isNullOrBlank()) {
+                        Text(
+                            text = candidate.imdbId,
+                            color = Color(0xFFFBBF24),
+                            fontFamily = NdotFont,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+
+                if (!candidate.overview.isNullOrBlank()) {
+                    Text(
+                        text = candidate.overview,
+                        color = Color(0xFF888A96),
+                        fontSize = 10.5.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        lineHeight = 14.sp
+                    )
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xFF2E1547))
+                    .border(1.dp, Color(0xFFA855F7), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    text = "SYNC",
+                    color = Color(0xFFD8B4FE),
+                    fontFamily = NdotFont,
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
-        context.startActivity(Intent.createChooser(intent, "Play stream with..."))
-    } catch (_: Exception) {
     }
 }

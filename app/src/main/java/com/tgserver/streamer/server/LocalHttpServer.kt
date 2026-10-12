@@ -182,7 +182,7 @@ class LocalHttpServer(
             } catch (_: Exception) { "" }
         } else ""
 
-        var mediaList = tgClient.getAllMedia().filter { item ->
+        var mediaList = tgClient.getAllMedia().filter { !it.isHidden }.filter { item ->
             val isItemSeries = item.type == "series" || item.type == "anime" || (item.season != null && item.episode != null)
             if (isAnime) {
                 item.type == "anime" || item.kitsuId != null || (tgClient.getChannel(item.channelId)?.isAnime == true)
@@ -382,7 +382,7 @@ class LocalHttpServer(
             targetEpisode = idParts.getOrNull(2)?.toIntOrNull()
         }
 
-        val allMedia = tgClient.getAllMedia()
+        val allMedia = tgClient.getAllMedia().filter { !it.isHidden }
 
         // 1. Direct ID matching (IMDb ID, Kitsu ID, TMDB ID, local tg_ ID)
         var matchedItems = allMedia.filter { item ->

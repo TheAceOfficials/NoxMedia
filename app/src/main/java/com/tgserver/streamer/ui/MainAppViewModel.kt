@@ -13,6 +13,8 @@ import com.tgserver.streamer.data.model.AuthSession
 import com.tgserver.streamer.data.model.ChannelInfo
 import com.tgserver.streamer.data.model.MediaItem
 import com.tgserver.streamer.data.model.ServerConfig
+import com.tgserver.streamer.metadata.EnrichedMetadata
+import com.tgserver.streamer.metadata.MetadataEnricher
 import com.tgserver.streamer.server.LocalHttpServer
 import com.tgserver.streamer.service.StreamerForegroundService
 import com.tgserver.streamer.telegram.TelegramClientManager
@@ -334,6 +336,38 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                 if (enriched != null) count++
             }
             Toast.makeText(getApplication(), "✓ Enriched metadata for $count items", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun toggleHideMedia(itemId: String): Boolean {
+        val newState = tgClient.toggleHideMediaItem(itemId)
+        val msg = if (newState) "Item hidden from Stremio" else "Item unhidden"
+        Toast.makeText(getApplication(), msg, Toast.LENGTH_SHORT).show()
+        return newState
+    }
+
+    suspend fun searchMetadataCandidates(query: String, type: String): List<EnrichedMetadata> = withContext(Dispatchers.IO) {
+        val tmdbKey = prefs.getString("tmdb_api_key", "") ?: ""
+        MetadataEnricher.searchCandidates(query, type, tmdbKey)
+    }
+
+    fun applyManualMetadata(groupItems: List<MediaItem>, meta: EnrichedMetadata) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val updated = groupItems.map { item ->
+                item.copy(
+                    title = meta.title ?: item.title,
+                    year = meta.year ?: item.year,
+                    overview = meta.overview ?: item.overview,
+                    posterUrl = meta.posterUrl ?: item.posterUrl,
+                    backdropUrl = meta.backdropUrl ?: item.backdropUrl,
+                    imdbId = meta.imdbId ?: item.imdbId,
+                    tmdbId = meta.tmdbId ?: item.tmdbId
+                )
+            }
+            tgClient.updateMediaItems(updated)
+            withContext(Dispatchers.Main) {
+                Toast.makeText(getApplication(), "✓ Metadata synced: ${meta.title}", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 

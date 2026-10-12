@@ -631,6 +631,20 @@ class TelegramClientManager(private val context: Context) {
         saveMediaIndex()
     }
 
+    fun updateMediaItems(items: List<MediaItem>) {
+        items.forEach { mediaIndex[it.id] = it }
+        saveMediaIndex()
+    }
+
+    fun toggleHideMediaItem(itemId: String): Boolean {
+        val existing = mediaIndex[itemId] ?: return false
+        val newHidden = !existing.isHidden
+        val updated = existing.copy(isHidden = newHidden)
+        mediaIndex[itemId] = updated
+        saveMediaIndex()
+        return newHidden
+    }
+
     suspend fun enrichExistingMedia(itemId: String): MediaItem? = withContext(Dispatchers.IO) {
         val existing = mediaIndex[itemId] ?: return@withContext null
         val enriched = com.tgserver.streamer.metadata.MetadataEnricher.enrich(existing)
