@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -950,7 +951,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                             .border(1.dp, StatusRed.copy(alpha = 0.3f), CircleShape)
                     ) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Logout,
+                            imageVector = Icons.AutoMirrored.Filled.ExitToApp,
                             contentDescription = null,
                             tint = StatusRed,
                             modifier = Modifier.size(18.dp)
