@@ -38,11 +38,12 @@ data class MediaItem(
     val id: String, // e.g. "tg_channelId_messageId"
     val channelId: Long,
     val messageId: Int,
-    val title: String,
+    var title: String,
     val type: String = "movie", // "movie" or "series"
-    val year: String? = null,
+    var year: String? = null,
     val season: Int? = null,
     val episode: Int? = null,
+    var episodeTitle: String? = null,
     val quality: String = "1080p", // "4K", "1080p", "720p", "HDR"
     val qualityBadge: String = quality,
     val sizeBytes: Long = 0L,
@@ -50,7 +51,10 @@ data class MediaItem(
     val mimeType: String = "video/mp4",
     val fileName: String = "",
     var posterUrl: String? = null,
-    val overview: String? = null,
+    var backdropUrl: String? = null,
+    var overview: String? = null,
+    var imdbId: String? = null,
+    var tmdbId: Int? = null,
     val isSplit: Boolean = false,
     val parts: List<SplitPart> = emptyList()
 ) {

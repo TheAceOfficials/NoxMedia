@@ -42,6 +42,7 @@ class TelegramClientManager(private val context: Context) {
         .readTimeout(20, TimeUnit.SECONDS)
         .writeTimeout(20, TimeUnit.SECONDS)
         .build()
+    private val metadataEnricher = com.tgserver.streamer.metadata.MetadataEnricher()
 
     private val _sessionState = MutableStateFlow(AuthSession())
     val sessionState: StateFlow<AuthSession> = _sessionState.asStateFlow()
@@ -595,6 +596,19 @@ class TelegramClientManager(private val context: Context) {
         }
     }
 
+    fun updateMediaItem(item: MediaItem) {
+        mediaIndex[item.id] = item
+        saveMediaIndex()
+    }
+
+    suspend fun enrichExistingMedia(itemId: String): MediaItem? = withContext(Dispatchers.IO) {
+        val existing = mediaIndex[itemId] ?: return@withContext null
+        val enriched = com.tgserver.streamer.metadata.MetadataEnricher.enrich(existing)
+        mediaIndex[itemId] = enriched
+        saveMediaIndex()
+        enriched
+    }
+
     suspend fun syncChannel(channelId: Long, limit: Int = 150): Result<Int> = withContext(Dispatchers.IO) {
         try {
             val apiId = getApiId()
@@ -651,6 +665,17 @@ class TelegramClientManager(private val context: Context) {
                         isSplit = mObj.optBoolean("isSplit", false),
                         parts = partsList
                     )
+
+                    // Enrich metadata with Kitsu / TMDB / Cinemeta
+                    val tmdbKey = prefs.getString("tmdb_api_key", "") ?: ""
+                    val tvdbKey = prefs.getString("tvdb_api_key", "") ?: ""
+                    metadataEnricher.enrich(
+                        item = item,
+                        isAnimeChannel = isAnime,
+                        tmdbKey = tmdbKey,
+                        tvdbKey = tvdbKey
+                    )
+
                     mediaIndex[item.id] = item
                     added++
                 }

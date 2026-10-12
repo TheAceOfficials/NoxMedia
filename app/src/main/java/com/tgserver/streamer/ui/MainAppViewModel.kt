@@ -13,6 +13,7 @@ import com.tgserver.streamer.data.model.AuthSession
 import com.tgserver.streamer.data.model.ChannelInfo
 import com.tgserver.streamer.data.model.MediaItem
 import com.tgserver.streamer.data.model.ServerConfig
+import com.tgserver.streamer.server.LocalHttpServer
 import com.tgserver.streamer.service.StreamerForegroundService
 import com.tgserver.streamer.telegram.TelegramClientManager
 import kotlinx.coroutines.Dispatchers
@@ -130,7 +131,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             while (true) {
                 val server = StreamerForegroundService.activeServer
-                val ip = server?.getLocalIpAddress() ?: "127.0.0.1"
+                val ip = server?.getLocalIpAddress() ?: LocalHttpServer.getLocalIpAddress()
                 val port = _config.value.port
                 val isRunning = StreamerForegroundService.isServiceRunning
                 val uptimeSec = (System.currentTimeMillis() - startTime) / 1000
@@ -313,6 +314,27 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     fun removeChannel(channelId: Long) {
         tgClient.removeChannel(channelId)
         Toast.makeText(getApplication(), "Channel removed", Toast.LENGTH_SHORT).show()
+    }
+
+    fun refreshMediaMetadata(item: MediaItem) {
+        viewModelScope.launch {
+            val enriched = tgClient.enrichExistingMedia(item.id)
+            if (enriched != null) {
+                Toast.makeText(getApplication(), "✓ Metadata enriched: ${enriched.title}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    fun refreshAllLibraryMetadata() {
+        viewModelScope.launch {
+            val all = tgClient.getAllMedia()
+            var count = 0
+            for (item in all) {
+                val enriched = tgClient.enrichExistingMedia(item.id)
+                if (enriched != null) count++
+            }
+            Toast.makeText(getApplication(), "✓ Enriched metadata for $count items", Toast.LENGTH_SHORT).show()
+        }
     }
 
     // --- Telegram Auth Actions ---
@@ -520,7 +542,6 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             tvdbApiKey = tvdb.trim()
         )
         saveStoredConfig(updated)
-        Toast.makeText(getApplication(), "✓ Metadata provider keys saved", Toast.LENGTH_SHORT).show()
     }
 
     fun updatePosterSettings(url: String) {

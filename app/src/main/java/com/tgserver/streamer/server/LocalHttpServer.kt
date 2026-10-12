@@ -24,22 +24,41 @@ class LocalHttpServer(
     private val gson = Gson()
     private val startTime = System.currentTimeMillis()
 
-    fun getLocalIpAddress(): String {
-        try {
-            val interfaces = NetworkInterface.getNetworkInterfaces()
-            while (interfaces.hasMoreElements()) {
-                val networkInterface = interfaces.nextElement()
-                val addresses = networkInterface.inetAddresses
-                while (addresses.hasMoreElements()) {
-                    val address = addresses.nextElement()
-                    if (!address.isLoopbackAddress && address is Inet4Address) {
-                        return address.hostAddress ?: "127.0.0.1"
+    fun getLocalIpAddress(): String = Companion.getLocalIpAddress()
+
+    companion object {
+        fun getLocalIpAddress(): String {
+            try {
+                val candidates = mutableListOf<Pair<String, String>>()
+                val interfaces = NetworkInterface.getNetworkInterfaces()
+                while (interfaces.hasMoreElements()) {
+                    val iface = interfaces.nextElement()
+                    if (iface.isLoopback || !iface.isUp) continue
+                    val addresses = iface.inetAddresses
+                    while (addresses.hasMoreElements()) {
+                        val addr = addresses.nextElement()
+                        if (!addr.isLoopbackAddress && addr is Inet4Address) {
+                            val host = addr.hostAddress ?: continue
+                            candidates.add(Pair(iface.name.lowercase(), host))
+                        }
                     }
                 }
+
+                // 1. Prioritize Wi-Fi or Ethernet interfaces (wlan0, eth0, ap0)
+                val wifi = candidates.firstOrNull { it.first.contains("wlan") || it.first.contains("eth") || it.first.contains("ap") }
+                if (wifi != null) return wifi.second
+
+                // 2. Prioritize common private network IP ranges
+                val privateRange = candidates.firstOrNull {
+                    it.second.startsWith("192.168.") || it.second.startsWith("10.") || it.second.startsWith("172.")
+                }
+                if (privateRange != null) return privateRange.second
+
+                if (candidates.isNotEmpty()) return candidates.first().second
+            } catch (_: Exception) {
             }
-        } catch (_: Exception) {
+            return "127.0.0.1"
         }
-        return "127.0.0.1"
     }
 
     override fun serve(session: IHTTPSession): Response {
@@ -109,7 +128,7 @@ class LocalHttpServer(
             addProperty("id", "org.tgserver.streamer")
             addProperty("version", "1.0.0")
             addProperty("name", "TG-Server Streamer")
-            addProperty("description", "Direct Telegram channel video streamer with SpatialPosters integration")
+            addProperty("description", "Direct Telegram channel video streamer with SpatialPosters & Kitsu/TMDB integration")
             addProperty("logo", "https://lh3.googleusercontent.com/aida/AEtjO1XxF5nLod1dKj8IrkfY2sKq1asKsR74gub1jDyICCeoafQ6Dh5N6bGXc8PAqlJkXYlWXajcnx4pVNnZX2pM9Ra923Ml5jb0jvAdarsZqKIj-yYVPDpCufiBbr8kb-kHeO3ymMD4-VoMVeVlJYOx8J0b4lEJpK2yAgUA8edYgOHhCTWrPUrSYWP6ec9qa80nJgzFgxMxgeIMqJ4lOX40yq670kg84dITxJghMvwrPMzL_NtP5hBpi82AQyAN")
             add("types", gson.toJsonTree(listOf("movie", "series")))
             add("catalogs", gson.toJsonTree(listOf(
@@ -127,7 +146,14 @@ class LocalHttpServer(
             if (isSeries) it.type == "series" else it.type == "movie"
         }
 
-        val metasArray = mediaList.map { item ->
+        // For series, group by title so multiple episodes show as a single series card
+        val distinctShows = if (isSeries) {
+            mediaList.distinctBy { it.title.lowercase().trim() }
+        } else {
+            mediaList
+        }
+
+        val metasArray = distinctShows.map { item ->
             val poster = item.posterUrl ?: posterService.resolvePoster(
                 item.title,
                 config.customPosterUrl,
@@ -135,13 +161,14 @@ class LocalHttpServer(
             )
             item.posterUrl = poster
 
+            val desc = item.overview ?: "${item.qualityBadge} • ${item.formattedSize}"
             mapOf(
                 "id" to item.id,
                 "type" to item.type,
                 "name" to item.title,
                 "poster" to (poster ?: "https://images.metahub.space/poster/medium/placeholder/img"),
                 "releaseInfo" to (item.year ?: "2024"),
-                "description" to (item.overview ?: "${item.qualityBadge} • ${item.formattedSize}")
+                "description" to desc
             )
         }
 
@@ -164,15 +191,37 @@ class LocalHttpServer(
             config.customPosterApiKey
         )
 
-        val metaObj = mapOf(
+        // For series, build the videos array so Stremio displays seasons & episodes
+        val videosList = if (item.type == "series") {
+            val episodes = tgClient.getAllMedia().filter {
+                it.type == "series" && (it.title.equals(item.title, ignoreCase = true) || it.id == item.id)
+            }
+            episodes.map { ep ->
+                val s = ep.season ?: 1
+                val e = ep.episode ?: 1
+                mapOf(
+                    "id" to "${ep.id}:$s:$e",
+                    "title" to (ep.episodeTitle ?: "Episode $e"),
+                    "season" to s,
+                    "episode" to e,
+                    "released" to "${ep.year ?: "2024"}-01-01T00:00:00.000Z"
+                )
+            }
+        } else null
+
+        val metaObj = mutableMapOf<String, Any?>(
             "id" to item.id,
             "type" to item.type,
             "name" to item.title,
             "year" to (item.year ?: "2024"),
             "poster" to (poster ?: "https://images.metahub.space/poster/medium/placeholder/img"),
+            "background" to (item.backdropUrl ?: poster ?: "https://images.metahub.space/background/medium/placeholder/img"),
             "description" to (item.overview ?: "${item.qualityBadge} • ${item.formattedSize} • ${item.formattedDuration}"),
             "genres" to listOf("Telegram", item.quality)
         )
+        if (videosList != null) {
+            metaObj["videos"] = videosList
+        }
 
         val res = mapOf("meta" to metaObj)
         return newFixedLengthResponse(Response.Status.OK, "application/json", gson.toJson(res))
@@ -180,19 +229,32 @@ class LocalHttpServer(
 
     private fun handleStreamDescriptor(uri: String): Response {
         val parts = uri.removeSuffix(".json").split("/")
-        val id = parts.lastOrNull() ?: ""
-        val item = tgClient.getMediaById(id)
+        val rawId = parts.lastOrNull() ?: ""
+
+        // Handle composite IDs like "tg_channelId_msgId:1:1"
+        val baseId = rawId.split(":").firstOrNull() ?: rawId
+        val item = tgClient.getMediaById(baseId)
+            ?: tgClient.getAllMedia().find { it.id == baseId || it.id == rawId }
 
         if (item == null) {
             return newFixedLengthResponse(Response.Status.OK, "application/json", "{\"streams\":[]}")
         }
 
         val localIp = getLocalIpAddress()
-        val streamUrl = "http://$localIp:${config.port}/stream/video/${item.channelId}/${item.messageId}"
+        val rawFileName = if (item.fileName.isNotBlank()) item.fileName else "${item.title}.mkv"
+        val safeFileName = try {
+            java.net.URLEncoder.encode(rawFileName, "UTF-8").replace("+", "%20")
+        } catch (_: Exception) {
+            "video.mkv"
+        }
+        val streamUrl = "http://$localIp:${config.port}/stream/video/${item.channelId}/${item.messageId}/$safeFileName"
+
+        val epText = if (item.season != null && item.episode != null) "S${String.format("%02d", item.season)}E${String.format("%02d", item.episode)} • " else ""
+        val epTitleText = if (!item.episodeTitle.isNullOrBlank()) "${item.episodeTitle}\n" else ""
 
         val stream = mapOf(
             "name" to "TG-Server (${item.quality})",
-            "title" to "${item.title} [${item.qualityBadge} • ${item.formattedSize}]",
+            "title" to "${item.title}\n$epTitleText$epText[${item.qualityBadge} • ${item.formattedSize}]",
             "url" to streamUrl
         )
 
@@ -204,7 +266,7 @@ class LocalHttpServer(
 
     private fun handleVideoStream(uri: String, headers: Map<String, String>): Response {
         val parts = uri.split("/")
-        // uri format: /stream/video/<channelId>/<messageId>
+        // uri format: /stream/video/<channelId>/<messageId> or /stream/video/<channelId>/<messageId>/<filename>
         if (parts.size < 5) {
             return newFixedLengthResponse(Response.Status.BAD_REQUEST, "text/plain", "Invalid stream path")
         }
@@ -228,11 +290,12 @@ class LocalHttpServer(
         }
 
         val chunk = tgClient.getStreamSource(channelId, messageId, startByte, endByte)
+        val mime = if (uri.contains(".mkv", ignoreCase = true)) "video/x-matroska" else chunk.mimeType
 
         val response = if (rangeHeader != null) {
             newFixedLengthResponse(
                 Response.Status.PARTIAL_CONTENT,
-                chunk.mimeType,
+                mime,
                 chunk.inputStream,
                 chunk.contentLength
             ).apply {
@@ -241,7 +304,7 @@ class LocalHttpServer(
         } else {
             newFixedLengthResponse(
                 Response.Status.OK,
-                chunk.mimeType,
+                mime,
                 chunk.inputStream,
                 chunk.totalSize
             )
@@ -249,6 +312,7 @@ class LocalHttpServer(
 
         response.addHeader("Accept-Ranges", "bytes")
         response.addHeader("Content-Length", chunk.contentLength.toString())
+        response.addHeader("Content-Disposition", "inline")
         return response
     }
 
