@@ -18,10 +18,24 @@ permissions:
 
 jobs:
   build:
-    name: Build Android APK
+    name: Build ${{ matrix.flavor }} APK
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - flavor: "arm64"
+            task: "assembleArm64Debug"
+            apk_subpath: "arm64/debug/app-arm64-debug.apk"
+            output_name: "TG-Server-arm64-v8a.apk"
+          - flavor: "armv7"
+            task: "assembleArmv7Debug"
+            apk_subpath: "armv7/debug/app-armv7-debug.apk"
+            output_name: "TG-Server-armeabi-v7a.apk"
+          - flavor: "universal"
+            task: "assembleUniversalDebug"
+            apk_subpath: "universal/debug/app-universal-debug.apk"
+            output_name: "TG-Server-universal.apk"
 
     steps:
       - name: Checkout Code
@@ -33,10 +47,10 @@ jobs:
           distribution: "temurin"
           java-version: "17"
 
-      - name: Set up Python 3.12
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.11"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -50,31 +64,51 @@ jobs:
       - name: Grant Execute Permission for Gradlew
         run: chmod +x gradlew
 
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace --no-daemon
+      - name: Build APK (${{ matrix.flavor }})
+        run: ./gradlew ${{ matrix.task }} --stacktrace --no-daemon
 
-      - name: Upload Debug APK Artifact
+      - name: Prepare Output APK
+        run: |
+          mkdir -p output
+          cp app/build/outputs/apk/${{ matrix.apk_subpath }} output/${{ matrix.output_name }}
+
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: TGServer-Debug-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: ${{ matrix.output_name }}
+          path: output/${{ matrix.output_name }}
           if-no-files-found: error
           retention-days: 14
 
-      - name: Publish Direct APK to GitHub Releases
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
+  release:
+    name: Publish APKs to GitHub Releases
+    needs: build
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all APKs
+        uses: actions/download-artifact@v4
+        with:
+          path: release-apks
+          merge-multiple: true
+
+      - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'latest' }}
           name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'TG-Server Latest APK' }}
           body: |
-            Direct APK build for TG-Server Mobile Streamer engine.
-            Download `app-debug.apk` directly below (no zip extraction required).
-          files: app/build/outputs/apk/debug/app-debug.apk
+            Direct APK downloads for TG-Server Mobile Streamer engine:
+
+            - 📱 **TG-Server-arm64-v8a.apk**: Modern 64-bit Android devices (Recommended, ~35MB)
+            - 📱 **TG-Server-armeabi-v7a.apk**: Older & budget 32-bit Android devices (Compatible with older phones, ~33MB)
+            - 📦 **TG-Server-universal.apk**: Universal build (Contains all architectures, ~65MB)
+          files: release-apks/*.apk
           draft: false
           prerelease: false
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-
