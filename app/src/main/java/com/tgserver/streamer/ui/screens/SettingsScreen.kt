@@ -19,8 +19,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.BasicAlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -39,6 +40,7 @@ import com.tgserver.streamer.theme.*
 import com.tgserver.streamer.ui.MainAppViewModel
 import com.tgserver.streamer.ui.components.*
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(viewModel: MainAppViewModel) {
     val context = LocalContext.current
@@ -65,12 +67,17 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
     var duplicateScanCount by remember { mutableStateOf<Int?>(null) }
     var deadFilesScanCount by remember { mutableStateOf<Int?>(null) }
 
-    AdaptiveScreenContainer {
+    // Dialogs state
+    var showLogoutDialog by remember { mutableStateOf(false) }
+    var showRestoreDialog by remember { mutableStateOf(false) }
+    var restoreJsonInput by remember { mutableStateOf("") }
+
+    AdaptiveScreenContainer(applyInsets = false) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 24.dp),
+                .padding(horizontal = 20.dp, vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
             // ==================== TOP BADGE & TITLE ====================
@@ -186,10 +193,10 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
 
                     NothingPillButton(
                         text = "Logout",
-                        onClick = { viewModel.logout() },
+                        onClick = { showLogoutDialog = true },
                         variant = NothingButtonVariant.Ghost,
                         height = 34.dp,
-                        modifier = Modifier.width(76.dp)
+                        modifier = Modifier.wrapContentWidth()
                     )
                 }
             }
@@ -228,32 +235,46 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
+                        .clip(RoundedCornerShape(16.dp))
                         .background(SurfaceCardElevated.copy(alpha = 0.5f))
-                        .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
+                        .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp))
                         .padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text(
-                        text = "CASCADE FALLBACK ENGINE",
-                        color = TextPrimary,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
-                        letterSpacing = 0.8.sp
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "CASCADE FALLBACK ENGINE",
+                            color = TextPrimary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            letterSpacing = 0.8.sp
+                        )
+
+                        NothingDotBadge(
+                            text = "AUTO-SWAP",
+                            dotColor = StatusGreen,
+                            textColor = StatusGreen
+                        )
+                    }
 
                     FallbackPipelineRow(
                         category = "Movies",
-                        pipeline = "TMDB → Cinemeta (Fallback)"
+                        steps = listOf("TMDB", "Cinemeta")
                     )
+
                     FallbackPipelineRow(
                         category = "Series",
-                        pipeline = "TVDB → TMDB → Cinemeta"
+                        steps = listOf("TVDB", "TMDB", "Cinemeta")
                     )
+
                     FallbackPipelineRow(
                         category = "Anime",
-                        pipeline = "Kitsu → TVDB → TMDB → Cinemeta"
+                        steps = listOf("Kitsu", "TVDB", "TMDB", "Cinemeta")
                     )
 
                     Spacer(modifier = Modifier.height(2.dp))
@@ -269,7 +290,9 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
 
                 NothingPillButton(
                     text = "Save Provider Keys →",
-                    onClick = { viewModel.updateMetadataProviders(tmdbKeyInput, tvdbKeyInput) },
+                    onClick = {
+                        viewModel.updateMetadataProviders(tmdbKeyInput, tvdbKeyInput)
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     variant = NothingButtonVariant.Secondary,
                     height = 46.dp
@@ -288,7 +311,19 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     label = "CUSTOM POSTER TEMPLATE URL",
                     placeholder = "https://custom-posters.domain/template/{id}",
                     isMonospace = true,
-                    singleLine = true
+                    singleLine = true,
+                    trailingIcon = if (posterUrlInput.isNotBlank()) {
+                        {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Clear",
+                                tint = TextTertiary,
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .clickable { posterUrlInput = "" }
+                            )
+                        }
+                    } else null
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -331,7 +366,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 val qualities = listOf("Any", "4K", "2K", "1080p", "720p", "480p")
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
                     qualities.forEach { q ->
                         val isSelected = selectedQuality == q
@@ -351,7 +386,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                             Text(
                                 text = q,
                                 color = if (isSelected) Color(0xFF070709) else TextSecondary,
-                                fontSize = 12.sp,
+                                fontSize = 11.5.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                             )
                         }
@@ -366,7 +401,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
-                DotDivider(dotsCount = 18)
+                DotDivider(dotsCount = 20)
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Hide Cam/TS Toggle Row
@@ -407,9 +442,11 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 title = "SERVER & NETWORK",
                 description = "Configure local port, streaming buffer chunks, and remote tunnel URLs."
             ) {
+                // Aligned Local Port & Buffer Chunk side-by-side
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.Top
                 ) {
                     Box(modifier = Modifier.weight(1f)) {
                         NothingTextField(
@@ -424,34 +461,57 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     }
 
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "BUFFER CHUNK",
-                            color = TextSecondary,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            letterSpacing = 0.5.sp,
-                            modifier = Modifier.padding(start = 2.dp, bottom = 6.dp)
-                        )
+                        // Harmonized Label Row matching NothingTextField
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 4.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(5.dp)
+                                    .background(TextTertiary, CircleShape)
+                            )
+                            Text(
+                                text = "BUFFER CHUNK",
+                                color = TextSecondary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                letterSpacing = 0.2.sp
+                            )
+                        }
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        // Aligned segmented button row matching field height
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(56.dp)
+                                .clip(RoundedCornerShape(18.dp))
+                                .border(1.dp, BorderSubtle, RoundedCornerShape(18.dp))
+                                .background(SurfaceCardElevated)
+                                .padding(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             listOf(512, 1024, 2048).forEach { kb ->
                                 val isSelected = selectedBufferKb == kb
                                 Box(
                                     contentAlignment = Alignment.Center,
                                     modifier = Modifier
                                         .weight(1f)
-                                        .height(48.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(if (isSelected) Color(0xFFFFFFFF) else SurfaceCardElevated)
-                                        .border(1.dp, if (isSelected) Color.Transparent else BorderSubtle, RoundedCornerShape(12.dp))
+                                        .fillMaxHeight()
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(if (isSelected) Color(0xFFFFFFFF) else Color.Transparent)
                                         .clickable { selectedBufferKb = kb }
                                 ) {
                                     Text(
                                         text = if (kb >= 1024) "${kb / 1024}M" else "${kb}K",
                                         color = if (isSelected) Color(0xFF070709) else TextSecondary,
-                                        fontSize = 11.5.sp,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        fontFamily = FontFamily.Monospace
                                     )
                                 }
                             }
@@ -479,7 +539,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
-                DotDivider(dotsCount = 18)
+                DotDivider(dotsCount = 20)
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Start on Boot Switch Row
@@ -536,32 +596,49 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
-                        Text(
-                            text = "Check Duplicate Files",
-                            color = TextPrimary,
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "Check Duplicate Files",
+                                color = TextPrimary,
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            if (duplicateScanCount != null) {
+                                NothingDotBadge(
+                                    text = if (duplicateScanCount == 0) "0 CLEAN" else "$duplicateScanCount DUPES",
+                                    dotColor = if (duplicateScanCount == 0) StatusGreen else StatusAmber,
+                                    textColor = if (duplicateScanCount == 0) StatusGreen else StatusAmber
+                                )
+                            }
+                        }
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = if (duplicateScanCount == null) "Scans for repeated media titles in your catalog."
-                            else "$duplicateScanCount duplicate media entries found.",
-                            color = if (duplicateScanCount != null && duplicateScanCount!! > 0) StatusAmber else TextTertiary,
+                            else if (duplicateScanCount == 0) "All media entries in catalog are unique."
+                            else "$duplicateScanCount duplicate media entries detected in database.",
+                            color = TextSecondary,
                             fontSize = 11.sp
                         )
                     }
 
                     NothingPillButton(
                         text = "Scan",
-                        onClick = { duplicateScanCount = viewModel.scanDuplicates() },
+                        onClick = {
+                            val res = viewModel.scanDuplicates()
+                            duplicateScanCount = res
+                            Toast.makeText(context, if (res == 0) "✓ Catalog clean: 0 duplicates" else "⚠ Found $res duplicate entries", Toast.LENGTH_SHORT).show()
+                        },
                         variant = NothingButtonVariant.Secondary,
                         height = 34.dp,
-                        modifier = Modifier.width(76.dp)
+                        modifier = Modifier.wrapContentWidth()
                     )
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
-                DotDivider(dotsCount = 18)
+                DotDivider(dotsCount = 20)
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // Dead Files Scan
@@ -571,27 +648,44 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
-                        Text(
-                            text = "Check Dead Files",
-                            color = TextPrimary,
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "Check Dead Files",
+                                color = TextPrimary,
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            if (deadFilesScanCount != null) {
+                                NothingDotBadge(
+                                    text = if (deadFilesScanCount == 0) "0 DEAD" else "$deadFilesScanCount DEAD",
+                                    dotColor = if (deadFilesScanCount == 0) StatusGreen else StatusRed,
+                                    textColor = if (deadFilesScanCount == 0) StatusGreen else StatusRed
+                                )
+                            }
+                        }
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = if (deadFilesScanCount == null) "Checks if channel video messages were deleted."
+                            else if (deadFilesScanCount == 0) "All indexed media files are online and valid."
                             else "$deadFilesScanCount inaccessible files detected.",
-                            color = if (deadFilesScanCount != null && deadFilesScanCount!! > 0) StatusRed else TextTertiary,
+                            color = TextSecondary,
                             fontSize = 11.sp
                         )
                     }
 
                     NothingPillButton(
                         text = "Scan",
-                        onClick = { deadFilesScanCount = viewModel.scanDeadFiles() },
+                        onClick = {
+                            val res = viewModel.scanDeadFiles()
+                            deadFilesScanCount = res
+                            Toast.makeText(context, if (res == 0) "✓ All indexed media files accessible" else "⚠ Detected $res inaccessible files", Toast.LENGTH_SHORT).show()
+                        },
                         variant = NothingButtonVariant.Secondary,
                         height = 34.dp,
-                        modifier = Modifier.width(76.dp)
+                        modifier = Modifier.wrapContentWidth()
                     )
                 }
             }
@@ -633,7 +727,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
-                DotDivider(dotsCount = 18)
+                DotDivider(dotsCount = 20)
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // Rule 2: Replace Same Quality
@@ -667,7 +761,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
-                DotDivider(dotsCount = 18)
+                DotDivider(dotsCount = 20)
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // Rule 3: Skip Exact Duplicates
@@ -786,7 +880,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
-                DotDivider(dotsCount = 18)
+                DotDivider(dotsCount = 20)
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Row(
@@ -812,7 +906,8 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     NothingPillButton(
                         text = "Restore",
                         onClick = {
-                            Toast.makeText(context, "Ready to restore backup JSON", Toast.LENGTH_SHORT).show()
+                            restoreJsonInput = ""
+                            showRestoreDialog = true
                         },
                         variant = NothingButtonVariant.Ghost,
                         height = 44.dp,
@@ -824,7 +919,180 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(32.dp))
+        }
+    }
+
+    // ==================== LOGOUT CONFIRMATION DIALOG ====================
+    if (showLogoutDialog) {
+        BasicAlertDialog(
+            onDismissRequest = { showLogoutDialog = false }
+        ) {
+            NothingCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp),
+                shape = RoundedCornerShape(22.dp),
+                backgroundColor = SurfaceCard,
+                borderColor = BorderSilver,
+                contentPadding = PaddingValues(20.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(StatusRed.copy(alpha = 0.15f))
+                            .border(1.dp, StatusRed.copy(alpha = 0.3f), CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.Logout,
+                            contentDescription = null,
+                            tint = StatusRed,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    Column {
+                        Text(
+                            text = "Logout Telegram?",
+                            color = TextPrimary,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "This will disconnect your account session.",
+                            color = TextSecondary,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    NothingPillButton(
+                        text = "Cancel",
+                        onClick = { showLogoutDialog = false },
+                        variant = NothingButtonVariant.Ghost,
+                        height = 40.dp,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    NothingPillButton(
+                        text = "Logout",
+                        onClick = {
+                            showLogoutDialog = false
+                            viewModel.logout()
+                        },
+                        variant = NothingButtonVariant.Primary,
+                        height = 40.dp,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+    }
+
+    // ==================== RESTORE BACKUP DIALOG ====================
+    if (showRestoreDialog) {
+        BasicAlertDialog(
+            onDismissRequest = { showRestoreDialog = false }
+        ) {
+            NothingCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                shape = RoundedCornerShape(22.dp),
+                backgroundColor = SurfaceCard,
+                borderColor = BorderSilver,
+                contentPadding = PaddingValues(20.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(AccentApple.copy(alpha = 0.15f))
+                            .border(1.dp, AccentApple.copy(alpha = 0.3f), CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Upload,
+                            contentDescription = null,
+                            tint = AccentApple,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    Column {
+                        Text(
+                            text = "Restore Configuration",
+                            color = TextPrimary,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Paste your exported backup JSON below.",
+                            color = TextSecondary,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                NothingTextField(
+                    value = restoreJsonInput,
+                    onValueChange = { restoreJsonInput = it },
+                    placeholder = "{\n  \"serverConfig\": { ... }\n}",
+                    singleLine = false,
+                    isMonospace = true,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 200.dp)
+                )
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    NothingPillButton(
+                        text = "Cancel",
+                        onClick = { showRestoreDialog = false },
+                        variant = NothingButtonVariant.Ghost,
+                        height = 42.dp,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    NothingPillButton(
+                        text = "Restore Now",
+                        onClick = {
+                            if (restoreJsonInput.isNotBlank()) {
+                                val success = viewModel.importBackupJson(restoreJsonInput.trim())
+                                if (success) {
+                                    showRestoreDialog = false
+                                }
+                            } else {
+                                Toast.makeText(context, "Please paste JSON backup content", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        variant = NothingButtonVariant.Primary,
+                        height = 42.dp,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
         }
     }
 }
@@ -880,24 +1148,67 @@ private fun SettingsSectionCard(
 @Composable
 private fun FallbackPipelineRow(
     category: String,
-    pipeline: String
+    steps: List<String>
 ) {
-    Row(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Text(
-            text = category,
-            color = TextSecondary,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold
-        )
-        Text(
-            text = pipeline,
-            color = TextPrimary,
-            fontSize = 11.sp,
-            fontFamily = FontFamily.Monospace
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = category,
+                color = TextSecondary,
+                fontSize = 11.5.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = "${steps.size} Stages",
+                color = TextTertiary,
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            steps.forEachIndexed { index, step ->
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (index == 0) SurfaceCardActive else SurfaceCardElevated)
+                        .border(
+                            0.5.dp,
+                            if (index == 0) BorderSilver else BorderSubtle,
+                            RoundedCornerShape(6.dp)
+                        )
+                        .padding(horizontal = 7.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = step,
+                        color = if (index == 0) TextPrimary else TextSecondary,
+                        fontSize = 10.sp,
+                        fontWeight = if (index == 0) FontWeight.Bold else FontWeight.Medium,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1
+                    )
+                }
+
+                if (index < steps.size - 1) {
+                    Text(
+                        text = "→",
+                        color = TextTertiary,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
     }
 }

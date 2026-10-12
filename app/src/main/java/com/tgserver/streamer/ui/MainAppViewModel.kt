@@ -466,6 +466,34 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         """.trimIndent()
     }
 
+    fun importBackupJson(json: String): Boolean {
+        return try {
+            val jsonObject = org.json.JSONObject(json)
+            if (jsonObject.has("serverConfig")) {
+                val sc = jsonObject.getJSONObject("serverConfig")
+                val updated = _config.value.copy(
+                    port = sc.optInt("port", _config.value.port),
+                    preferredQuality = sc.optString("preferredQuality", _config.value.preferredQuality),
+                    hideCamTs = sc.optBoolean("hideCamTs", _config.value.hideCamTs),
+                    remotePublicUrl = sc.optString("remotePublicUrl", _config.value.remotePublicUrl),
+                    startOnBoot = sc.optBoolean("startOnBoot", _config.value.startOnBoot),
+                    autoScanNewContent = sc.optBoolean("autoScanNewContent", _config.value.autoScanNewContent),
+                    replaceSameQuality = sc.optBoolean("replaceSameQuality", _config.value.replaceSameQuality),
+                    skipExactDuplicates = sc.optBoolean("skipExactDuplicates", _config.value.skipExactDuplicates)
+                )
+                saveStoredConfig(updated)
+                Toast.makeText(getApplication(), "✓ Settings successfully restored from backup!", Toast.LENGTH_LONG).show()
+                true
+            } else {
+                Toast.makeText(getApplication(), "Invalid backup JSON: Missing serverConfig", Toast.LENGTH_SHORT).show()
+                false
+            }
+        } catch (e: Exception) {
+            Toast.makeText(getApplication(), "Failed to parse backup JSON: ${e.message}", Toast.LENGTH_SHORT).show()
+            false
+        }
+    }
+
     fun updateConfig(port: Int, posterUrl: String, apiKey: String) {
         val updated = _config.value.copy(
             port = port,

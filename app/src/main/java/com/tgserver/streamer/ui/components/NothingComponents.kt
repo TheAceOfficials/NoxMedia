@@ -33,6 +33,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -100,10 +101,10 @@ fun NothingPillButton(
     val effectivePadding = contentPadding ?: if (height <= 38.dp) {
         PaddingValues(horizontal = 14.dp, vertical = 0.dp)
     } else {
-        PaddingValues(horizontal = 24.dp, vertical = 0.dp)
+        PaddingValues(horizontal = 16.dp, vertical = 0.dp)
     }
 
-    val effectiveFontSize = if (height <= 38.dp) 12.sp else 15.sp
+    val effectiveFontSize = if (height <= 38.dp) 12.sp else 14.sp
 
     Box(
         modifier = modifier
@@ -147,7 +148,9 @@ fun NothingPillButton(
                     color = contentColor,
                     fontSize = effectiveFontSize,
                     fontWeight = FontWeight.SemiBold,
-                    letterSpacing = (-0.2).sp
+                    letterSpacing = (-0.2).sp,
+                    maxLines = 1,
+                    softWrap = false
                 )
 
                 if (trailingIcon != null) {
@@ -230,6 +233,7 @@ fun NothingTextField(
             ) {
                 if (label != null) {
                     Row(
+                        modifier = Modifier.weight(1f, fill = false),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
@@ -246,12 +250,15 @@ fun NothingTextField(
                             color = if (isFocused) TextPrimary else TextSecondary,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
-                            letterSpacing = 0.2.sp
+                            letterSpacing = 0.2.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
 
                 if (badgeText != null) {
+                    Spacer(modifier = Modifier.width(8.dp))
                     NothingDotBadge(
                         text = badgeText,
                         dotColor = if (isFocused) AccentSilver else TextTertiary
@@ -281,7 +288,10 @@ fun NothingTextField(
                             color = TextTertiary,
                             fontSize = 15.sp,
                             fontFamily = if (isMonospace) FontFamily.Monospace else FontFamily.Default,
-                            letterSpacing = (-0.2).sp
+                            letterSpacing = (-0.2).sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
@@ -368,7 +378,9 @@ fun NothingDotBadge(
             fontSize = 10.5.sp,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Medium,
-            letterSpacing = 0.8.sp
+            letterSpacing = 0.8.sp,
+            maxLines = 1,
+            softWrap = false
         )
     }
 }
@@ -473,14 +485,20 @@ fun DotDivider(
 fun AdaptiveScreenContainer(
     modifier: Modifier = Modifier,
     maxWidth: Dp = 500.dp,
+    applyInsets: Boolean = true,
     content: @Composable BoxScope.() -> Unit
 ) {
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(BackgroundOled)
-            .statusBarsPadding()
-            .navigationBarsPadding(),
+            .then(
+                if (applyInsets) {
+                    Modifier
+                        .statusBarsPadding()
+                        .navigationBarsPadding()
+                } else Modifier
+            ),
         contentAlignment = Alignment.TopCenter
     ) {
         Box(
