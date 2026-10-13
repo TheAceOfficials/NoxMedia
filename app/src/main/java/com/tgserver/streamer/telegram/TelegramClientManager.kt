@@ -1579,6 +1579,7 @@ class TelegramClientManager(private val context: Context) {
                 }
 
                 val partsJson = gson.toJson(partsList)
+                Log.d(TAG, "create_stream request: partsCount=${partsList.size}, channelId=$effectiveChannelId, range=$startByte-$effectiveEnd/$totalSize")
                 val streamId = bridge.callAttr(
                     "create_stream",
                     apiId,
