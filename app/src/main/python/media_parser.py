@@ -2,8 +2,13 @@ import re
 from typing import Optional, Dict, Any, Tuple, List
 
 _VIDEO_EXTENSIONS = r'mkv|mp4|avi|ts|m4v|mov|wmv|webm|flv|m2ts|mpg|mpeg'
-_ARCHIVE_EXTENSIONS = r'zip|rar'
-_SPLIT_PART_PATTERN = re.compile(rf'(?i)\.({_VIDEO_EXTENSIONS}|{_ARCHIVE_EXTENSIONS})\.(\d{{2,3}})(?=$|\D)')
+_ARCHIVE_EXTENSIONS = r'zip|rar|7z'
+_ALL_MEDIA_EXTENSIONS = rf'{_VIDEO_EXTENSIONS}|{_ARCHIVE_EXTENSIONS}'
+
+# Pattern 1: e.g. .mkv.001, .mp4.02, .rar.003
+_SPLIT_PART_PATTERN_1 = re.compile(rf'(?i)\.({_ALL_MEDIA_EXTENSIONS})\.(\d{{2,4}})(?=$|\D)')
+# Pattern 2: e.g. .part001.mkv, .part1.mkv, _part01.mp4, - part 2.mkv, .pt01.mkv
+_SPLIT_PART_PATTERN_2 = re.compile(rf'(?i)[\s._-]*(?:part|pt)[\s._-]*(\d{{1,4}})\.({_ALL_MEDIA_EXTENSIONS})$')
 
 _RELEASE_GROUP_RE = re.compile(r"\[[^\]]{1,40}\]")
 
@@ -60,16 +65,23 @@ _YEAR_RE = re.compile(r"(?:^|[\s._\-\(\[])((?:19|20)\d{2})(?:[\s._\-\)\]]|$)")
 
 def parse_split_part(filename: str) -> Optional[Tuple[str, int]]:
     """
-    Detects split parts like .mkv.001 or .rar.002.
+    Detects split parts like .mkv.001 or .part001.mkv or .part1.rar.
     Returns (normalized_clean_base_filename, part_number) or None.
     """
     if not filename:
         return None
-    m = _SPLIT_PART_PATTERN.search(filename)
-    if m:
-        start = m.start()
-        ext = m.group(1)
-        part_num = int(m.group(2))
+    m1 = _SPLIT_PART_PATTERN_1.search(filename)
+    if m1:
+        start = m1.start()
+        ext = m1.group(1)
+        part_num = int(m1.group(2))
+        clean_name = filename[:start] + "." + ext
+        return clean_name, part_num
+    m2 = _SPLIT_PART_PATTERN_2.search(filename)
+    if m2:
+        start = m2.start()
+        part_num = int(m2.group(1))
+        ext = m2.group(2)
         clean_name = filename[:start] + "." + ext
         return clean_name, part_num
     return None

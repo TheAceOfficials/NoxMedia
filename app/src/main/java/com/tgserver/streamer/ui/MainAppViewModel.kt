@@ -118,6 +118,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         val loaded = loadStoredConfig()
         _config.value = loaded
         StreamerForegroundService.activeConfig = loaded
+        tgClient.cleanupSplitDuplicates()
         startTelemetryLoop()
     }
 
@@ -560,6 +561,13 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         }
         _config.value = cfg
         StreamerForegroundService.activeConfig = cfg
+        if (cfg.skipExactDuplicates) {
+            tgClient.cleanupSplitDuplicates()
+        }
+    }
+
+    fun cleanupDuplicates(): Int {
+        return tgClient.cleanupSplitDuplicates()
     }
 
     suspend fun verifyAndSaveMetadataKeys(tmdb: String, tvdb: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {

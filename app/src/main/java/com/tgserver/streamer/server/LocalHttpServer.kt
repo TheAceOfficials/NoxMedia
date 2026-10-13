@@ -466,7 +466,8 @@ class LocalHttpServer(
         val splitPartMessageIds = allMedia.filter { it.isSplit }.flatMap { it.parts.map { p -> p.messageId } }.toSet()
         val splitCleanBases = allMedia.filter { it.isSplit }.map {
             it.fileName.lowercase()
-                .replace(Regex("""\.(mkv|mp4|avi|webm)$""", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("""[\s._-]*(?:part|pt)[\s._-]*\d+.*""", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("""\.(mkv|mp4|avi|webm|ts|m4v)(\.\d{2,4})?$""", RegexOption.IGNORE_CASE), "")
                 .trim()
         }.filter { it.isNotBlank() }.toSet()
 
@@ -477,12 +478,17 @@ class LocalHttpServer(
             // If messageId is part of a split item
             if (splitPartMessageIds.contains(item.messageId)) return@filter false
 
-            // If filename has split part extension (.001, .002, etc.) and cleanBase matches a split item
             val cleanName = item.fileName.lowercase()
-                .replace(Regex("""\.(mkv|mp4|avi|webm)(\.\d{2,3})?$""", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("""[\s._-]*(?:part|pt)[\s._-]*\d+.*""", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("""\.(mkv|mp4|avi|webm|ts|m4v)(\.\d{2,4})?$""", RegexOption.IGNORE_CASE), "")
                 .trim()
-            if (splitCleanBases.contains(cleanName) && item.fileName.matches(Regex(""".*\.\d{2,3}$"""))) {
-                return@filter false
+            if (splitCleanBases.contains(cleanName)) {
+                if (item.fileName.contains(Regex("""(?i)(?:part|pt|\.\d{2,4})"""))) return@filter false
+                val splitMatch = allMedia.find {
+                    it.isSplit && (it.channelId == item.channelId || it.channelId == 0L || item.channelId == 0L) &&
+                    it.season == item.season && it.episode == item.episode
+                }
+                if (splitMatch != null && item.sizeBytes < splitMatch.sizeBytes) return@filter false
             }
 
             true

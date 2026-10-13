@@ -220,31 +220,117 @@ class TelegramClientManager(private val context: Context) {
         autoEnrichMissingMetadata()
     }
 
-    private fun cleanupSplitDuplicates() {
-        val splitPartMessageIds = mediaIndex.values.filter { it.isSplit }.flatMap { it.parts.map { p -> p.messageId } }.toSet()
+    fun cleanupSplitDuplicates(): Int {
+        var removedCount = 0
+
+        // 1. Identify all known split items and their message IDs and clean bases
+        val splitPartMessageIds = mediaIndex.values.filter { it.isSplit }
+            .flatMap { it.parts.map { p -> p.messageId } }
+            .toSet()
+
         val splitCleanBases = mediaIndex.values.filter { it.isSplit }.map {
             it.fileName.lowercase()
-                .replace(Regex("""\.(mkv|mp4|avi|webm)$""", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("""[\s._-]*(?:part|pt)[\s._-]*\d+.*""", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("""\.(mkv|mp4|avi|webm|ts|m4v)(\.\d{2,4})?$""", RegexOption.IGNORE_CASE), "")
                 .trim()
         }.filter { it.isNotBlank() }.toSet()
 
+        // 2. Remove standalone items that are redundant duplicates of an existing split item
         val toRemove = mediaIndex.values.filter { item ->
-            if (item.isSplit) false
-            else {
-                splitPartMessageIds.contains(item.messageId) || (
-                    item.fileName.matches(Regex(""".*\.\d{2,3}$""")) &&
-                    splitCleanBases.contains(
-                        item.fileName.lowercase()
-                            .replace(Regex("""\.(mkv|mp4|avi|webm)(\.\d{2,3})?$""", RegexOption.IGNORE_CASE), "")
-                            .trim()
-                    )
-                )
+            if (item.isSplit) return@filter false
+
+            // Direct message ID match with a part of a split item
+            if (splitPartMessageIds.contains(item.messageId)) return@filter true
+
+            val itemClean = item.fileName.lowercase()
+                .replace(Regex("""[\s._-]*(?:part|pt)[\s._-]*\d+.*""", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("""\.(mkv|mp4|avi|webm|ts|m4v)(\.\d{2,4})?$""", RegexOption.IGNORE_CASE), "")
+                .trim()
+
+            if (splitCleanBases.contains(itemClean)) {
+                // If it's a raw part slice (.part001, .part002, .001, etc.)
+                if (item.fileName.contains(Regex("""(?i)(?:part|pt|\.\d{2,4})"""))) {
+                    return@filter true
+                }
+                // Or if it's an inferior duplicate with identical season/episode/cleanBase but smaller size
+                val splitItem = mediaIndex.values.find {
+                    it.isSplit && (it.channelId == item.channelId || it.channelId == 0L || item.channelId == 0L) &&
+                    it.season == item.season && it.episode == item.episode
+                }
+                if (splitItem != null && item.sizeBytes < splitItem.sizeBytes) {
+                    return@filter true
+                }
             }
+
+            false
         }
+
         if (toRemove.isNotEmpty()) {
             toRemove.forEach { mediaIndex.remove(it.id) }
-            saveMediaIndex()
+            removedCount += toRemove.size
         }
+
+        // 3. Scan for any UNMERGED split parts in mediaIndex from old scans and auto-merge them
+        val partMarkerRegex = Regex("""(?i)(?:[\s._-]*(?:part|pt)[\s._-]*\d+\.[a-zA-Z0-9]{2,4}$|\.[a-zA-Z0-9]{2,4}\.\d{2,4}$)""")
+        val unmergedCandidateGroups = mediaIndex.values
+            .filter { !it.isSplit && it.fileName.contains(partMarkerRegex) }
+            .groupBy { item ->
+                val base = item.fileName.lowercase()
+                    .replace(Regex("""(?i)[\s._-]*(?:part|pt)[\s._-]*\d+\.[a-zA-Z0-9]{2,4}$"""), "")
+                    .replace(Regex("""(?i)\.[a-zA-Z0-9]{2,4}\.\d{2,4}$"""), "")
+                    .replace(Regex("""(?i)\.[a-zA-Z0-9]{2,4}$"""), "")
+                    .trim()
+                "${item.channelId}_${base}"
+            }
+
+        for ((_, group) in unmergedCandidateGroups) {
+            if (group.size >= 2) {
+                val sortedParts = group.sortedBy { item ->
+                    val m1 = Regex("""(?i)(?:part|pt)[\s._-]*(\d+)""").find(item.fileName)
+                    val m2 = Regex("""(?i)\.(\d{2,4})$""").find(item.fileName)
+                    m1?.groupValues?.get(1)?.toIntOrNull()
+                        ?: m2?.groupValues?.get(1)?.toIntOrNull()
+                        ?: 1
+                }
+
+                var runningStart = 0L
+                val computedParts = sortedParts.mapIndexed { idx, item ->
+                    val p = SplitPart(
+                        messageId = item.messageId,
+                        partNumber = idx + 1,
+                        sizeBytes = item.sizeBytes,
+                        cumStart = runningStart
+                    )
+                    runningStart += item.sizeBytes
+                    p
+                }
+
+                val primary = sortedParts.first()
+                val cleanFileName = primary.fileName
+                    .replace(Regex("""(?i)[\s._-]*(?:part|pt)[\s._-]*\d+"""), "")
+                    .replace(Regex("""(?i)\.\d{2,4}$"""), "")
+
+                val splitId = "tg_${primary.channelId}_${primary.messageId}_split"
+                val mergedItem = primary.copy(
+                    id = splitId,
+                    fileName = cleanFileName,
+                    sizeBytes = runningStart,
+                    isSplit = true,
+                    parts = computedParts
+                )
+
+                group.forEach { mediaIndex.remove(it.id) }
+                mediaIndex[splitId] = mergedItem
+                removedCount += group.size
+            }
+        }
+
+        if (removedCount > 0) {
+            saveMediaIndex()
+            _mediaState.value = mediaIndex.values.toList()
+        }
+
+        return removedCount
     }
 
     private fun autoEnrichMissingMetadata() {

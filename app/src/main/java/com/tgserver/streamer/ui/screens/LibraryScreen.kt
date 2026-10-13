@@ -230,7 +230,42 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
 
     // Group raw files into distinct titles (Movies and Series entities)
     val mediaGroups = remember(allMedia) {
-        allMedia.groupBy { item ->
+        val splitItems = allMedia.filter { it.isSplit }
+        val effectiveMedia = if (splitItems.isEmpty()) {
+            allMedia
+        } else {
+            val splitPartMsgIds = splitItems.flatMap { it.parts.map { p -> p.messageId } }.toSet()
+            val splitCleanBases = splitItems.map {
+                it.fileName.lowercase()
+                    .replace(Regex("""[\s._-]*(?:part|pt)[\s._-]*\d+.*""", RegexOption.IGNORE_CASE), "")
+                    .replace(Regex("""\.(mkv|mp4|avi|webm|ts|m4v)(\.\d{2,4})?$""", RegexOption.IGNORE_CASE), "")
+                    .trim()
+            }.toSet()
+
+            allMedia.filter { item ->
+                if (item.isSplit) return@filter true
+                if (splitPartMsgIds.contains(item.messageId)) return@filter false
+                val itemClean = item.fileName.lowercase()
+                    .replace(Regex("""[\s._-]*(?:part|pt)[\s._-]*\d+.*""", RegexOption.IGNORE_CASE), "")
+                    .replace(Regex("""\.(mkv|mp4|avi|webm|ts|m4v)(\.\d{2,4})?$""", RegexOption.IGNORE_CASE), "")
+                    .trim()
+                if (splitCleanBases.contains(itemClean)) {
+                    if (item.fileName.contains(Regex("""(?i)(?:part|pt|\.\d{2,4})"""))) {
+                        return@filter false
+                    }
+                    val splitMatch = splitItems.find {
+                        (it.channelId == item.channelId || it.channelId == 0L || item.channelId == 0L) &&
+                        it.season == item.season && it.episode == item.episode
+                    }
+                    if (splitMatch != null && item.sizeBytes < splitMatch.sizeBytes) {
+                        return@filter false
+                    }
+                }
+                true
+            }
+        }
+
+        effectiveMedia.groupBy { item ->
             val cleanTitle = item.title.trim().lowercase()
             when {
                 item.tmdbId != null && item.tmdbId!! > 0 -> "tmdb_${item.type}_${item.tmdbId}"
