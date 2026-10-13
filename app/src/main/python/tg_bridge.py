@@ -2,9 +2,11 @@ import asyncio
 import json
 import math
 import threading
+import time
 import uuid
 import traceback
 import re
+from collections import OrderedDict
 from typing import List, Dict, Any, Optional, Tuple
 from pyrogram import Client, errors, raw
 from pyrogram.file_id import FileId, FileType
@@ -22,9 +24,30 @@ _auth_state = {
 }
 
 # Active streaming sessions and cache
-_active_streams: Dict[str, "VirtualStreamSession"] = {}
+_active_streams: Dict[str, Any] = {}
 _file_id_cache: Dict[Tuple[int, int], FileId] = {}
 _media_session_lock = asyncio.Lock()
+
+# High-Performance In-Memory LRU Chunk Cache
+# 24 chunks x 1MB = ~24 MB RAM (tuned for maximum efficiency on both 32-bit & 64-bit devices)
+_CHUNK_CACHE_MAX_ENTRIES = 24
+_chunk_cache: OrderedDict[Tuple[int, int, int], bytes] = OrderedDict()
+_fetch_dedup_lock = asyncio.Lock()
+_pending_fetches: Dict[Tuple[int, int, int], asyncio.Task] = {}
+
+def _cache_get(key: Tuple[int, int, int]) -> Optional[bytes]:
+    if key in _chunk_cache:
+        _chunk_cache.move_to_end(key)
+        return _chunk_cache[key]
+    return None
+
+def _cache_put(key: Tuple[int, int, int], data: bytes):
+    if not data:
+        return
+    _chunk_cache[key] = data
+    _chunk_cache.move_to_end(key)
+    while len(_chunk_cache) > _CHUNK_CACHE_MAX_ENTRIES:
+        _chunk_cache.popitem(last=False)
 
 # Dedicated persistent asyncio event loop on a background daemon thread
 _main_loop = None
@@ -674,19 +697,19 @@ async def _resolve_file_id(client: Client, chat_id: int, msg_id: int) -> Optiona
 
     msg = None
     try:
+        msg = await client.get_messages(chat_id, msg_id)
+    except (errors.PeerIdInvalid, errors.ChannelInvalid):
         try:
             await client.get_chat(chat_id)
-        except Exception:
-            pass
-        msg = await client.get_messages(chat_id, msg_id)
-    except errors.PeerIdInvalid:
-        try:
-            async for _ in client.get_dialogs(limit=100):
-                pass
             msg = await client.get_messages(chat_id, msg_id)
-        except Exception as e:
-            print(f"Error fetching message after get_dialogs for {chat_id}:{msg_id}: {e}")
-            return None
+        except Exception:
+            try:
+                async for _ in client.get_dialogs(limit=50):
+                    pass
+                msg = await client.get_messages(chat_id, msg_id)
+            except Exception as e:
+                print(f"Error fetching message after get_dialogs for {chat_id}:{msg_id}: {e}")
+                return None
     except Exception as e:
         print(f"Error fetching message for {chat_id}:{msg_id}: {e}")
         return None
@@ -773,6 +796,40 @@ async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_
             await asyncio.sleep(0.5)
     return None
 
+async def _get_or_fetch_chunk(client: Client, chat_id: int, msg_id: int, fetch_off: int, limit: int) -> Optional[bytes]:
+    key = (chat_id, msg_id, fetch_off)
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
+
+    async with _fetch_dedup_lock:
+        task = _pending_fetches.get(key)
+        if task is None:
+            task = asyncio.create_task(_do_fetch_chunk_network(client, chat_id, msg_id, fetch_off, limit, key))
+            _pending_fetches[key] = task
+
+    try:
+        return await asyncio.shield(task)
+    except Exception:
+        return None
+    finally:
+        async with _fetch_dedup_lock:
+            if _pending_fetches.get(key) is task and task.done():
+                _pending_fetches.pop(key, None)
+
+async def _do_fetch_chunk_network(client: Client, chat_id: int, msg_id: int, fetch_off: int, limit: int, key: Tuple[int, int, int]) -> Optional[bytes]:
+    try:
+        file_id_obj = await _resolve_file_id(client, chat_id, msg_id)
+        if not file_id_obj:
+            return None
+        chunk = await _fetch_chunk_bytes(client, chat_id, msg_id, file_id_obj, fetch_off, limit)
+        if chunk:
+            _cache_put(key, chunk)
+        return chunk
+    except Exception as e:
+        print(f"[ChunkFetch] Error fetching chunk {key}: {e}")
+        return None
+
 class VirtualStreamSession:
     def __init__(self, client: Client, chat_id: int, parts: List[Dict[str, Any]], start_byte: int, end_byte: int):
         self.client = client
@@ -795,18 +852,23 @@ class VirtualStreamSession:
         self.end_byte = end_byte
         self.total_to_read = max(0, end_byte - start_byte + 1)
         self.bytes_read = 0
-        self.gen = self._stream_generator()
         self.buffer = bytearray()
-        print(f"[VirtualStreamSession] Init stream chat={chat_id}, parts_count={len(self.parts)}, range={start_byte}-{end_byte}")
+        self.queue: asyncio.Queue = asyncio.Queue(maxsize=16)
+        self._closed = False
+        self._last_active = time.time()
+        self.tasks = self._plan_tasks()
+        self.prefetch_task: Optional[asyncio.Task] = None
+        print(f"[VirtualStreamSession] Init stream chat={chat_id}, parts_count={len(self.parts)}, range={start_byte}-{end_byte}, total_tasks={len(self.tasks)}")
 
-    async def _stream_generator(self):
+    def _plan_tasks(self) -> List[Dict[str, Any]]:
         CHUNK_SIZE = 1024 * 1024 # 1 MB MTProto chunk
         pos = self.start_byte
         end = self.end_byte
+        tasks = []
 
         for p in self.parts:
-            part_size = int(p.get("sizeBytes") or p.get("size", 0))
-            cum_start = int(p.get("cumStart") or p.get("cum_start", 0))
+            part_size = int(p.get("sizeBytes", 0))
+            cum_start = int(p.get("cumStart", 0))
             cum_end = cum_start + part_size - 1
 
             if cum_end < pos:
@@ -816,12 +878,7 @@ class VirtualStreamSession:
 
             local_start = max(pos, cum_start) - cum_start
             local_end = min(end, cum_end) - cum_start
-
-            msg_id = int(p.get("messageId") or p.get("message_id"))
-            file_id_obj = await _resolve_file_id(self.client, self.chat_id, msg_id)
-            if not file_id_obj:
-                print(f"[VirtualStreamSession] Could not resolve file_id for {self.chat_id}:{msg_id}")
-                continue
+            msg_id = int(p.get("messageId", 0))
 
             offset = local_start - (local_start % CHUNK_SIZE)
             first_part_cut = local_start - offset
@@ -832,54 +889,156 @@ class VirtualStreamSession:
                 fetch_off = offset + (i * CHUNK_SIZE)
                 if fetch_off >= part_size:
                     break
-                chunk = await _fetch_chunk_bytes(self.client, self.chat_id, msg_id, file_id_obj, fetch_off, CHUNK_SIZE)
-                if not chunk:
-                    break
-
                 curr_idx = i + 1
                 if part_count == 1:
-                    out = chunk[first_part_cut:min(len(chunk), last_part_cut)]
+                    s_start = first_part_cut
+                    s_end = last_part_cut
                 elif curr_idx == 1:
-                    out = chunk[first_part_cut:]
+                    s_start = first_part_cut
+                    s_end = CHUNK_SIZE
                 elif curr_idx == part_count:
-                    out = chunk[:min(len(chunk), last_part_cut)]
+                    s_start = 0
+                    s_end = last_part_cut
                 else:
-                    out = chunk
+                    s_start = 0
+                    s_end = CHUNK_SIZE
 
-                if out:
-                    yield out
+                tasks.append({
+                    "msg_id": msg_id,
+                    "fetch_off": fetch_off,
+                    "limit": CHUNK_SIZE,
+                    "s_start": s_start,
+                    "s_end": s_end
+                })
 
             pos = cum_end + 1
             if pos > end:
                 break
 
+        return tasks
+
+    def start_prefetch(self):
+        if not self._closed and self.prefetch_task is None:
+            self.prefetch_task = asyncio.create_task(self._prefetch_loop())
+
+    async def _fetch_task_slice(self, t_info: Dict[str, Any]) -> Optional[bytes]:
+        msg_id = t_info["msg_id"]
+        fetch_off = t_info["fetch_off"]
+        limit = t_info["limit"]
+        s_start = t_info["s_start"]
+        s_end = t_info["s_end"]
+
+        raw_chunk = await _get_or_fetch_chunk(self.client, self.chat_id, msg_id, fetch_off, limit)
+        if not raw_chunk:
+            return None
+
+        chunk_len = len(raw_chunk)
+        if s_start >= chunk_len:
+            return None
+        end_idx = min(chunk_len, s_end) if s_end is not None else chunk_len
+        return raw_chunk[s_start:end_idx]
+
+    async def _prefetch_loop(self):
+        in_flight: List[asyncio.Task] = []
+        try:
+            # Parallel file_id resolution for all required parts
+            unique_msg_ids = list(dict.fromkeys(t["msg_id"] for t in self.tasks))
+            await asyncio.gather(
+                *[_resolve_file_id(self.client, self.chat_id, mid) for mid in unique_msg_ids],
+                return_exceptions=True
+            )
+
+            MAX_IN_FLIGHT = 2
+            task_idx = 0
+            total_tasks = len(self.tasks)
+
+            while (task_idx < total_tasks or in_flight) and not self._closed:
+                while task_idx < total_tasks and len(in_flight) < MAX_IN_FLIGHT and self.queue.qsize() < 14 and not self._closed:
+                    t_info = self.tasks[task_idx]
+                    task_idx += 1
+                    in_flight.append(asyncio.create_task(self._fetch_task_slice(t_info)))
+
+                if not in_flight:
+                    await asyncio.sleep(0.02)
+                    continue
+
+                next_task = in_flight.pop(0)
+                try:
+                    slice_bytes = await next_task
+                except Exception as e:
+                    print(f"[VirtualStreamSession] Slice error: {e}")
+                    slice_bytes = None
+
+                if self._closed:
+                    break
+
+                if slice_bytes:
+                    await self.queue.put(slice_bytes)
+                else:
+                    break
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            print(f"[VirtualStreamSession] prefetch loop error: {e}")
+        finally:
+            for fut in in_flight:
+                fut.cancel()
+            await self.queue.put(None)
+
     async def read_bytes(self, max_bytes: int) -> bytes:
-        while len(self.buffer) < max_bytes:
-            try:
-                chunk = await self.gen.__anext__()
-                self.buffer.extend(chunk)
-            except StopAsyncIteration:
-                break
-            except Exception as e:
-                print(f"[VirtualStreamSession] read_bytes iteration error -> {e}")
-                break
+        self._last_active = time.time()
+        while len(self.buffer) < max_bytes and not self._closed:
+            if not self.queue.empty():
+                item = self.queue.get_nowait()
+                if item is None:
+                    break
+                self.buffer.extend(item)
+            else:
+                try:
+                    item = await asyncio.wait_for(self.queue.get(), timeout=35.0)
+                    if item is None:
+                        break
+                    self.buffer.extend(item)
+                except asyncio.TimeoutError:
+                    print(f"[VirtualStreamSession] Timeout waiting for stream queue")
+                    break
 
         result = bytes(self.buffer[:max_bytes])
         self.buffer = self.buffer[max_bytes:]
         self.bytes_read += len(result)
         return result
 
+    def close(self):
+        if not self._closed:
+            self._closed = True
+            if self.prefetch_task and not self.prefetch_task.done():
+                self.prefetch_task.cancel()
+            self.buffer.clear()
+            while not self.queue.empty():
+                try:
+                    self.queue.get_nowait()
+                except Exception:
+                    break
+
 def create_stream(api_id: int, api_hash: str, session_str: str, chat_id: int, parts_json: str, start_byte: int, end_byte: int) -> str:
     """
-    Initializes a virtual byte stream and returns a unique stream_id.
+    Initializes a virtual byte stream with concurrent pre-buffering and returns a unique stream_id.
     """
     global _active_streams
 
     async def _async_create():
+        now = time.time()
+        expired = [sid for sid, s in list(_active_streams.items()) if now - s._last_active > 60]
+        for sid in expired:
+            s = _active_streams.pop(sid, None)
+            if s:
+                s.close()
+
         client = await _get_connected_stream_client(api_id, api_hash, session_str)
         parts = json.loads(parts_json)
         stream_id = str(uuid.uuid4())
         session = VirtualStreamSession(client, int(chat_id), parts, int(start_byte), int(end_byte))
+        session.start_prefetch()
         _active_streams[stream_id] = session
         return stream_id
 
@@ -890,9 +1049,9 @@ def create_stream(api_id: int, api_hash: str, session_str: str, chat_id: int, pa
         traceback.print_exc()
         return ""
 
-def read_stream_chunk(stream_id: str, max_bytes: int = 262144) -> bytes:
+def read_stream_chunk(stream_id: str, max_bytes: int = 524288) -> bytes:
     """
-    Reads the next slice of bytes for the given stream_id synchronously.
+    Reads the next slice of bytes from pre-buffered queue for the given stream_id synchronously.
     Returns bytes or empty bytes(0) when finished.
     """
     global _active_streams
@@ -909,17 +1068,9 @@ def read_stream_chunk(stream_id: str, max_bytes: int = 262144) -> bytes:
 
 def close_stream(stream_id: str):
     """
-    Closes and removes an active stream session.
+    Closes and cancels an active stream session and cleans up its prefetch buffer.
     """
     global _active_streams
     session = _active_streams.pop(stream_id, None)
-    if session and hasattr(session, "gen"):
-        async def _close():
-            try:
-                await session.gen.aclose()
-            except Exception:
-                pass
-        try:
-            run_async(_close(), timeout=5)
-        except Exception:
-            pass
+    if session:
+        session.close()

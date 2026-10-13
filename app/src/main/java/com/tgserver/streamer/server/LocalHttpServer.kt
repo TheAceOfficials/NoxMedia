@@ -633,6 +633,7 @@ class LocalHttpServer(
         }
 
         response.addHeader("Accept-Ranges", "bytes")
+        response.addHeader("Connection", "keep-alive")
         response.addHeader("Content-Disposition", "inline; filename=\"$fileName\"")
         return response
     }
