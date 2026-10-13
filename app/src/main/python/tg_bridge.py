@@ -569,11 +569,12 @@ def sync_channel_media(api_id: int, api_hash: str, session_str: str, channel_id:
         traceback.print_exc()
         return json.dumps({"status": "error", "error": str(e)})
 
-def scan_channel_batch(api_id: int, api_hash: str, session_str: str, channel_id: int, offset_id: int = 0, limit: int = 100, is_anime: bool = False) -> str:
+def scan_channel_batch(api_id: int, api_hash: str, session_str: str, channel_id: int, offset_id: int = 0, limit: int = 100, is_anime: bool = False, min_id: int = 0) -> str:
     """
     Scans a single batch (chunk) of messages from chat_history starting at offset_id.
     Returns JSON with items, split parts, skipped/unsupported files, last_msg_id, and has_more flag.
     Gracefully handles FloodWait.
+    If min_id > 0, stops scanning once msg.id <= min_id (incremental scan for new messages only).
     """
     async def _async_scan():
         client = await _get_connected_stream_client(api_id, api_hash, session_str)
@@ -594,12 +595,24 @@ def scan_channel_batch(api_id: int, api_hash: str, session_str: str, channel_id:
         skipped = []
         last_msg_id = 0
         messages_scanned = 0
+        first_msg_id = 0
+        max_msg_id = 0
+        reached_min = False
+        min_msg_cutoff = int(min_id) if min_id else 0
         video_exts = (".mkv", ".mp4", ".avi", ".ts", ".m4v", ".mov", ".webm", ".flv", ".wmv", ".m2ts")
 
         try:
             async for msg in client.get_chat_history(chat_id, limit=int(limit), offset_id=int(offset_id)):
+                if first_msg_id == 0:
+                    first_msg_id = msg.id
+                if min_msg_cutoff > 0 and msg.id <= min_msg_cutoff:
+                    reached_min = True
+                    break
+
                 messages_scanned += 1
                 last_msg_id = msg.id
+                if msg.id > max_msg_id:
+                    max_msg_id = msg.id
 
                 media = msg.video or msg.document or msg.animation
                 if not media:
@@ -685,6 +698,9 @@ def scan_channel_batch(api_id: int, api_hash: str, session_str: str, channel_id:
                 "wait_seconds": e.value,
                 "last_msg_id": last_msg_id,
                 "messages_scanned": messages_scanned,
+                "first_msg_id": first_msg_id,
+                "max_msg_id": max_msg_id,
+                "reached_min": reached_min,
                 "items": items,
                 "split_parts": split_parts,
                 "skipped": skipped
@@ -697,7 +713,10 @@ def scan_channel_batch(api_id: int, api_hash: str, session_str: str, channel_id:
             "skipped": skipped,
             "last_msg_id": last_msg_id,
             "messages_scanned": messages_scanned,
-            "has_more": messages_scanned >= int(limit) and last_msg_id > 0
+            "first_msg_id": first_msg_id,
+            "max_msg_id": max_msg_id,
+            "reached_min": reached_min,
+            "has_more": (not reached_min) and messages_scanned >= int(limit) and last_msg_id > 0
         }
 
     try:

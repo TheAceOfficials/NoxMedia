@@ -9,7 +9,8 @@ data class ChannelInfo(
     val isActive: Boolean = true,
     val autoIndex: Boolean = true,
     val lastSyncTime: Long = 0L,
-    val isAnime: Boolean = false
+    val isAnime: Boolean = false,
+    val lastScannedMsgId: Int = 0
 ) {
     val scanStatusText: String
         get() {

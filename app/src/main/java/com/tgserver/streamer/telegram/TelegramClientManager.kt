@@ -943,13 +943,38 @@ class TelegramClientManager(private val context: Context) {
         clearUnmatched(channelId)
     }
 
+    fun getMaxKnownMessageId(channelId: Long): Int {
+        val channelLastId = channels[channelId]?.lastScannedMsgId ?: 0
+        val maxMediaMsgId = mediaIndex.values
+            .filter { it.channelId == channelId }
+            .flatMap { item ->
+                if (item.isSplit) {
+                    item.parts.map { it.messageId }
+                } else {
+                    listOf(item.messageId)
+                }
+            }
+            .maxOrNull() ?: 0
+
+        val maxUnmatchedMsgId = unmatchedIndex.values
+            .filter { it.channelId == channelId }
+            .map { it.messageId }
+            .maxOrNull() ?: 0
+
+        return maxOf(channelLastId, maxMediaMsgId, maxUnmatchedMsgId)
+    }
+
     suspend fun rescanFromScratch(channelId: Long): Result<Int> = withContext(Dispatchers.IO) {
         stopChannelScan(channelId)
         val toRemove = mediaIndex.values.filter { it.channelId == channelId }.map { it.id }
         toRemove.forEach { mediaIndex.remove(it) }
         saveMediaIndex()
         clearUnmatched(channelId)
-        scanChannelLive(channelId)
+        channels[channelId]?.let { chInfo ->
+            channels[channelId] = chInfo.copy(videoCount = 0, lastScannedMsgId = 0)
+            saveChannels()
+        }
+        scanChannelLive(channelId, incremental = false)
     }
 
     // --- Unmatched Content Operations ---
@@ -1123,11 +1148,12 @@ class TelegramClientManager(private val context: Context) {
     }
 
     suspend fun syncChannel(channelId: Long, limit: Int = 150): Result<Int> {
-        return scanChannelLive(channelId)
+        return scanChannelLive(channelId, incremental = true)
     }
 
     suspend fun scanChannelLive(
         channelId: Long,
+        incremental: Boolean = true,
         onProgress: (ScanProgressState) -> Unit = {}
     ): Result<Int> = withContext(Dispatchers.IO) {
         try {
@@ -1146,6 +1172,9 @@ class TelegramClientManager(private val context: Context) {
             val tmdbKey = prefs.getString("tmdb_api_key", "") ?: ""
             val tvdbKey = prefs.getString("tvdb_api_key", "") ?: ""
 
+            val minMsgId = if (incremental) getMaxKnownMessageId(channelId) else 0
+            var newestEncounteredMsgId = 0
+
             var offsetId = 0
             var totalMessagesScanned = 0
             var newItemsAdded = 0
@@ -1159,6 +1188,12 @@ class TelegramClientManager(private val context: Context) {
                 splitGroupsMap[item.fileName] = item.parts.toMutableList()
             }
 
+            val initialStatus = if (incremental && minMsgId > 0) {
+                "Checking for new videos (since msg #$minMsgId)..."
+            } else {
+                "Starting channel scan..."
+            }
+
             val initialProgress = ScanProgressState(
                 channelId = channelId,
                 channelTitle = ch?.title ?: "Channel",
@@ -1167,7 +1202,7 @@ class TelegramClientManager(private val context: Context) {
                 totalBytes = totalBytesScanned,
                 currentBatch = 0,
                 isScanning = true,
-                statusMessage = "Starting scan..."
+                statusMessage = initialStatus
             )
             _scanProgress.value = _scanProgress.value + (channelId to initialProgress)
             onProgress(initialProgress)
@@ -1183,7 +1218,11 @@ class TelegramClientManager(private val context: Context) {
                     totalBytes = totalBytesScanned,
                     currentBatch = batchNumber,
                     isScanning = true,
-                    statusMessage = "Scanning batch #$batchNumber (offset message $offsetId)..."
+                    statusMessage = if (incremental && minMsgId > 0) {
+                        "Checking for new content (batch #$batchNumber)..."
+                    } else {
+                        "Scanning batch #$batchNumber (offset message $offsetId)..."
+                    }
                 )
                 _scanProgress.value = _scanProgress.value + (channelId to progressReport)
                 onProgress(progressReport)
@@ -1197,7 +1236,8 @@ class TelegramClientManager(private val context: Context) {
                         channelId,
                         offsetId,
                         batchSize,
-                        isAnime
+                        isAnime,
+                        minMsgId
                     )?.toString() ?: "{}"
                 } catch (e: Exception) {
                     Log.e(TAG, "Error in scan_channel_batch: ${e.message}", e)
@@ -1237,6 +1277,10 @@ class TelegramClientManager(private val context: Context) {
                 val lastMsgId = obj.optInt("last_msg_id", 0)
                 val messagesScanned = obj.optInt("messages_scanned", 0)
                 val hasMore = obj.optBoolean("has_more", false)
+                val firstMsgId = obj.optInt("first_msg_id", 0)
+                val maxMsgId = obj.optInt("max_msg_id", 0)
+                if (firstMsgId > newestEncounteredMsgId) newestEncounteredMsgId = firstMsgId
+                if (maxMsgId > newestEncounteredMsgId) newestEncounteredMsgId = maxMsgId
                 totalMessagesScanned += messagesScanned
 
                 // 1. Process regular media items in this batch
@@ -1244,10 +1288,12 @@ class TelegramClientManager(private val context: Context) {
                 if (itemsArr != null) {
                     for (i in 0 until itemsArr.length()) {
                         val mObj = itemsArr.getJSONObject(i)
+                        val mMsgId = mObj.getInt("messageId")
+                        if (mMsgId > newestEncounteredMsgId) newestEncounteredMsgId = mMsgId
                         val item = MediaItem(
                             id = mObj.getString("id"),
                             channelId = mObj.getLong("channelId"),
-                            messageId = mObj.getInt("messageId"),
+                            messageId = mMsgId,
                             title = mObj.getString("title"),
                             type = mObj.getString("type"),
                             year = if (mObj.isNull("year")) null else mObj.getString("year"),
@@ -1313,6 +1359,7 @@ class TelegramClientManager(private val context: Context) {
                         val pNum = spObj.getInt("partNumber")
                         val pSize = spObj.getLong("sizeBytes")
                         val pMsgId = spObj.getInt("messageId")
+                        if (pMsgId > newestEncounteredMsgId) newestEncounteredMsgId = pMsgId
 
                         val list = splitGroupsMap.getOrPut(cleanBase) { mutableListOf() }
                         if (list.none { it.partNumber == pNum && it.messageId == pMsgId }) {
@@ -1384,8 +1431,10 @@ class TelegramClientManager(private val context: Context) {
                                 splitItem.kitsuId != null
 
                         if (isMatched) {
+                            val wasAlreadyInIndex = mediaIndex.containsKey(splitItem.id)
                             mediaIndex[splitItem.id] = splitItem
                             unmatchedIndex.remove("unmatched_${channelId}_${firstMsgId}")
+                            if (!wasAlreadyInIndex) newItemsAdded++
                             totalBytesScanned += pSize
                         } else {
                             val rawFn = spObj.optString("rawFileName", cleanBase)
@@ -1414,6 +1463,7 @@ class TelegramClientManager(private val context: Context) {
                     for (i in 0 until skippedArr.length()) {
                         val sk = skippedArr.getJSONObject(i)
                         val skMsgId = sk.getInt("messageId")
+                        if (skMsgId > newestEncounteredMsgId) newestEncounteredMsgId = skMsgId
                         val unId = "skipped_${channelId}_$skMsgId"
                         val un = UnmatchedItem(
                             id = unId,
@@ -1436,9 +1486,15 @@ class TelegramClientManager(private val context: Context) {
                 saveMediaIndex()
                 saveUnmatchedIndex()
                 channels[channelId]?.let { chInfo ->
+                    val updatedLastMsgId = maxOf(
+                        chInfo.lastScannedMsgId,
+                        newestEncounteredMsgId,
+                        minMsgId
+                    )
                     channels[channelId] = chInfo.copy(
                         videoCount = mediaIndex.values.count { it.channelId == channelId },
-                        lastSyncTime = System.currentTimeMillis()
+                        lastSyncTime = System.currentTimeMillis(),
+                        lastScannedMsgId = updatedLastMsgId
                     )
                     saveChannels()
                 }
@@ -1452,7 +1508,11 @@ class TelegramClientManager(private val context: Context) {
                     totalBytes = totalBytesScanned,
                     currentBatch = batchNumber,
                     isScanning = true,
-                    statusMessage = "Indexed ${mediaIndex.values.count { it.channelId == channelId }} videos (${formatBytes(totalBytesScanned)})"
+                    statusMessage = if (incremental && minMsgId > 0) {
+                        if (newItemsAdded > 0) "+$newItemsAdded new video(s) found..." else "Checking messages..."
+                    } else {
+                        "Indexed ${mediaIndex.values.count { it.channelId == channelId }} videos (${formatBytes(totalBytesScanned)})"
+                    }
                 )
                 _scanProgress.value = _scanProgress.value + (channelId to batchDoneProgress)
                 onProgress(batchDoneProgress)
@@ -1471,12 +1531,28 @@ class TelegramClientManager(private val context: Context) {
 
             // Finished scanning
             val finalCount = mediaIndex.values.count { it.channelId == channelId }
+            val updatedLastMsgId = maxOf(
+                channels[channelId]?.lastScannedMsgId ?: 0,
+                newestEncounteredMsgId,
+                minMsgId
+            )
             channels[channelId]?.let { chInfo ->
                 channels[channelId] = chInfo.copy(
                     videoCount = finalCount,
-                    lastSyncTime = System.currentTimeMillis()
+                    lastSyncTime = System.currentTimeMillis(),
+                    lastScannedMsgId = updatedLastMsgId
                 )
                 saveChannels()
+            }
+
+            val finalStatus = if (incremental && minMsgId > 0) {
+                if (newItemsAdded > 0) {
+                    "Sync complete: +$newItemsAdded new video(s) added ($finalCount total)"
+                } else {
+                    "Channel is already up to date ($finalCount videos)"
+                }
+            } else {
+                "Scan complete: $finalCount videos indexed"
             }
 
             val finalProgress = ScanProgressState(
@@ -1487,12 +1563,12 @@ class TelegramClientManager(private val context: Context) {
                 totalBytes = totalBytesScanned,
                 currentBatch = batchNumber,
                 isScanning = false,
-                statusMessage = "Scan complete: $finalCount videos indexed"
+                statusMessage = finalStatus
             )
             _scanProgress.value = _scanProgress.value + (channelId to finalProgress)
             onProgress(finalProgress)
 
-            Result.success(finalCount)
+            Result.success(newItemsAdded)
         } catch (e: Exception) {
             Log.e(TAG, "Exception during live scan of channel $channelId: ${e.message}", e)
             val errProgress = ScanProgressState(

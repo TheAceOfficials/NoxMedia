@@ -257,11 +257,16 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             _scanningChannelIds.value = _scanningChannelIds.value + channelId
             val ch = channels.value.find { it.id == channelId }
-            val res = tgClient.scanChannelLive(channelId)
+            val res = tgClient.scanChannelLive(channelId, incremental = true)
             _scanningChannelIds.value = _scanningChannelIds.value - channelId
             if (res.isSuccess) {
-                val count = res.getOrDefault(0)
-                Toast.makeText(getApplication(), "✓ Scan complete: $count videos indexed from ${ch?.title ?: "channel"}", Toast.LENGTH_SHORT).show()
+                val newCount = res.getOrDefault(0)
+                val totalCount = channels.value.find { it.id == channelId }?.videoCount ?: newCount
+                if (newCount > 0) {
+                    Toast.makeText(getApplication(), "✓ Synced: $newCount new video(s) added (${ch?.title ?: "channel"})", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(getApplication(), "✓ ${ch?.title ?: "Channel"} is up to date ($totalCount videos)", Toast.LENGTH_SHORT).show()
+                }
             } else {
                 val err = res.exceptionOrNull()?.message ?: "Scan failed"
                 Toast.makeText(getApplication(), "Error: $err", Toast.LENGTH_LONG).show()
@@ -283,17 +288,21 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                 return@launch
             }
             _isScanningAll.value = true
-            var total = 0
+            var totalNew = 0
             for (ch in activeChannels) {
                 _scanningChannelIds.value = _scanningChannelIds.value + ch.id
-                val res = tgClient.scanChannelLive(ch.id)
+                val res = tgClient.scanChannelLive(ch.id, incremental = true)
                 _scanningChannelIds.value = _scanningChannelIds.value - ch.id
                 if (res.isSuccess) {
-                    total += res.getOrDefault(0)
+                    totalNew += res.getOrDefault(0)
                 }
             }
             _isScanningAll.value = false
-            Toast.makeText(getApplication(), "✓ Scan complete: $total total videos indexed", Toast.LENGTH_SHORT).show()
+            if (totalNew > 0) {
+                Toast.makeText(getApplication(), "✓ Sync complete: $totalNew new video(s) added across active channels", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(getApplication(), "✓ All channels are up to date", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
