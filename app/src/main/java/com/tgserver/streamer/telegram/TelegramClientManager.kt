@@ -226,7 +226,7 @@ class TelegramClientManager(private val context: Context) {
             val toRemove = mediaIndex.values.filter { !it.isSplit && splitPartMessageIds.contains(it.messageId) }
             if (toRemove.isNotEmpty()) {
                 toRemove.forEach { mediaIndex.remove(it.id) }
-                saveMediaIndexToDisk()
+                saveMediaIndex()
             }
         }
     }
@@ -1063,9 +1063,10 @@ class TelegramClientManager(private val context: Context) {
 
                         // Proactively clean up any standalone items or old partial split items for these part message IDs
                         val partMsgIds = computedParts.map { it.messageId }.toSet()
-                        mediaIndex.entries.removeIf { (k, v) ->
+                        val toRemoveKeys = mediaIndex.filter { (k, v) ->
                             v.channelId == channelId && (partMsgIds.contains(v.messageId) || (v.isSplit && v.parts.any { partMsgIds.contains(it.messageId) })) && k != splitItemId
-                        }
+                        }.keys
+                        toRemoveKeys.forEach { mediaIndex.remove(it) }
 
                         val splitItem = mediaIndex[splitItemId] ?: MediaItem(
                             id = splitItemId,
