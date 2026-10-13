@@ -214,9 +214,21 @@ class TelegramClientManager(private val context: Context) {
             val list: List<MediaItem> = gson.fromJson(json, type) ?: emptyList()
             list.forEach { mediaIndex[it.id] = it }
         }
+        cleanupSplitDuplicates()
         _mediaState.value = mediaIndex.values.toList()
 
         autoEnrichMissingMetadata()
+    }
+
+    private fun cleanupSplitDuplicates() {
+        val splitPartMessageIds = mediaIndex.values.filter { it.isSplit }.flatMap { it.parts.map { p -> p.messageId } }.toSet()
+        if (splitPartMessageIds.isNotEmpty()) {
+            val toRemove = mediaIndex.values.filter { !it.isSplit && splitPartMessageIds.contains(it.messageId) }
+            if (toRemove.isNotEmpty()) {
+                toRemove.forEach { mediaIndex.remove(it.id) }
+                saveMediaIndexToDisk()
+            }
+        }
     }
 
     private fun autoEnrichMissingMetadata() {
@@ -1049,6 +1061,12 @@ class TelegramClientManager(private val context: Context) {
                         val firstMsgId = computedParts.first().messageId
                         val splitItemId = "tg_${channelId}_${firstMsgId}_split"
 
+                        // Proactively clean up any standalone items or old partial split items for these part message IDs
+                        val partMsgIds = computedParts.map { it.messageId }.toSet()
+                        mediaIndex.entries.removeIf { (k, v) ->
+                            v.channelId == channelId && (partMsgIds.contains(v.messageId) || (v.isSplit && v.parts.any { partMsgIds.contains(it.messageId) })) && k != splitItemId
+                        }
+
                         val splitItem = mediaIndex[splitItemId] ?: MediaItem(
                             id = splitItemId,
                             channelId = channelId,
@@ -1213,13 +1231,19 @@ class TelegramClientManager(private val context: Context) {
         channelId: Long,
         messageId: Int,
         startByte: Long,
-        endByte: Long
+        endByte: Long,
+        mediaId: String? = null
     ): StreamChunkResult {
-        val media = mediaIndex.values.find {
-            (it.channelId == channelId && it.messageId == messageId) ||
-            (it.channelId == channelId && it.isSplit && it.parts.any { p -> p.messageId == messageId })
-        } ?: mediaIndex.values.find { it.messageId == messageId }
-          ?: unmatchedIndex.values.find { it.channelId == channelId && it.messageId == messageId }?.parsedMediaItem
+        val media = (if (!mediaId.isNullOrBlank()) mediaIndex[mediaId] else null)
+            ?: (if (!mediaId.isNullOrBlank()) mediaIndex.values.find { it.id == mediaId } else null)
+            ?: mediaIndex.values.find {
+                it.channelId == channelId && it.isSplit && (it.messageId == messageId || it.parts.any { p -> p.messageId == messageId })
+            }
+            ?: mediaIndex.values.find {
+                (it.channelId == channelId && it.messageId == messageId) ||
+                (it.channelId == channelId && it.isSplit && it.parts.any { p -> p.messageId == messageId })
+            } ?: mediaIndex.values.find { it.messageId == messageId }
+              ?: unmatchedIndex.values.find { (!mediaId.isNullOrBlank() && it.id == mediaId) || (it.channelId == channelId && it.messageId == messageId) }?.parsedMediaItem
 
         val effectiveChannelId = media?.channelId ?: channelId
         val totalSize = media?.sizeBytes ?: 50_000_000L

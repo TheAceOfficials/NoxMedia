@@ -461,15 +461,47 @@ class LocalHttpServer(
             return newFixedLengthResponse(Response.Status.OK, "application/json", "{\"streams\":[]}")
         }
 
+        // Deduplicate streams:
+        // 1. Identify all messageIds that are parts of split items
+        val splitPartMessageIds = allMedia.filter { it.isSplit }.flatMap { it.parts.map { p -> p.messageId } }.toSet()
+
+        // 2. Filter out any standalone items that are just parts of a split item
+        var finalItems = matchedItems.filter { item ->
+            if (!item.isSplit && splitPartMessageIds.contains(item.messageId)) {
+                false // Skip standalone part because the merged split item exists!
+            } else {
+                true
+            }
+        }
+
+        // 3. Skip Exact Duplicate Files if enabled (or deduplicate same file releases)
+        if (config.skipExactDuplicates) {
+            val seen = mutableSetOf<String>()
+            val deduped = mutableListOf<MediaItem>()
+            // Sort so split items and larger sizes come first
+            val sorted = finalItems.sortedWith(compareByDescending<MediaItem> { it.isSplit }.thenByDescending { it.sizeBytes })
+            for (item in sorted) {
+                val cleanKey = item.fileName.lowercase()
+                    .replace(Regex("""\.(mkv|mp4|avi|webm)(\.\d{2,3})?$""", RegexOption.IGNORE_CASE), "")
+                    .replace(Regex("""[\s._-]+"""), " ")
+                    .trim()
+                val groupKey = "${cleanKey}_${item.quality}_${item.season ?: 0}_${item.episode ?: 0}"
+                if (seen.add(groupKey)) {
+                    deduped.add(item)
+                }
+            }
+            finalItems = deduped
+        }
+
         val localIp = getLocalIpAddress()
-        val streams = matchedItems.map { item ->
+        val streams = finalItems.map { item ->
             val rawFileName = if (item.fileName.isNotBlank()) item.fileName else "${item.title}.mkv"
             val safeFileName = try {
                 java.net.URLEncoder.encode(rawFileName, "UTF-8").replace("+", "%20")
             } catch (_: Exception) {
                 "video.mkv"
             }
-            val streamUrl = "http://$localIp:${config.port}/stream/video/${item.channelId}/${item.messageId}/$safeFileName"
+            val streamUrl = "http://$localIp:${config.port}/stream/video/${item.channelId}/${item.id}/$safeFileName"
             val epInfo = if (item.season != null && item.episode != null) "S%02dE%02d • ".format(item.season, item.episode) else ""
             val epTitle = if (!item.episodeTitle.isNullOrBlank()) "${item.episodeTitle}\n" else ""
 
@@ -488,24 +520,31 @@ class LocalHttpServer(
 
     private fun handleVideoStream(session: IHTTPSession, uri: String, headers: Map<String, String>): Response {
         val parts = uri.split("/")
-        // uri format: /stream/video/<channelId>/<messageId> or /stream/video/<channelId>/<messageId>/<filename>
+        // uri format: /stream/video/<channelId>/<targetParam> or /stream/video/<channelId>/<targetParam>/<filename>
         if (parts.size < 5) {
             return newFixedLengthResponse(Response.Status.BAD_REQUEST, "text/plain", "Invalid stream path")
         }
 
         val channelId = parts[3].toLongOrNull() ?: 0L
-        val messageId = parts[4].toIntOrNull() ?: 0
+        val targetParam = parts[4]
+        val messageId = targetParam.toIntOrNull() ?: 0
         val fileName = if (parts.size >= 6) {
             try { java.net.URLDecoder.decode(parts[5], "UTF-8") } catch (_: Exception) { parts[5] }
         } else "video.mp4"
 
-        val media = tgClient.getAllMedia().find {
-            (it.channelId == channelId && it.messageId == messageId) ||
-            (it.channelId == channelId && it.isSplit && it.parts.any { p -> p.messageId == messageId }) ||
-            (it.messageId == messageId)
-        } ?: tgClient.getUnmatchedMedia().find {
-            it.channelId == channelId && it.messageId == messageId
-        }?.parsedMediaItem
+        val allMedia = tgClient.getAllMedia()
+        val media = allMedia.find { it.id == targetParam }
+            ?: allMedia.find { it.channelId == channelId && it.id == targetParam }
+            // Prefer split items over standalone parts if multiple exist
+            ?: allMedia.find {
+                it.channelId == channelId && it.isSplit && (it.messageId == messageId || it.parts.any { p -> p.messageId == messageId })
+            }
+            ?: allMedia.find {
+                (it.channelId == channelId && it.messageId == messageId) || (it.messageId == messageId)
+            }
+            ?: tgClient.getUnmatchedMedia().find {
+                it.id == targetParam || (it.channelId == channelId && it.messageId == messageId)
+            }?.parsedMediaItem
 
         val totalSize = media?.sizeBytes ?: 50_000_000L
         val mime = if (fileName.contains(".mkv", ignoreCase = true) || uri.contains(".mkv", ignoreCase = true)) {
@@ -538,7 +577,7 @@ class LocalHttpServer(
             }
         }
 
-        val chunk = tgClient.getStreamSource(channelId, messageId, startByte, endByte)
+        val chunk = tgClient.getStreamSource(channelId, messageId, startByte, endByte, mediaId = targetParam)
 
         val response = if (rangeHeader != null) {
             newFixedLengthResponse(

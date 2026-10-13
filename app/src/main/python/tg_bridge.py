@@ -1,5 +1,6 @@
 import asyncio
 import json
+import math
 import threading
 import uuid
 import traceback
@@ -638,7 +639,7 @@ async def _get_media_session(client: Client, dc_id: int) -> Session:
             for _ in range(6):
                 try:
                     exported = await client.invoke(raw.functions.auth.ExportAuthorization(dc_id=dc_id))
-                    await session.send(raw.functions.auth.ImportAuthorization(id=exported.id, bytes=exported.bytes))
+                    await session.invoke(raw.functions.auth.ImportAuthorization(id=exported.id, bytes=exported.bytes))
                     break
                 except errors.AuthBytesInvalid:
                     await asyncio.sleep(0.5)
@@ -656,13 +657,13 @@ def _get_location_from_file_id(file_id_obj: FileId):
             id=file_id_obj.media_id,
             access_hash=file_id_obj.access_hash,
             file_reference=file_id_obj.file_reference,
-            thumb_size=file_id_obj.thumbnail_size
+            thumb_size=file_id_obj.thumbnail_size or ""
         )
     return raw.types.InputDocumentFileLocation(
         id=file_id_obj.media_id,
         access_hash=file_id_obj.access_hash,
         file_reference=file_id_obj.file_reference,
-        thumb_size=file_id_obj.thumbnail_size
+        thumb_size=file_id_obj.thumbnail_size or ""
     )
 
 async def _resolve_file_id(client: Client, chat_id: int, msg_id: int) -> Optional[FileId]:
@@ -704,6 +705,74 @@ async def _resolve_file_id(client: Client, chat_id: int, msg_id: int) -> Optiona
         print(f"Error decoding file_id for {chat_id}:{msg_id}: {e}")
         return None
 
+async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_obj: FileId, offset: int, limit: int) -> Optional[bytes]:
+    location = _get_location_from_file_id(file_id_obj)
+    dc_id = file_id_obj.dc_id
+    session = await _get_media_session(client, dc_id)
+
+    tries = 0
+    while tries < 4:
+        try:
+            r = await asyncio.wait_for(
+                session.send(
+                    raw.functions.upload.GetFile(
+                        location=location,
+                        offset=offset,
+                        limit=limit
+                    )
+                ),
+                timeout=25.0
+            )
+
+            if isinstance(r, raw.types.upload.File):
+                return r.bytes
+            elif isinstance(r, raw.types.upload.FileCdnRedirect):
+                cdn_session = Session(
+                    client, r.dc_id, await Auth(client, r.dc_id, await client.storage.test_mode()).create(),
+                    await client.storage.test_mode(), is_media=True, is_cdn=True
+                )
+                try:
+                    await cdn_session.start()
+                    r2 = await cdn_session.invoke(
+                        raw.functions.upload.GetCdnFile(
+                            file_token=r.file_token,
+                            offset=offset,
+                            limit=limit
+                        )
+                    )
+                    from pyrogram.crypto import aes
+                    decrypted_chunk = aes.ctr256_decrypt(
+                        r2.bytes,
+                        r.encryption_key,
+                        bytearray(r.encryption_iv[:-4] + (offset // 16).to_bytes(4, "big"))
+                    )
+                    return decrypted_chunk
+                finally:
+                    await cdn_session.stop()
+            else:
+                raw_chunk = getattr(r, "bytes", None)
+                if raw_chunk is not None:
+                    return raw_chunk
+                return None
+        except asyncio.TimeoutError:
+            tries += 1
+            await asyncio.sleep(0.5)
+        except Exception as e:
+            err_str = str(e)
+            if "FILE_REFERENCE" in err_str or "file_reference" in err_str.lower():
+                _file_id_cache.pop((chat_id, msg_id), None)
+                refreshed = await _resolve_file_id(client, chat_id, msg_id)
+                if refreshed:
+                    file_id_obj = refreshed
+                    location = _get_location_from_file_id(refreshed)
+            elif "FloodWait" in type(e).__name__ or "flood" in err_str.lower():
+                m = re.search(r'(\d+)', err_str)
+                w = int(m.group(1)) if m else 3
+                await asyncio.sleep(w + 0.5)
+            tries += 1
+            await asyncio.sleep(0.5)
+    return None
+
 class VirtualStreamSession:
     def __init__(self, client: Client, chat_id: int, parts: List[Dict[str, Any]], start_byte: int, end_byte: int):
         self.client = client
@@ -740,74 +809,33 @@ class VirtualStreamSession:
                 print(f"[VirtualStreamSession] Could not resolve file_id for {self.chat_id}:{msg_id}")
                 continue
 
-            start_chunk_idx = local_start // CHUNK_SIZE
-            end_chunk_idx = local_end // CHUNK_SIZE
-            num_chunks = end_chunk_idx - start_chunk_idx + 1
-            start_offset_in_chunk = local_start % CHUNK_SIZE
+            offset = local_start - (local_start % CHUNK_SIZE)
+            first_part_cut = local_start - offset
+            last_part_cut = (local_end % CHUNK_SIZE) + 1
+            part_count = math.ceil((local_end + 1) / CHUNK_SIZE) - (offset // CHUNK_SIZE)
 
-            bytes_to_read_in_part = local_end - local_start + 1
-            curr_chunk_in_part = 0
+            for i in range(part_count):
+                fetch_off = offset + (i * CHUNK_SIZE)
+                chunk = await _fetch_chunk_bytes(self.client, self.chat_id, msg_id, file_id_obj, fetch_off, CHUNK_SIZE)
+                if not chunk:
+                    break
 
-            try:
-                async for raw_chunk in self.client.get_file(
-                    file_id=file_id_obj,
-                    file_size=part_size,
-                    limit=num_chunks,
-                    offset=start_chunk_idx
-                ):
-                    if not raw_chunk:
-                        break
+                curr_idx = i + 1
+                if part_count == 1:
+                    out = chunk[first_part_cut:min(len(chunk), last_part_cut)]
+                elif curr_idx == 1:
+                    out = chunk[first_part_cut:]
+                elif curr_idx == part_count:
+                    out = chunk[:min(len(chunk), last_part_cut)]
+                else:
+                    out = chunk
 
-                    if curr_chunk_in_part == 0 and start_offset_in_chunk > 0:
-                        raw_chunk = raw_chunk[start_offset_in_chunk:]
+                if out:
+                    yield out
 
-                    if len(raw_chunk) > bytes_to_read_in_part:
-                        raw_chunk = raw_chunk[:bytes_to_read_in_part]
-
-                    if raw_chunk:
-                        yield raw_chunk
-                        bytes_to_read_in_part -= len(raw_chunk)
-                        pos += len(raw_chunk)
-
-                    curr_chunk_in_part += 1
-                    if bytes_to_read_in_part <= 0:
-                        break
-            except Exception as e:
-                err_str = str(e)
-                print(f"[VirtualStreamSession] get_file error on msg {msg_id}: {e}")
-                if "FILE_REFERENCE" in err_str or "file_reference" in err_str.lower():
-                    _file_id_cache.pop((self.chat_id, msg_id), None)
-                    refreshed = await _resolve_file_id(self.client, self.chat_id, msg_id)
-                    if refreshed and bytes_to_read_in_part > 0:
-                        part_curr_local = local_end - bytes_to_read_in_part + 1
-                        retry_start_chunk = part_curr_local // CHUNK_SIZE
-                        retry_offset_in_chunk = part_curr_local % CHUNK_SIZE
-                        retry_end_chunk = local_end // CHUNK_SIZE
-                        retry_num_chunks = retry_end_chunk - retry_start_chunk + 1
-                        retry_curr_chunk = 0
-
-                        try:
-                            async for raw_chunk in self.client.get_file(
-                                file_id=refreshed,
-                                file_size=part_size,
-                                limit=retry_num_chunks,
-                                offset=retry_start_chunk
-                            ):
-                                if not raw_chunk:
-                                    break
-                                if retry_curr_chunk == 0 and retry_offset_in_chunk > 0:
-                                    raw_chunk = raw_chunk[retry_offset_in_chunk:]
-                                if len(raw_chunk) > bytes_to_read_in_part:
-                                    raw_chunk = raw_chunk[:bytes_to_read_in_part]
-                                if raw_chunk:
-                                    yield raw_chunk
-                                    bytes_to_read_in_part -= len(raw_chunk)
-                                    pos += len(raw_chunk)
-                                retry_curr_chunk += 1
-                                if bytes_to_read_in_part <= 0:
-                                    break
-                        except Exception as re:
-                            print(f"[VirtualStreamSession] retry get_file error on msg {msg_id}: {re}")
+            pos = cum_end + 1
+            if pos > end:
+                break
 
     async def read_bytes(self, max_bytes: int) -> bytes:
         while len(self.buffer) < max_bytes:
