@@ -1530,7 +1530,15 @@ class TelegramClientManager(private val context: Context) {
         val effectiveEnd = if (endByte <= 0L || endByte >= totalSize) totalSize - 1 else endByte
         val contentLength = effectiveEnd - startByte + 1
 
-        Log.d(TAG, "getStreamSource: mediaId=$mediaId, effectiveMsgId=$extractedMsgId, isSplit=${media?.isSplit}, partsCount=${media?.parts?.size}, range=$startByte-$effectiveEnd/$totalSize")
+        val mimeType = if (media?.fileName?.contains(".mkv", ignoreCase = true) == true ||
+            media?.mimeType?.contains("matroska", ignoreCase = true) == true
+        ) {
+            "video/x-matroska"
+        } else {
+            media?.mimeType ?: "video/mp4"
+        }
+
+        Log.d(TAG, "getStreamSource: mediaId=$mediaId, effectiveMsgId=$extractedMsgId, isSplit=${media?.isSplit}, partsCount=${media?.parts?.size}, range=$startByte-$effectiveEnd/$totalSize, mime=$mimeType")
 
         val apiId = getApiId()
         val apiHash = getApiHash()
@@ -1543,7 +1551,11 @@ class TelegramClientManager(private val context: Context) {
                 val activeCfg = com.tgserver.streamer.service.StreamerForegroundService.activeConfig
                 val diskMb = activeCfg?.diskCacheMb ?: 2048
                 val bufMb = activeCfg?.bufferPipelineMb ?: 20
-                bridge.callAttr("configure_cache", streamCacheDir, diskMb, bufMb)
+                try {
+                    bridge.callAttr("configure_cache", streamCacheDir, diskMb, bufMb)
+                } catch (ce: Exception) {
+                    Log.w(TAG, "configure_cache notice: ${ce.message}")
+                }
 
                 val partsList = if (media != null && media.isSplit && media.parts.isNotEmpty()) {
                     media.parts.sortedBy { it.partNumber }.map {
@@ -1586,26 +1598,18 @@ class TelegramClientManager(private val context: Context) {
                         startByte = startByte,
                         endByte = effectiveEnd,
                         totalSize = totalSize,
-                        mimeType = media?.mimeType ?: "video/mp4"
+                        mimeType = mimeType
                     )
+                } else {
+                    Log.e(TAG, "create_stream returned blank streamId for mediaId=$mediaId, channel=$effectiveChannelId")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error creating live MTProto stream: ${e.message}", e)
+                throw java.io.IOException("Failed to create MTProto stream: ${e.message}", e)
             }
         }
 
-        val bufferSize = minOf(contentLength, 65536L).toInt()
-        val dummyBytes = ByteArray(bufferSize)
-        val inputStream: InputStream = ByteArrayInputStream(dummyBytes)
-
-        return StreamChunkResult(
-            inputStream = inputStream,
-            contentLength = contentLength,
-            startByte = startByte,
-            endByte = effectiveEnd,
-            totalSize = totalSize,
-            mimeType = media?.mimeType ?: "video/mp4"
-        )
+        throw java.io.IOException("MTProto stream unavailable: session inactive or streamId blank for mediaId=$mediaId")
     }
 
     fun updateStreamCacheConfig(diskCacheMb: Int, bufferPipelineMb: Int) {

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import math
+import os
 import threading
 import time
 import uuid
@@ -52,13 +53,13 @@ def configure_cache(cache_dir: str, max_disk_mb: int, buffer_mb: int):
         except Exception:
             pass
 
-def _save_chunk_to_disk(chat_id: int, msg_id: int, fetch_off: int, limit: int, data: bytes):
+def _save_chunk_to_disk_sync(chat_id: int, msg_id: int, fetch_off: int, limit: int, data: bytes):
     global _last_prune_time
     try:
-        if not _disk_cache_dir or _disk_cache_max_mb == 0:
+        if not _disk_cache_dir or _disk_cache_max_mb <= 0:
             return
         chunk_file = os.path.join(_disk_cache_dir, f"{abs(chat_id)}_{msg_id}_{fetch_off}_{limit}.bin")
-        temp_file = chunk_file + ".tmp"
+        temp_file = chunk_file + f".{uuid.uuid4().hex[:6]}.tmp"
         with open(temp_file, "wb") as f:
             f.write(data)
         os.replace(temp_file, chunk_file)
@@ -68,7 +69,16 @@ def _save_chunk_to_disk(chat_id: int, msg_id: int, fetch_off: int, limit: int, d
             _last_prune_time = now
             _prune_disk_cache()
     except Exception as e:
-        print(f"[DiskCache] Write error: {e}")
+        print(f"[DiskCache] Write error: {e}", flush=True)
+
+def _save_chunk_to_disk(chat_id: int, msg_id: int, fetch_off: int, limit: int, data: bytes):
+    if not _disk_cache_dir or _disk_cache_max_mb <= 0:
+        return
+    try:
+        loop = _ensure_event_loop()
+        loop.run_in_executor(None, _save_chunk_to_disk_sync, chat_id, msg_id, fetch_off, limit, data)
+    except Exception:
+        pass
 
 def _prune_disk_cache():
     try:
@@ -98,7 +108,7 @@ def _prune_disk_cache():
                 except Exception:
                     pass
     except Exception as e:
-        print(f"[DiskCache] Prune error: {e}")
+        print(f"[DiskCache] Prune error: {e}", flush=True)
 
 def _cache_get(key: Tuple[int, int, int]) -> Optional[bytes]:
     if key in _chunk_cache:
@@ -267,12 +277,14 @@ async def _get_connected_stream_client(api_id: int, api_hash: str, session_str: 
     )
     await _stream_client.start()
 
-    # Pre-cache initial dialogs (limit=20, takes <300ms) so user's channel access hashes are known
+    # Pre-cache initial dialogs (limit=20, timeout 3s) so user's channel access hashes are known
     try:
-        async for _ in _stream_client.get_dialogs(limit=20):
-            pass
+        async def _quick_dialogs():
+            async for _ in _stream_client.get_dialogs(limit=20):
+                pass
+        await asyncio.wait_for(_quick_dialogs(), timeout=3.0)
     except Exception as e:
-        print(f"Pre-caching dialogs notice: {e}")
+        print(f"Pre-caching dialogs notice: {e}", flush=True)
 
     return _stream_client
 
@@ -729,7 +741,7 @@ async def _get_media_session(client: Client, dc_id: int) -> Session:
             for _ in range(6):
                 try:
                     exported = await client.invoke(raw.functions.auth.ExportAuthorization(dc_id=dc_id))
-                    await session.invoke(raw.functions.auth.ImportAuthorization(id=exported.id, bytes=exported.bytes))
+                    await session.send(raw.functions.auth.ImportAuthorization(id=exported.id, bytes=exported.bytes))
                     break
                 except errors.AuthBytesInvalid:
                     await asyncio.sleep(0.5)
@@ -762,31 +774,47 @@ async def _resolve_file_id(client: Client, chat_id: int, msg_id: int) -> Optiona
     if cached:
         return cached
 
-    msg = None
-    target_peer = chat_id
-    try:
-        msg = await client.get_messages(chat_id, msg_id)
-    except (errors.PeerIdInvalid, errors.ChannelInvalid):
+    # Candidate peers to try (e.g. -1004424883082, 4424883082, etc.)
+    target_peers = [chat_id]
+    chat_str = str(chat_id)
+    if chat_str.startswith("-100"):
         try:
-            await client.get_chat(chat_id)
-            msg = await client.get_messages(chat_id, msg_id)
+            target_peers.append(int(chat_str[4:]))
         except Exception:
-            try:
-                # Fast targeted dialog search: scan dialogs to find channel peer and break immediately
-                async for dialog in client.get_dialogs(limit=100):
-                    if dialog.chat and (dialog.chat.id == chat_id or str(abs(dialog.chat.id)).endswith(str(abs(chat_id)))):
-                        target_peer = dialog.chat.id
-                        break
-                msg = await client.get_messages(target_peer, msg_id)
-            except Exception as e:
-                print(f"Error fetching message after get_dialogs for {chat_id}:{msg_id}: {e}")
-                return None
-    except Exception as e:
-        print(f"Error fetching message for {chat_id}:{msg_id}: {e}")
-        return None
+            pass
+    elif not chat_str.startswith("-"):
+        try:
+            target_peers.append(int(f"-100{chat_str}"))
+        except Exception:
+            pass
+
+    msg = None
+    for peer in target_peers:
+        try:
+            msg = await client.get_messages(peer, msg_id)
+            if msg and (msg.video or msg.document or msg.animation or msg.audio):
+                break
+        except Exception:
+            msg = None
+
+    if not msg or not (msg.video or msg.document or msg.animation or msg.audio):
+        try:
+            async for dialog in client.get_dialogs(limit=100):
+                dchat = dialog.chat
+                if dchat and (dchat.id == chat_id or str(abs(dchat.id)).endswith(str(abs(chat_id))) or str(abs(chat_id)).endswith(str(abs(dchat.id)))):
+                    try:
+                        msg = await client.get_messages(dchat.id, msg_id)
+                        if msg and (msg.video or msg.document or msg.animation or msg.audio):
+                            break
+                    except Exception:
+                        pass
+        except Exception as e:
+            print(f"[ResolveFileId] Dialog scan notice: {e}", flush=True)
 
     if not msg:
+        print(f"[ResolveFileId] Failed to resolve message {msg_id} in chat {chat_id}", flush=True)
         return None
+
     media = msg.video or msg.document or msg.animation or msg.audio
     if not media:
         return None
@@ -794,11 +822,11 @@ async def _resolve_file_id(client: Client, chat_id: int, msg_id: int) -> Optiona
     try:
         file_id_obj = FileId.decode(media.file_id)
         _file_id_cache[key] = file_id_obj
-        if target_peer != chat_id:
-            _file_id_cache[(target_peer, msg_id)] = file_id_obj
+        for peer in target_peers:
+            _file_id_cache[(peer, msg_id)] = file_id_obj
         return file_id_obj
     except Exception as e:
-        print(f"Error decoding file_id for {chat_id}:{msg_id}: {e}")
+        print(f"Error decoding file_id for {chat_id}:{msg_id}: {e}", flush=True)
         return None
 
 async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_obj: FileId, offset: int, limit: int) -> Optional[bytes]:
@@ -810,13 +838,13 @@ async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_
         session = await _get_media_session(client, dc_id)
         try:
             r = await asyncio.wait_for(
-                session.invoke(
+                session.send(
                     raw.functions.upload.GetFile(
                         location=location,
                         offset=offset,
                         limit=limit
                     ),
-                    sleep_threshold=30
+                    timeout=20.0
                 ),
                 timeout=25.0
             )
@@ -830,12 +858,13 @@ async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_
                 )
                 try:
                     await cdn_session.start()
-                    r2 = await cdn_session.invoke(
+                    r2 = await cdn_session.send(
                         raw.functions.upload.GetCdnFile(
                             file_token=r.file_token,
                             offset=offset,
                             limit=limit
-                        )
+                        ),
+                        timeout=20.0
                     )
                     from pyrogram.crypto import aes
                     decrypted_chunk = aes.ctr256_decrypt(
@@ -851,7 +880,7 @@ async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_
                 if raw_chunk is not None:
                     return raw_chunk
                 return None
-        except asyncio.TimeoutError:
+        except (asyncio.TimeoutError, TimeoutError):
             tries += 1
             await asyncio.sleep(0.3)
         except Exception as e:
@@ -866,7 +895,7 @@ async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_
                 m = re.search(r'(\d+)', err_str)
                 w = int(m.group(1)) if m else 3
                 await asyncio.sleep(w + 0.5)
-            elif "AuthKey" in err_str or "SessionRevoked" in err_str or "session" in err_str.lower():
+            elif "AuthKey" in err_str or "SessionRevoked" in err_str:
                 if hasattr(client, "media_sessions"):
                     client.media_sessions.pop(dc_id, None)
             tries += 1
@@ -1027,17 +1056,17 @@ class VirtualStreamSession:
         s_end = t_info["s_end"]
 
         raw_chunk = await _get_or_fetch_chunk(self.client, self.chat_id, msg_id, fetch_off, limit)
-        if not raw_chunk:
+        if raw_chunk is None:
             return None
 
         chunk_len = len(raw_chunk)
         if s_start >= chunk_len:
-            return None
+            return b""
         end_idx = min(chunk_len, s_end) if s_end is not None else chunk_len
         return raw_chunk[s_start:end_idx]
 
     async def _prefetch_loop(self):
-        in_flight: List[asyncio.Task] = []
+        in_flight: List[Tuple[int, asyncio.Task]] = []
         try:
             # Parallel file_id resolution for all required parts
             unique_msg_ids = list(dict.fromkeys(t["msg_id"] for t in self.tasks))
@@ -1050,39 +1079,54 @@ class VirtualStreamSession:
                         return_exceptions=True
                     ))
 
-            MAX_IN_FLIGHT = min(5, max(3, _buffer_pipeline_mb // 5))
+            MAX_IN_FLIGHT = min(6, max(3, _buffer_pipeline_mb // 4))
             task_idx = 0
             total_tasks = len(self.tasks)
 
             while (task_idx < total_tasks or in_flight) and not self._closed:
                 while task_idx < total_tasks and len(in_flight) < MAX_IN_FLIGHT and not self._closed:
                     t_info = self.tasks[task_idx]
+                    t_idx = task_idx
                     task_idx += 1
-                    in_flight.append(asyncio.create_task(self._fetch_task_slice(t_info)))
+                    in_flight.append((t_idx, asyncio.create_task(self._fetch_task_slice(t_info))))
 
                 if not in_flight:
                     break
 
-                next_task = in_flight.pop(0)
+                t_idx, next_task = in_flight.pop(0)
                 try:
                     slice_bytes = await next_task
                 except Exception as e:
-                    print(f"[VirtualStreamSession] Slice error: {e}")
+                    print(f"[VirtualStreamSession] Slice error on task {t_idx}: {e}", flush=True)
                     slice_bytes = None
 
                 if self._closed:
                     break
 
-                if slice_bytes:
-                    await self.queue.put(slice_bytes)
+                if slice_bytes is not None:
+                    if len(slice_bytes) > 0:
+                        await self.queue.put(slice_bytes)
                 else:
-                    break
+                    # Retry task once if it returned None
+                    print(f"[VirtualStreamSession] Task {t_idx} returned None, retrying once...", flush=True)
+                    try:
+                        slice_bytes = await self._fetch_task_slice(self.tasks[t_idx])
+                        if slice_bytes is not None:
+                            if len(slice_bytes) > 0:
+                                await self.queue.put(slice_bytes)
+                        else:
+                            print(f"[VirtualStreamSession] Task {t_idx} failed retry, closing prefetch", flush=True)
+                            break
+                    except Exception as e:
+                        print(f"[VirtualStreamSession] Retry failed for task {t_idx}: {e}", flush=True)
+                        break
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            print(f"[VirtualStreamSession] prefetch loop error: {e}")
+            print(f"[VirtualStreamSession] prefetch loop error: {e}", flush=True)
+            traceback.print_exc()
         finally:
-            for fut in in_flight:
+            for _, fut in in_flight:
                 fut.cancel()
             await self.queue.put(None)
 

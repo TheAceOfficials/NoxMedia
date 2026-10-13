@@ -618,7 +618,16 @@ class LocalHttpServer(
         }
 
         // Pass resolvedMessageId (from actual media item) and targetParam (item.id) for lookup
-        val chunk = tgClient.getStreamSource(effectiveChannelId, resolvedMessageId, startByte, endByte, mediaId = targetParam)
+        val chunk = try {
+            tgClient.getStreamSource(effectiveChannelId, resolvedMessageId, startByte, endByte, mediaId = targetParam)
+        } catch (e: Exception) {
+            Log.e(TAG, "Stream error: ${e.message}", e)
+            return newFixedLengthResponse(
+                Response.Status.INTERNAL_ERROR,
+                "text/plain",
+                "Stream error: ${e.message}"
+            )
+        }
 
         val response = if (rangeHeader != null) {
             newFixedLengthResponse(
