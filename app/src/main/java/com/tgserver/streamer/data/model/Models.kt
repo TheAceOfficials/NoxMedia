@@ -155,6 +155,8 @@ data class ServerConfig(
     var telegramApiId: Int = 0,
     var telegramApiHash: String = "",
     var bufferChunkSizeKb: Int = 512,
+    var diskCacheMb: Int = 2048,
+    var bufferPipelineMb: Int = 20,
     var cacheDir: String = "",
     var tmdbApiKey: String = "",
     var tvdbApiKey: String = "",

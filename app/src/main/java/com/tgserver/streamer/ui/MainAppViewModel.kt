@@ -524,6 +524,8 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         return ServerConfig(
             port = prefs.getInt("server_port", 7788),
             bufferChunkSizeKb = prefs.getInt("buffer_chunk_kb", 512),
+            diskCacheMb = prefs.getInt("disk_cache_mb", 2048),
+            bufferPipelineMb = prefs.getInt("buffer_pipeline_mb", 20),
             customPosterUrl = prefs.getString("custom_poster_url", "") ?: "",
             customPosterApiKey = prefs.getString("custom_poster_api_key", "") ?: "",
             tmdbApiKey = prefs.getString("tmdb_api_key", "") ?: "",
@@ -544,6 +546,8 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         prefs.edit().apply {
             putInt("server_port", cfg.port)
             putInt("buffer_chunk_kb", cfg.bufferChunkSizeKb)
+            putInt("disk_cache_mb", cfg.diskCacheMb)
+            putInt("buffer_pipeline_mb", cfg.bufferPipelineMb)
             putString("custom_poster_url", cfg.customPosterUrl)
             putString("custom_poster_api_key", cfg.customPosterApiKey)
             putString("tmdb_api_key", cfg.tmdbApiKey)
@@ -561,6 +565,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         }
         _config.value = cfg
         StreamerForegroundService.activeConfig = cfg
+        tgClient.updateStreamCacheConfig(cfg.diskCacheMb, cfg.bufferPipelineMb)
         if (cfg.skipExactDuplicates) {
             tgClient.cleanupSplitDuplicates()
         }
@@ -645,15 +650,32 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         Toast.makeText(getApplication(), "✓ Streaming preferences saved", Toast.LENGTH_SHORT).show()
     }
 
-    fun updateServerNetwork(port: Int, bufferKb: Int, remoteUrl: String, startOnBoot: Boolean) {
+    fun updateServerNetwork(port: Int, diskCacheMb: Int, bufferPipelineMb: Int, remoteUrl: String, startOnBoot: Boolean) {
         val updated = _config.value.copy(
             port = port,
-            bufferChunkSizeKb = bufferKb,
+            diskCacheMb = diskCacheMb,
+            bufferPipelineMb = bufferPipelineMb,
             remotePublicUrl = remoteUrl.trim(),
             startOnBoot = startOnBoot
         )
         saveStoredConfig(updated)
-        Toast.makeText(getApplication(), "✓ Server settings saved (Port: $port)", Toast.LENGTH_SHORT).show()
+        Toast.makeText(getApplication(), "✓ Server settings saved (Port: $port, Cache: ${diskCacheMb}MB, Buffer: ${bufferPipelineMb}MB)", Toast.LENGTH_SHORT).show()
+    }
+
+    fun restoreServerDefaults(): ServerConfig {
+        val current = _config.value
+        val updated = current.copy(
+            port = 7788,
+            diskCacheMb = 2048,
+            bufferPipelineMb = 20
+        )
+        saveStoredConfig(updated)
+        Toast.makeText(getApplication(), "✓ Defaults restored: Cache 2048MB, Buffer 20MB, Port 7788", Toast.LENGTH_SHORT).show()
+        return updated
+    }
+
+    fun detectTailscaleIp(): String? {
+        return tgClient.detectTailscaleAddress()
     }
 
     fun updateChannelAutomation(autoScan: Boolean, replaceSameQuality: Boolean, skipExact: Boolean) {

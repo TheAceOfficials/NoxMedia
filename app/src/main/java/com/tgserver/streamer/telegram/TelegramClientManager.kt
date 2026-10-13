@@ -25,6 +25,8 @@ import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.InputStream
+import java.net.Inet4Address
+import java.net.NetworkInterface
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
@@ -1537,6 +1539,12 @@ class TelegramClientManager(private val context: Context) {
 
         if (bridge != null && sessionStr.isNotBlank() && apiId > 0) {
             try {
+                val streamCacheDir = File(context.cacheDir, "stream_cache").apply { mkdirs() }.absolutePath
+                val activeCfg = com.tgserver.streamer.service.StreamerForegroundService.activeConfig
+                val diskMb = activeCfg?.diskCacheMb ?: 2048
+                val bufMb = activeCfg?.bufferPipelineMb ?: 20
+                bridge.callAttr("configure_cache", streamCacheDir, diskMb, bufMb)
+
                 val partsList = if (media != null && media.isSplit && media.parts.isNotEmpty()) {
                     media.parts.sortedBy { it.partNumber }.map {
                         mapOf(
@@ -1598,6 +1606,40 @@ class TelegramClientManager(private val context: Context) {
             totalSize = totalSize,
             mimeType = media?.mimeType ?: "video/mp4"
         )
+    }
+
+    fun updateStreamCacheConfig(diskCacheMb: Int, bufferPipelineMb: Int) {
+        try {
+            val bridge = getPyBridge() ?: return
+            val cacheFolder = File(context.cacheDir, "stream_cache").apply { mkdirs() }.absolutePath
+            bridge.callAttr("configure_cache", cacheFolder, diskCacheMb, bufferPipelineMb)
+            Log.d(TAG, "Stream cache configured: dir=$cacheFolder, diskCacheMb=$diskCacheMb, bufferMb=$bufferPipelineMb")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error updating stream cache config: ${e.message}", e)
+        }
+    }
+
+    fun detectTailscaleAddress(): String? {
+        return try {
+            val interfaces = NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val iface = interfaces.nextElement()
+                if (iface.isLoopback || !iface.isUp) continue
+                val addresses = iface.inetAddresses
+                while (addresses.hasMoreElements()) {
+                    val addr = addresses.nextElement()
+                    if (!addr.isLoopbackAddress && addr is Inet4Address) {
+                        val host = addr.hostAddress ?: continue
+                        if (host.startsWith("100.") || iface.name.contains("tailscale", ignoreCase = true)) {
+                            return host
+                        }
+                    }
+                }
+            }
+            null
+        } catch (_: Exception) {
+            null
+        }
     }
 }
 

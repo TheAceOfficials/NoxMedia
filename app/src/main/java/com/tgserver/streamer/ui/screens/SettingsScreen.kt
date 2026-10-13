@@ -56,15 +56,9 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
     var tvdbKeyInput by remember(config.tvdbApiKey) { mutableStateOf(config.tvdbApiKey) }
     var posterUrlInput by remember(config.customPosterUrl) { mutableStateOf(config.customPosterUrl) }
     var portInput by remember(config.port) { mutableStateOf(config.port.toString()) }
-    var bufferMbInput by remember(config.bufferChunkSizeKb) {
-        mutableStateOf(
-            if (config.bufferChunkSizeKb <= 0) "1.0"
-            else {
-                val mbVal = config.bufferChunkSizeKb / 1024.0
-                if (mbVal % 1.0 == 0.0) "${mbVal.toInt()}" else String.format(java.util.Locale.US, "%.2f", mbVal).trimEnd('0').trimEnd('.')
-            }
-        )
-    }
+    var cacheMbInput by remember(config.diskCacheMb) { mutableStateOf(config.diskCacheMb.toString()) }
+    var bufferMbInput by remember(config.bufferPipelineMb) { mutableStateOf(config.bufferPipelineMb.toString()) }
+    var tailscaleIp by remember { mutableStateOf(viewModel.detectTailscaleIp()) }
     var remoteUrlInput by remember(config.remotePublicUrl) { mutableStateOf(config.remotePublicUrl) }
     var selectedQuality by remember(config.preferredQuality) { mutableStateOf(config.preferredQuality) }
     var hideCamTs by remember(config.hideCamTs) { mutableStateOf(config.hideCamTs) }
@@ -464,20 +458,24 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
             SettingsSectionCard(
                 icon = Icons.Default.Dns,
                 title = "SERVER & NETWORK",
-                description = "Configure port, streaming buffer chunks, and remote access."
+                description = "Configure disk cache, pipeline streaming buffer, local port, and remote access."
             ) {
-                // Aligned Local Port & Custom Buffer MB side-by-side
+                // Aligned Cache MB, Buffer MB, and Local Port Row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.Top
                 ) {
                     Box(modifier = Modifier.weight(1f)) {
                         NothingTextField(
-                            value = portInput,
-                            onValueChange = { portInput = it.filter { c -> c.isDigit() } },
-                            label = "LOCAL PORT",
-                            placeholder = "7788",
+                            value = cacheMbInput,
+                            onValueChange = { input ->
+                                if (input.isEmpty() || input.matches(Regex("""^-?\d*$"""))) {
+                                    cacheMbInput = input
+                                }
+                            },
+                            label = "CACHE MB",
+                            placeholder = "2048",
                             isMonospace = true,
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
@@ -488,22 +486,83 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         NothingTextField(
                             value = bufferMbInput,
                             onValueChange = { input ->
-                                if (input.isEmpty() || input.matches(Regex("""^\d*\.?\d*$"""))) {
+                                if (input.isEmpty() || input.matches(Regex("""^\d*$"""))) {
                                     bufferMbInput = input
                                 }
                             },
-                            label = "BUFFER (MB)",
-                            badgeText = "CHUNK",
-                            placeholder = "1.0",
+                            label = "BUFFER MB",
+                            placeholder = "20",
                             isMonospace = true,
                             singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                        )
+                    }
+
+                    Box(modifier = Modifier.weight(1f)) {
+                        NothingTextField(
+                            value = portInput,
+                            onValueChange = { portInput = it.filter { c -> c.isDigit() } },
+                            label = "PORT",
+                            placeholder = "7788",
+                            isMonospace = true,
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                         )
                     }
                 }
 
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = "-1 = unlimited cache, 0 = none. Smaller values save storage on low-end devices.",
+                    color = TextTertiary,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp
+                )
+
                 Spacer(modifier = Modifier.height(14.dp))
 
+                // Action Buttons Row: Save & Restore Defaults
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(modifier = Modifier.weight(1.3f)) {
+                        NothingPillButton(
+                            text = "Save Settings →",
+                            onClick = {
+                                val parsedPort = portInput.toIntOrNull() ?: 7788
+                                val parsedCache = cacheMbInput.toIntOrNull() ?: 2048
+                                val parsedBuf = bufferMbInput.toIntOrNull() ?: 20
+                                viewModel.updateServerNetwork(parsedPort, parsedCache, parsedBuf, remoteUrlInput, startOnBoot)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            variant = NothingButtonVariant.Primary,
+                            height = 44.dp
+                        )
+                    }
+
+                    Box(modifier = Modifier.weight(1f)) {
+                        NothingPillButton(
+                            text = "↺ Defaults",
+                            onClick = {
+                                val restored = viewModel.restoreServerDefaults()
+                                portInput = restored.port.toString()
+                                cacheMbInput = restored.diskCacheMb.toString()
+                                bufferMbInput = restored.bufferPipelineMb.toString()
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            variant = NothingButtonVariant.Secondary,
+                            height = 44.dp
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                DotDivider(dotsCount = 20)
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Remote Public IP / Tunnel URL
                 NothingTextField(
                     value = remoteUrlInput,
                     onValueChange = { remoteUrlInput = it },
@@ -523,9 +582,72 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     overflow = TextOverflow.Ellipsis
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Tailscale Detection Row
+                if (tailscaleIp != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0x0DFFFFFF))
+                            .border(1.dp, Color(0x1AFFFFFF), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                            Text(
+                                text = "Tailscale Address Detected",
+                                color = StatusGreen,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "IP: $tailscaleIp",
+                                color = TextSecondary,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+
+                        NothingPillButton(
+                            text = "Use IP",
+                            onClick = {
+                                val effectivePort = portInput.ifBlank { "7788" }
+                                remoteUrlInput = "http://$tailscaleIp:$effectivePort"
+                            },
+                            variant = NothingButtonVariant.Ghost,
+                            height = 30.dp,
+                            modifier = Modifier.wrapContentWidth()
+                        )
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(TextTertiary)
+                        )
+                        Text(
+                            text = "Tailscale not detected on device",
+                            color = TextTertiary,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
                 DotDivider(dotsCount = 20)
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 // Start on Boot Switch Row
                 Row(
@@ -555,21 +677,6 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         onCheckedChange = { startOnBoot = it }
                     )
                 }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                NothingPillButton(
-                    text = "Save Server Settings →",
-                    onClick = {
-                        val parsedPort = portInput.toIntOrNull() ?: 7788
-                        val parsedMb = bufferMbInput.toDoubleOrNull() ?: 1.0
-                        val bufferKb = (parsedMb * 1024).toInt().coerceAtLeast(64)
-                        viewModel.updateServerNetwork(parsedPort, bufferKb, remoteUrlInput, startOnBoot)
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    variant = NothingButtonVariant.Secondary,
-                    height = 46.dp
-                )
             }
 
             // ==================== 6. DATABASE & STORAGE MAINTENANCE ====================

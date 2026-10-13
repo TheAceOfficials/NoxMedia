@@ -35,6 +35,71 @@ _chunk_cache: OrderedDict[Tuple[int, int, int], bytes] = OrderedDict()
 _fetch_dedup_lock = asyncio.Lock()
 _pending_fetches: Dict[Tuple[int, int, int], asyncio.Task] = {}
 
+# Persistent On-Disk Chunk Cache & Buffer Pipeline Config
+_disk_cache_dir: Optional[str] = None
+_disk_cache_max_mb: int = 2048
+_buffer_pipeline_mb: int = 20
+_last_prune_time: float = 0.0
+
+def configure_cache(cache_dir: str, max_disk_mb: int, buffer_mb: int):
+    global _disk_cache_dir, _disk_cache_max_mb, _buffer_pipeline_mb
+    _disk_cache_dir = cache_dir
+    _disk_cache_max_mb = int(max_disk_mb)
+    _buffer_pipeline_mb = max(2, int(buffer_mb))
+    if _disk_cache_dir and not os.path.exists(_disk_cache_dir):
+        try:
+            os.makedirs(_disk_cache_dir, exist_ok=True)
+        except Exception:
+            pass
+
+def _save_chunk_to_disk(chat_id: int, msg_id: int, fetch_off: int, limit: int, data: bytes):
+    global _last_prune_time
+    try:
+        if not _disk_cache_dir or _disk_cache_max_mb == 0:
+            return
+        chunk_file = os.path.join(_disk_cache_dir, f"{abs(chat_id)}_{msg_id}_{fetch_off}_{limit}.bin")
+        temp_file = chunk_file + ".tmp"
+        with open(temp_file, "wb") as f:
+            f.write(data)
+        os.replace(temp_file, chunk_file)
+
+        now = time.time()
+        if _disk_cache_max_mb > 0 and (now - _last_prune_time > 30):
+            _last_prune_time = now
+            _prune_disk_cache()
+    except Exception as e:
+        print(f"[DiskCache] Write error: {e}")
+
+def _prune_disk_cache():
+    try:
+        if not _disk_cache_dir or _disk_cache_max_mb <= 0:
+            return
+        max_bytes = _disk_cache_max_mb * 1024 * 1024
+        entries = []
+        total_size = 0
+        for entry in os.scandir(_disk_cache_dir):
+            if entry.is_file() and entry.name.endswith(".bin"):
+                try:
+                    stat = entry.stat()
+                    total_size += stat.st_size
+                    entries.append((stat.st_mtime, stat.st_size, entry.path))
+                except Exception:
+                    pass
+
+        if total_size > max_bytes:
+            entries.sort(key=lambda x: x[0])
+            target_size = int(max_bytes * 0.85)
+            for _, size, path in entries:
+                try:
+                    os.remove(path)
+                    total_size -= size
+                    if total_size <= target_size:
+                        break
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"[DiskCache] Prune error: {e}")
+
 def _cache_get(key: Tuple[int, int, int]) -> Optional[bytes]:
     if key in _chunk_cache:
         _chunk_cache.move_to_end(key)
@@ -810,10 +875,26 @@ async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_
 
 async def _get_or_fetch_chunk(client: Client, chat_id: int, msg_id: int, fetch_off: int, limit: int) -> Optional[bytes]:
     key = (chat_id, msg_id, fetch_off)
+    # L1: Memory Cache
     cached = _cache_get(key)
     if cached is not None:
         return cached
 
+    # L2: Fast Local Disk Cache (0ms replay/seeking)
+    if _disk_cache_dir and _disk_cache_max_mb != 0:
+        chunk_file = os.path.join(_disk_cache_dir, f"{abs(chat_id)}_{msg_id}_{fetch_off}_{limit}.bin")
+        if os.path.isfile(chunk_file):
+            try:
+                os.utime(chunk_file, None)
+                with open(chunk_file, "rb") as f:
+                    disk_bytes = f.read()
+                if disk_bytes:
+                    _cache_put(key, disk_bytes)
+                    return disk_bytes
+            except Exception as e:
+                print(f"[DiskCache] Read error: {e}")
+
+    # L3: Deduplicated Network Fetch
     async with _fetch_dedup_lock:
         task = _pending_fetches.get(key)
         if task is None:
@@ -837,6 +918,8 @@ async def _do_fetch_chunk_network(client: Client, chat_id: int, msg_id: int, fet
         chunk = await _fetch_chunk_bytes(client, chat_id, msg_id, file_id_obj, fetch_off, limit)
         if chunk:
             _cache_put(key, chunk)
+            if _disk_cache_dir and _disk_cache_max_mb != 0:
+                _save_chunk_to_disk(chat_id, msg_id, fetch_off, limit, chunk)
         return chunk
     except Exception as e:
         print(f"[ChunkFetch] Error fetching chunk {key}: {e}")
@@ -865,13 +948,15 @@ class VirtualStreamSession:
         self.total_to_read = max(0, end_byte - start_byte + 1)
         self.bytes_read = 0
         self.buffer = bytearray()
-        self.queue: asyncio.Queue = asyncio.Queue(maxsize=16)
+        # Pipeline buffer: queue maxsize dynamically based on buffer_mb (default 20MB)
+        q_size = max(4, min(64, _buffer_pipeline_mb))
+        self.queue: asyncio.Queue = asyncio.Queue(maxsize=q_size)
         self._closed = False
         self._eof = False
         self._last_active = time.time()
         self.tasks = self._plan_tasks()
         self.prefetch_task: Optional[asyncio.Task] = None
-        print(f"[VirtualStreamSession] Init stream chat={chat_id}, parts_count={len(self.parts)}, range={start_byte}-{end_byte}, total_tasks={len(self.tasks)}")
+        print(f"[VirtualStreamSession] Init stream chat={chat_id}, parts_count={len(self.parts)}, range={start_byte}-{end_byte}, total_tasks={len(self.tasks)}, buffer_mb={_buffer_pipeline_mb}")
 
     def _plan_tasks(self) -> List[Dict[str, Any]]:
         CHUNK_SIZE = 1024 * 1024 # 1 MB MTProto chunk
@@ -965,7 +1050,7 @@ class VirtualStreamSession:
                         return_exceptions=True
                     ))
 
-            MAX_IN_FLIGHT = 3
+            MAX_IN_FLIGHT = min(5, max(3, _buffer_pipeline_mb // 5))
             task_idx = 0
             total_tasks = len(self.tasks)
 
