@@ -523,7 +523,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     private fun loadStoredConfig(): ServerConfig {
         return ServerConfig(
             port = prefs.getInt("server_port", 7788),
-            bufferChunkSizeKb = prefs.getInt("buffer_chunk_kb", 1024),
+            bufferChunkSizeKb = prefs.getInt("buffer_chunk_kb", 512),
             customPosterUrl = prefs.getString("custom_poster_url", "") ?: "",
             customPosterApiKey = prefs.getString("custom_poster_api_key", "") ?: "",
             tmdbApiKey = prefs.getString("tmdb_api_key", "") ?: "",

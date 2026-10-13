@@ -201,6 +201,14 @@ async def _get_connected_stream_client(api_id: int, api_hash: str, session_str: 
         in_memory=True
     )
     await _stream_client.start()
+
+    # Pre-cache initial dialogs (limit=20, takes <300ms) so user's channel access hashes are known
+    try:
+        async for _ in _stream_client.get_dialogs(limit=20):
+            pass
+    except Exception as e:
+        print(f"Pre-caching dialogs notice: {e}")
+
     return _stream_client
 
 def parse_media(filename: str, caption: str = "") -> str:
@@ -622,140 +630,51 @@ def scan_channel_batch(api_id: int, api_hash: str, session_str: str, channel_id:
 
 # --- Byte Streaming Across Single / Split Parts ---
 
-# --- High-Throughput Parallel Media Session Pool ---
-# Telegram enforces an MTProto throttle of ~1.5 - 2.0 MB/s per single TCP connection.
-# By maintaining a pool of 5 parallel worker sessions per DC, we achieve 8 - 10+ MB/s
-# aggregate streaming throughput simultaneously without hitting rate limits.
+# --- Byte Streaming Across Single / Split Parts ---
 
-MEDIA_WORKERS_PER_DC = 5
-_dc_session_pools: Dict[int, "MediaSessionPool"] = {}
-_dc_session_pools_lock = asyncio.Lock()
+async def _get_media_session(client: Client, dc_id: int) -> Session:
+    if not hasattr(client, "media_sessions"):
+        client.media_sessions = {}
 
-class MediaSessionPool:
-    def __init__(self, client: Client, dc_id: int, pool_size: int = MEDIA_WORKERS_PER_DC):
-        self.client = client
-        self.dc_id = dc_id
-        self.pool_size = pool_size
-        self.sessions: List[Session] = []
-        self.available_queue: asyncio.Queue = asyncio.Queue()
-        self.lock = asyncio.Lock()
-        self._auth_key = None
-        self._warmup_started = False
+    session = client.media_sessions.get(dc_id)
+    if session:
+        return session
 
-    async def _init_auth_key(self):
-        if self._auth_key is None:
-            current_dc = await self.client.storage.dc_id()
-            test_mode = await self.client.storage.test_mode()
-            if self.dc_id != current_dc:
-                self._auth_key = await Auth(self.client, self.dc_id, test_mode).create()
-            else:
-                self._auth_key = await self.client.storage.auth_key()
+    async with _media_session_lock:
+        session = client.media_sessions.get(dc_id)
+        if session:
+            return session
 
-    async def _create_worker_session(self) -> Session:
-        await self._init_auth_key()
-        current_dc = await self.client.storage.dc_id()
-        test_mode = await self.client.storage.test_mode()
+        test_mode = await client.storage.test_mode()
+        current_dc = await client.storage.dc_id()
 
-        session = Session(
-            self.client,
-            self.dc_id,
-            self._auth_key,
-            test_mode,
-            is_media=True
-        )
+        if dc_id != current_dc:
+            auth_key = await Auth(client, dc_id, test_mode).create()
+        else:
+            auth_key = await client.storage.auth_key()
+
+        session = Session(client, dc_id, auth_key, test_mode, is_media=True)
         session.no_updates = True
-        session.timeout = 25
+        session.timeout = 30
         session.sleep_threshold = 60
+
         await session.start()
 
-        if self.dc_id != current_dc:
+        if dc_id != current_dc:
             for _ in range(6):
                 try:
-                    exported = await self.client.invoke(raw.functions.auth.ExportAuthorization(dc_id=self.dc_id))
+                    exported = await client.invoke(raw.functions.auth.ExportAuthorization(dc_id=dc_id))
                     await session.invoke(raw.functions.auth.ImportAuthorization(id=exported.id, bytes=exported.bytes))
                     break
                 except errors.AuthBytesInvalid:
-                    await asyncio.sleep(0.4)
+                    await asyncio.sleep(0.5)
                 except OSError:
-                    await asyncio.sleep(0.8)
+                    await asyncio.sleep(1)
                 except Exception:
                     break
 
+        client.media_sessions[dc_id] = session
         return session
-
-    async def acquire(self) -> Session:
-        async with self.lock:
-            # If no sessions exist yet, spin up the initial one immediately so streaming starts with 0s delay
-            if not self.sessions:
-                s = await self._create_worker_session()
-                self.sessions.append(s)
-                if not self._warmup_started:
-                    self._warmup_started = True
-                    asyncio.create_task(self._warmup_workers())
-                return s
-
-            # If an idle session is available, return immediately
-            try:
-                return self.available_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                pass
-
-            # If we haven't reached pool_size, create a new worker on demand
-            if len(self.sessions) < self.pool_size:
-                s = await self._create_worker_session()
-                self.sessions.append(s)
-                return s
-
-        # Otherwise wait for an available session from the queue
-        return await self.available_queue.get()
-
-    def release(self, session: Session):
-        if session and session.is_connected:
-            self.available_queue.put_nowait(session)
-        else:
-            asyncio.create_task(self._replace_session(session))
-
-    async def _replace_session(self, old_session: Session):
-        async with self.lock:
-            if old_session in self.sessions:
-                self.sessions.remove(old_session)
-            try:
-                if old_session.is_connected:
-                    await old_session.stop()
-            except Exception:
-                pass
-            try:
-                new_s = await self._create_worker_session()
-                self.sessions.append(new_s)
-                self.available_queue.put_nowait(new_s)
-            except Exception as e:
-                print(f"[MediaSessionPool] Session replace error: {e}")
-
-    async def _warmup_workers(self):
-        try:
-            while True:
-                async with self.lock:
-                    if len(self.sessions) >= self.pool_size:
-                        break
-                s = await self._create_worker_session()
-                async with self.lock:
-                    self.sessions.append(s)
-                self.available_queue.put_nowait(s)
-        except Exception as e:
-            print(f"[MediaSessionPool] Warmup background notice: {e}")
-
-async def _get_dc_session_pool(client: Client, dc_id: int) -> MediaSessionPool:
-    pool = _dc_session_pools.get(dc_id)
-    if pool is not None:
-        return pool
-
-    async with _dc_session_pools_lock:
-        pool = _dc_session_pools.get(dc_id)
-        if pool is not None:
-            return pool
-        pool = MediaSessionPool(client, dc_id, pool_size=MEDIA_WORKERS_PER_DC)
-        _dc_session_pools[dc_id] = pool
-        return pool
 
 def _get_location_from_file_id(file_id_obj: FileId):
     if file_id_obj.file_type == FileType.PHOTO:
@@ -779,15 +698,24 @@ async def _resolve_file_id(client: Client, chat_id: int, msg_id: int) -> Optiona
         return cached
 
     msg = None
+    target_peer = chat_id
     try:
         msg = await client.get_messages(chat_id, msg_id)
     except (errors.PeerIdInvalid, errors.ChannelInvalid):
         try:
             await client.get_chat(chat_id)
             msg = await client.get_messages(chat_id, msg_id)
-        except Exception as e:
-            print(f"Error fetching message after get_chat for {chat_id}:{msg_id}: {e}")
-            return None
+        except Exception:
+            try:
+                # Fast targeted dialog search: scan dialogs to find channel peer and break immediately
+                async for dialog in client.get_dialogs(limit=100):
+                    if dialog.chat and (dialog.chat.id == chat_id or str(abs(dialog.chat.id)).endswith(str(abs(chat_id)))):
+                        target_peer = dialog.chat.id
+                        break
+                msg = await client.get_messages(target_peer, msg_id)
+            except Exception as e:
+                print(f"Error fetching message after get_dialogs for {chat_id}:{msg_id}: {e}")
+                return None
     except Exception as e:
         print(f"Error fetching message for {chat_id}:{msg_id}: {e}")
         return None
@@ -801,6 +729,8 @@ async def _resolve_file_id(client: Client, chat_id: int, msg_id: int) -> Optiona
     try:
         file_id_obj = FileId.decode(media.file_id)
         _file_id_cache[key] = file_id_obj
+        if target_peer != chat_id:
+            _file_id_cache[(target_peer, msg_id)] = file_id_obj
         return file_id_obj
     except Exception as e:
         print(f"Error decoding file_id for {chat_id}:{msg_id}: {e}")
@@ -809,19 +739,19 @@ async def _resolve_file_id(client: Client, chat_id: int, msg_id: int) -> Optiona
 async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_obj: FileId, offset: int, limit: int) -> Optional[bytes]:
     location = _get_location_from_file_id(file_id_obj)
     dc_id = file_id_obj.dc_id
-    pool = await _get_dc_session_pool(client, dc_id)
 
     tries = 0
     while tries < 4:
-        session = await pool.acquire()
+        session = await _get_media_session(client, dc_id)
         try:
             r = await asyncio.wait_for(
-                session.send(
+                session.invoke(
                     raw.functions.upload.GetFile(
                         location=location,
                         offset=offset,
                         limit=limit
-                    )
+                    ),
+                    sleep_threshold=30
                 ),
                 timeout=25.0
             )
@@ -858,7 +788,7 @@ async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_
                 return None
         except asyncio.TimeoutError:
             tries += 1
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(0.3)
         except Exception as e:
             err_str = str(e)
             if "FILE_REFERENCE" in err_str or "file_reference" in err_str.lower():
@@ -871,10 +801,11 @@ async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_
                 m = re.search(r'(\d+)', err_str)
                 w = int(m.group(1)) if m else 3
                 await asyncio.sleep(w + 0.5)
+            elif "AuthKey" in err_str or "SessionRevoked" in err_str or "session" in err_str.lower():
+                if hasattr(client, "media_sessions"):
+                    client.media_sessions.pop(dc_id, None)
             tries += 1
-            await asyncio.sleep(0.2)
-        finally:
-            pool.release(session)
+            await asyncio.sleep(0.3)
     return None
 
 async def _get_or_fetch_chunk(client: Client, chat_id: int, msg_id: int, fetch_off: int, limit: int) -> Optional[bytes]:
@@ -936,6 +867,7 @@ class VirtualStreamSession:
         self.buffer = bytearray()
         self.queue: asyncio.Queue = asyncio.Queue(maxsize=16)
         self._closed = False
+        self._eof = False
         self._last_active = time.time()
         self.tasks = self._plan_tasks()
         self.prefetch_task: Optional[asyncio.Task] = None
@@ -1024,8 +956,8 @@ class VirtualStreamSession:
         try:
             # Parallel file_id resolution for all required parts
             unique_msg_ids = list(dict.fromkeys(t["msg_id"] for t in self.tasks))
+            # Resolve part 1 immediately so chunk 0 begins downloading with 0ms wait
             if unique_msg_ids:
-                # Resolve part 1 immediately so chunk 0 begins downloading with 0ms wait
                 await _resolve_file_id(self.client, self.chat_id, unique_msg_ids[0])
                 if len(unique_msg_ids) > 1:
                     asyncio.create_task(asyncio.gather(
@@ -1033,19 +965,18 @@ class VirtualStreamSession:
                         return_exceptions=True
                     ))
 
-            MAX_IN_FLIGHT = 5 # 5 parallel chunk downloads over 5 separate TCP sockets
+            MAX_IN_FLIGHT = 3
             task_idx = 0
             total_tasks = len(self.tasks)
 
             while (task_idx < total_tasks or in_flight) and not self._closed:
-                while task_idx < total_tasks and len(in_flight) < MAX_IN_FLIGHT and self.queue.qsize() < 24 and not self._closed:
+                while task_idx < total_tasks and len(in_flight) < MAX_IN_FLIGHT and not self._closed:
                     t_info = self.tasks[task_idx]
                     task_idx += 1
                     in_flight.append(asyncio.create_task(self._fetch_task_slice(t_info)))
 
                 if not in_flight:
-                    await asyncio.sleep(0.01)
-                    continue
+                    break
 
                 next_task = in_flight.pop(0)
                 try:
@@ -1072,34 +1003,23 @@ class VirtualStreamSession:
 
     async def read_bytes(self, max_bytes: int) -> bytes:
         self._last_active = time.time()
-        # Fast path: zero-copy return if internal buffer is empty and a complete chunk is in queue
-        if not self.buffer and not self.queue.empty():
-            item = self.queue.get_nowait()
-            if item is not None:
-                if len(item) == max_bytes:
-                    self.bytes_read += max_bytes
-                    return item
-                elif len(item) > max_bytes:
-                    self.buffer.extend(item[max_bytes:])
-                    self.bytes_read += max_bytes
-                    return item[:max_bytes]
-                else:
-                    self.buffer.extend(item)
-
-        while len(self.buffer) < max_bytes and not self._closed:
+        while len(self.buffer) < max_bytes and not self._closed and not self._eof:
             if not self.queue.empty():
                 item = self.queue.get_nowait()
                 if item is None:
+                    self._eof = True
                     break
                 self.buffer.extend(item)
             else:
                 try:
                     item = await asyncio.wait_for(self.queue.get(), timeout=35.0)
                     if item is None:
+                        self._eof = True
                         break
                     self.buffer.extend(item)
                 except asyncio.TimeoutError:
                     print(f"[VirtualStreamSession] Timeout waiting for stream queue")
+                    self._eof = True
                     break
 
         result = bytes(self.buffer[:max_bytes])
@@ -1110,6 +1030,7 @@ class VirtualStreamSession:
     def close(self):
         if not self._closed:
             self._closed = True
+            self._eof = True
             if self.prefetch_task and not self.prefetch_task.done():
                 self.prefetch_task.cancel()
             self.buffer.clear()
@@ -1134,12 +1055,6 @@ def create_stream(api_id: int, api_hash: str, session_str: str, chat_id: int, pa
                 s.close()
 
         client = await _get_connected_stream_client(api_id, api_hash, session_str)
-        try:
-            # Ensure target channel input peer is cached in Pyrogram memory with 0s latency
-            await client.get_chat(int(chat_id))
-        except Exception:
-            pass
-
         parts = json.loads(parts_json)
         stream_id = str(uuid.uuid4())
         session = VirtualStreamSession(client, int(chat_id), parts, int(start_byte), int(end_byte))
@@ -1154,7 +1069,7 @@ def create_stream(api_id: int, api_hash: str, session_str: str, chat_id: int, pa
         traceback.print_exc()
         return ""
 
-def read_stream_chunk(stream_id: str, max_bytes: int = 1048576) -> bytes:
+def read_stream_chunk(stream_id: str, max_bytes: int = 524288) -> bytes:
     """
     Reads the next slice of bytes from pre-buffered queue for the given stream_id synchronously.
     Returns bytes or empty bytes(0) when finished.
