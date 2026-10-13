@@ -1,6 +1,7 @@
 package com.tgserver.streamer.server
 
 import android.content.Context
+import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
@@ -17,6 +18,8 @@ import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+
+private const val TAG = "LocalHttpServer"
 
 class LocalHttpServer(
     private val context: Context,
