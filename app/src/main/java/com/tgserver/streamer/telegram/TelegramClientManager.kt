@@ -243,13 +243,13 @@ class TelegramClientManager(private val context: Context) {
             if (splitPartMessageIds.contains(item.messageId)) return@filter true
 
             val itemClean = item.fileName.lowercase()
-                .replace(Regex("""[\s._-]*(?:part|pt)[\s._-]*\d+.*""", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("""[\s._\-\(\[]*(?:part|pt|cd|disc)[\s._\-]*\d+.*""", RegexOption.IGNORE_CASE), "")
                 .replace(Regex("""\.(mkv|mp4|avi|webm|ts|m4v)(\.\d{2,4})?$""", RegexOption.IGNORE_CASE), "")
                 .trim()
 
             if (splitCleanBases.contains(itemClean)) {
-                // If it's a raw part slice (.part001, .part002, .001, etc.)
-                if (item.fileName.contains(Regex("""(?i)(?:part|pt|\.\d{2,4})"""))) {
+                // If it's a raw part slice (.part001, .part002, .001, .cd1, etc.)
+                if (item.fileName.contains(Regex("""(?i)(?:part|pt|cd|disc|\.\d{2,4})"""))) {
                     return@filter true
                 }
                 // Or if it's an inferior duplicate with identical season/episode/cleanBase but smaller size
@@ -271,12 +271,12 @@ class TelegramClientManager(private val context: Context) {
         }
 
         // 3. Scan for any UNMERGED split parts in mediaIndex from old scans and auto-merge them
-        val partMarkerRegex = Regex("""(?i)(?:[\s._-]*(?:part|pt)[\s._-]*\d+\.[a-zA-Z0-9]{2,4}$|\.[a-zA-Z0-9]{2,4}\.\d{2,4}$)""")
+        val partMarkerRegex = Regex("""(?i)(?:[\s._\-\(\[]*(?:part|pt|cd|disc)[\s._\-]*\d+[\s._\-\)\]]*\.[a-zA-Z0-9]{2,4}$|\.[a-zA-Z0-9]{2,4}\.\d{2,4}$|\.\d{2,4}$)""")
         val unmergedCandidateGroups = mediaIndex.values
             .filter { !it.isSplit && it.fileName.contains(partMarkerRegex) }
             .groupBy { item ->
                 val base = item.fileName.lowercase()
-                    .replace(Regex("""(?i)[\s._-]*(?:part|pt)[\s._-]*\d+\.[a-zA-Z0-9]{2,4}$"""), "")
+                    .replace(Regex("""(?i)[\s._\-\(\[]*(?:part|pt|cd|disc)[\s._\-]*\d+[\s._\-\)\]]*\.[a-zA-Z0-9]{2,4}$"""), "")
                     .replace(Regex("""(?i)\.[a-zA-Z0-9]{2,4}\.\d{2,4}$"""), "")
                     .replace(Regex("""(?i)\.[a-zA-Z0-9]{2,4}$"""), "")
                     .trim()
@@ -286,7 +286,7 @@ class TelegramClientManager(private val context: Context) {
         for ((_, group) in unmergedCandidateGroups) {
             if (group.size >= 2) {
                 val sortedParts = group.sortedBy { item ->
-                    val m1 = Regex("""(?i)(?:part|pt)[\s._-]*(\d+)""").find(item.fileName)
+                    val m1 = Regex("""(?i)(?:part|pt|cd|disc)[\s._\-]*(\d+)""").find(item.fileName)
                     val m2 = Regex("""(?i)\.(\d{2,4})$""").find(item.fileName)
                     m1?.groupValues?.get(1)?.toIntOrNull()
                         ?: m2?.groupValues?.get(1)?.toIntOrNull()
@@ -307,7 +307,7 @@ class TelegramClientManager(private val context: Context) {
 
                 val primary = sortedParts.first()
                 val cleanFileName = primary.fileName
-                    .replace(Regex("""(?i)[\s._-]*(?:part|pt)[\s._-]*\d+"""), "")
+                    .replace(Regex("""(?i)[\s._\-\(\[]*(?:part|pt|cd|disc)[\s._\-]*\d+[\s._\-\)\]]*"""), "")
                     .replace(Regex("""(?i)\.\d{2,4}$"""), "")
 
                 val splitId = "tg_${primary.channelId}_${primary.messageId}_split"
