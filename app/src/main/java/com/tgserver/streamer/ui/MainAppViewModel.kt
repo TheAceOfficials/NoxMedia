@@ -685,7 +685,11 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
 
     fun getAppCacheSizeBytes(): Long = tgClient.getAppCacheSizeBytes()
 
-    fun clearAppCache(): Long = tgClient.clearAppCache()
+    fun clearAppCache(): Long {
+        val freed = tgClient.clearAppCache()
+        com.tgserver.streamer.ui.screens.ImageMemoryCache.clear()
+        return freed
+    }
 
     fun clearAppLogs(): Boolean = tgClient.clearAppLogs()
 

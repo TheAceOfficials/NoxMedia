@@ -452,7 +452,6 @@ class TelegramClientManager(private val context: Context) {
             deleteDirRecursive(context.cacheDir)
             context.externalCacheDir?.let { deleteDirRecursive(it) }
             metadataEnricher.clearCache()
-            com.tgserver.streamer.ui.screens.ImageMemoryCache.clear()
         } catch (e: Exception) {
             Log.e(TAG, "Error clearing cache: ${e.message}")
         }

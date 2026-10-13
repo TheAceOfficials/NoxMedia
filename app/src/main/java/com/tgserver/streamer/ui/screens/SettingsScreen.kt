@@ -83,7 +83,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
     // Library scan & storage state
     var duplicateScanCount by remember { mutableStateOf<Int?>(null) }
     var deadFilesScanCount by remember { mutableStateOf<Int?>(null) }
-    var cacheSizeBytes by remember { mutableLongStateOf(viewModel.getAppCacheSizeBytes()) }
+    var cacheSizeBytes by remember { mutableStateOf(viewModel.getAppCacheSizeBytes()) }
 
     // Dialogs state
     var showLogoutDialog by remember { mutableStateOf(false) }

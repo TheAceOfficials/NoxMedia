@@ -754,7 +754,7 @@ fun PixelCyberSwitch(
                     sweepAngle = 180f,
                     useCenter = false,
                     topLeft = Offset(1.5.dp.toPx(), 1.5.dp.toPx()),
-                    size = Size(size.width - 3.dp.toPx(), size.height - 3.dp.toPx()),
+                    size = androidx.compose.ui.geometry.Size(size.width - 3.dp.toPx(), size.height - 3.dp.toPx()),
                     style = Stroke(width = 1.dp.toPx())
                 )
 
@@ -765,7 +765,7 @@ fun PixelCyberSwitch(
                     sweepAngle = 180f,
                     useCenter = false,
                     topLeft = Offset(1.5.dp.toPx(), 1.5.dp.toPx()),
-                    size = Size(size.width - 3.dp.toPx(), size.height - 3.dp.toPx()),
+                    size = androidx.compose.ui.geometry.Size(size.width - 3.dp.toPx(), size.height - 3.dp.toPx()),
                     style = Stroke(width = 1.dp.toPx())
                 )
 
@@ -781,9 +781,9 @@ fun PixelCyberSwitch(
 
                 // 4. Sad Face (when OFF)
                 if (faceSadAlpha > 0.01f) {
-                    val eyeRadius = 1.25.dp.toPx() * faceSadScale
-                    val eyeDist = 3.6.dp.toPx() * faceSadScale
-                    val eyeY = cy - 2.0.dp.toPx()
+                    val eyeRadius = 1.3.dp.toPx() * faceSadScale
+                    val eyeDist = 4.dp.toPx() * faceSadScale
+                    val eyeY = cy - 2.dp.toPx()
 
                     // Eyes
                     drawCircle(
@@ -799,23 +799,23 @@ fun PixelCyberSwitch(
 
                     // Sad mouth (frown)
                     val mouthW = 6.dp.toPx() * faceSadScale
-                    val mouthH = 3.8.dp.toPx() * faceSadScale
+                    val mouthH = 4.dp.toPx() * faceSadScale
                     drawArc(
                         color = faceColor.copy(alpha = faceSadAlpha),
                         startAngle = 190f,
                         sweepAngle = 160f,
                         useCenter = false,
-                        topLeft = Offset(cx - mouthW / 2f, cy + 0.5.dp.toPx()),
-                        size = Size(mouthW, mouthH),
+                        topLeft = Offset(cx - mouthW / 2f, cy + 1.dp.toPx()),
+                        size = androidx.compose.ui.geometry.Size(mouthW, mouthH),
                         style = Stroke(width = strokeW * faceSadScale, cap = StrokeCap.Round)
                     )
                 }
 
                 // 5. Happy Face (when ON)
                 if (faceHappyAlpha > 0.01f) {
-                    val eyeRadius = 1.25.dp.toPx() * faceHappyScale
-                    val eyeDist = 3.6.dp.toPx() * faceHappyScale
-                    val eyeY = cy - 2.0.dp.toPx()
+                    val eyeRadius = 1.3.dp.toPx() * faceHappyScale
+                    val eyeDist = 4.dp.toPx() * faceHappyScale
+                    val eyeY = cy - 2.dp.toPx()
 
                     // Eyes
                     drawCircle(
@@ -831,14 +831,14 @@ fun PixelCyberSwitch(
 
                     // Happy mouth (smile)
                     val mouthW = 6.dp.toPx() * faceHappyScale
-                    val mouthH = 3.8.dp.toPx() * faceHappyScale
+                    val mouthH = 4.dp.toPx() * faceHappyScale
                     drawArc(
                         color = faceColor.copy(alpha = faceHappyAlpha),
                         startAngle = 10f,
                         sweepAngle = 160f,
                         useCenter = false,
-                        topLeft = Offset(cx - mouthW / 2f, cy - 0.5.dp.toPx()),
-                        size = Size(mouthW, mouthH),
+                        topLeft = Offset(cx - mouthW / 2f, cy - 1.dp.toPx()),
+                        size = androidx.compose.ui.geometry.Size(mouthW, mouthH),
                         style = Stroke(width = strokeW * faceHappyScale, cap = StrokeCap.Round)
                     )
                 }
