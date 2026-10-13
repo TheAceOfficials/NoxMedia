@@ -367,7 +367,7 @@ class TelegramClientManager(private val context: Context) {
         // 4. Exact duplicate media items (same title, season, episode, resolution)
         val duplicatesByMedia = mediaIndex.values
             .filter { it.title.isNotBlank() && !it.isSplit }
-            .groupBy { "${it.title.lowercase().trim()}_${it.season ?: 0}_${it.episode ?: 0}_${it.resolution ?: ""}" }
+            .groupBy { "${it.title.lowercase().trim()}_${it.season ?: 0}_${it.episode ?: 0}_${it.quality}" }
         for ((_, grp) in duplicatesByMedia) {
             if (grp.size > 1) {
                 count += (grp.size - 1)
@@ -398,7 +398,7 @@ class TelegramClientManager(private val context: Context) {
         // 2. Remove exact duplicate media items (same title, season, episode, resolution)
         val duplicatesByMedia = mediaIndex.values
             .filter { it.title.isNotBlank() && !it.isSplit }
-            .groupBy { "${it.title.lowercase().trim()}_${it.season ?: 0}_${it.episode ?: 0}_${it.resolution ?: ""}" }
+            .groupBy { "${it.title.lowercase().trim()}_${it.season ?: 0}_${it.episode ?: 0}_${it.quality}" }
         for ((_, grp) in duplicatesByMedia) {
             if (grp.size > 1) {
                 val sorted = grp.sortedWith(
