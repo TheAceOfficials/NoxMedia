@@ -333,6 +333,172 @@ class TelegramClientManager(private val context: Context) {
         return removedCount
     }
 
+    fun scanDuplicates(): Int {
+        var count = 0
+        // 1. Redundant raw part slices of existing split items
+        val splitPartMessageIds = mediaIndex.values.filter { it.isSplit }
+            .flatMap { it.parts.map { p -> p.messageId } }
+            .toSet()
+        count += mediaIndex.values.count { !it.isSplit && splitPartMessageIds.contains(it.messageId) }
+
+        // 2. Unmerged part groups (group >= 2 items)
+        val partMarkerRegex = Regex("""(?i)(?:[\s._\-\(\[]*(?:part|pt|cd|disc)[\s._\-]*\d+[\s._\-\)\]]*\.[a-zA-Z0-9]{2,4}$|\.[a-zA-Z0-9]{2,4}\.\d{2,4}$|\.\d{2,4}$)""")
+        val unmergedCandidateGroups = mediaIndex.values
+            .filter { !it.isSplit && it.fileName.contains(partMarkerRegex) }
+            .groupBy { item ->
+                val base = item.fileName.lowercase()
+                    .replace(Regex("""(?i)[\s._\-\(\[]*(?:part|pt|cd|disc)[\s._\-]*\d+[\s._\-\)\]]*\.[a-zA-Z0-9]{2,4}$"""), "")
+                    .replace(Regex("""(?i)\.[a-zA-Z0-9]{2,4}\.\d{2,4}$"""), "")
+                    .replace(Regex("""(?i)\.[a-zA-Z0-9]{2,4}$"""), "")
+                    .trim()
+                "${item.channelId}_${base}"
+            }
+        for ((_, grp) in unmergedCandidateGroups) {
+            if (grp.size >= 2) count += (grp.size - 1)
+        }
+
+        // 3. Exact identical file duplicates (same channelId, fileName, and sizeBytes)
+        val duplicatesByNameAndSize = mediaIndex.values.filter { !it.isSplit }
+            .groupBy { "${it.channelId}_${it.fileName.lowercase().trim()}_${it.sizeBytes}" }
+        for ((_, grp) in duplicatesByNameAndSize) {
+            if (grp.size > 1) count += (grp.size - 1)
+        }
+
+        // 4. Exact duplicate media items (same title, season, episode, resolution)
+        val duplicatesByMedia = mediaIndex.values
+            .filter { it.title.isNotBlank() && !it.isSplit }
+            .groupBy { "${it.title.lowercase().trim()}_${it.season ?: 0}_${it.episode ?: 0}_${it.resolution ?: ""}" }
+        for ((_, grp) in duplicatesByMedia) {
+            if (grp.size > 1) {
+                count += (grp.size - 1)
+            }
+        }
+        return count
+    }
+
+    fun deleteDuplicates(): Int {
+        var removed = cleanupSplitDuplicates()
+
+        // 1. Remove exact identical file duplicates (same channel, fileName, sizeBytes)
+        val duplicatesByNameAndSize = mediaIndex.values.filter { !it.isSplit }
+            .groupBy { "${it.channelId}_${it.fileName.lowercase().trim()}_${it.sizeBytes}" }
+        for ((_, grp) in duplicatesByNameAndSize) {
+            if (grp.size > 1) {
+                val sorted = grp.sortedWith(
+                    compareByDescending<MediaItem> { !it.imdbId.isNullOrBlank() || it.kitsuId != null }
+                        .thenByDescending { !it.posterUrl.isNullOrBlank() }
+                        .thenByDescending { it.messageId }
+                )
+                val toRemove = sorted.drop(1)
+                toRemove.forEach { mediaIndex.remove(it.id) }
+                removed += toRemove.size
+            }
+        }
+
+        // 2. Remove exact duplicate media items (same title, season, episode, resolution)
+        val duplicatesByMedia = mediaIndex.values
+            .filter { it.title.isNotBlank() && !it.isSplit }
+            .groupBy { "${it.title.lowercase().trim()}_${it.season ?: 0}_${it.episode ?: 0}_${it.resolution ?: ""}" }
+        for ((_, grp) in duplicatesByMedia) {
+            if (grp.size > 1) {
+                val sorted = grp.sortedWith(
+                    compareByDescending<MediaItem> { !it.imdbId.isNullOrBlank() || it.kitsuId != null }
+                        .thenByDescending { it.sizeBytes }
+                        .thenByDescending { it.messageId }
+                )
+                val toRemove = sorted.drop(1)
+                toRemove.forEach { mediaIndex.remove(it.id) }
+                removed += toRemove.size
+            }
+        }
+
+        if (removed > 0) {
+            saveMediaIndex()
+            _mediaState.value = mediaIndex.values.toList()
+        }
+        return removed
+    }
+
+    fun scanDeadFiles(): Int {
+        return mediaIndex.values.count {
+            it.sizeBytes <= 0 || it.fileName.isBlank() || (it.channelId == 0L && it.messageId == 0) || (it.isSplit && it.parts.isEmpty())
+        }
+    }
+
+    fun purgeDeadFiles(): Int {
+        val deadItems = mediaIndex.values.filter {
+            it.sizeBytes <= 0 || it.fileName.isBlank() || (it.channelId == 0L && it.messageId == 0) || (it.isSplit && it.parts.isEmpty())
+        }
+        if (deadItems.isNotEmpty()) {
+            deadItems.forEach { mediaIndex.remove(it.id) }
+            saveMediaIndex()
+            _mediaState.value = mediaIndex.values.toList()
+        }
+        return deadItems.size
+    }
+
+    fun getAppCacheSizeBytes(): Long {
+        var size = 0L
+        try {
+            size += getDirSize(context.cacheDir)
+            context.externalCacheDir?.let { size += getDirSize(it) }
+        } catch (_: Exception) {}
+        return size
+    }
+
+    fun clearAppCache(): Long {
+        val initialSize = getAppCacheSizeBytes()
+        try {
+            deleteDirRecursive(context.cacheDir)
+            context.externalCacheDir?.let { deleteDirRecursive(it) }
+            metadataEnricher.clearCache()
+            com.tgserver.streamer.ui.screens.ImageMemoryCache.clear()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error clearing cache: ${e.message}")
+        }
+        return initialSize
+    }
+
+    fun clearAppLogs(): Boolean {
+        return try {
+            val logDir = File(context.filesDir, "logs")
+            if (logDir.exists()) deleteDirRecursive(logDir)
+            val files = context.filesDir.listFiles { _, name -> name.endsWith(".log") || name.endsWith(".txt") }
+            files?.forEach { it.delete() }
+            try {
+                Runtime.getRuntime().exec("logcat -c")
+            } catch (_: Exception) {}
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Error clearing logs: ${e.message}")
+            false
+        }
+    }
+
+    private fun getDirSize(dir: File?): Long {
+        if (dir == null || !dir.exists()) return 0L
+        var size = 0L
+        dir.listFiles()?.forEach { file ->
+            size += if (file.isDirectory) getDirSize(file) else file.length()
+        }
+        return size
+    }
+
+    private fun deleteDirRecursive(dir: File?): Long {
+        if (dir == null || !dir.exists()) return 0L
+        var freed = 0L
+        dir.listFiles()?.forEach { file ->
+            if (file.isDirectory) {
+                freed += deleteDirRecursive(file)
+                file.delete()
+            } else {
+                freed += file.length()
+                file.delete()
+            }
+        }
+        return freed
+    }
+
     private fun autoEnrichMissingMetadata() {
         val itemsToEnrich = mediaIndex.values.filter { it.imdbId.isNullOrBlank() && it.kitsuId == null }
         if (itemsToEnrich.isEmpty()) return

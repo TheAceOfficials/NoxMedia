@@ -54,6 +54,10 @@ class MetadataEnricher {
 
     private val cache = ConcurrentHashMap<String, EnrichedMetadata>()
 
+    fun clearCache() {
+        cache.clear()
+    }
+
     fun enrich(
         item: MediaItem,
         isAnimeChannel: Boolean = false,

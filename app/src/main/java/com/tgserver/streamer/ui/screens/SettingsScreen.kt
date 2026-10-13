@@ -80,9 +80,10 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
     var tmdbKeyError by remember { mutableStateOf<String?>(null) }
     var tvdbKeyError by remember { mutableStateOf<String?>(null) }
 
-    // Library scan state
+    // Library scan & storage state
     var duplicateScanCount by remember { mutableStateOf<Int?>(null) }
     var deadFilesScanCount by remember { mutableStateOf<Int?>(null) }
+    var cacheSizeBytes by remember { mutableLongStateOf(viewModel.getAppCacheSizeBytes()) }
 
     // Dialogs state
     var showLogoutDialog by remember { mutableStateOf(false) }
@@ -571,13 +572,13 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 )
             }
 
-            // ==================== 6. LIBRARY TOOLS ====================
+            // ==================== 6. DATABASE & STORAGE MAINTENANCE ====================
             SettingsSectionCard(
                 icon = Icons.Default.Build,
-                title = "LIBRARY TOOLS",
-                description = "Inspect media catalog consistency and scan for duplicate or broken entries."
+                title = "DATABASE & STORAGE MAINTENANCE",
+                description = "Manage duplicate files, purge broken catalog entries, and clear cache memory & logs."
             ) {
-                // Duplicate Scan
+                // 1. Duplicate Media Management
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -589,7 +590,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Text(
-                                text = "Check Duplicate Files",
+                                text = "Duplicate Media Files",
                                 color = TextPrimary,
                                 fontSize = 13.5.sp,
                                 fontWeight = FontWeight.SemiBold
@@ -604,9 +605,9 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         }
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = if (duplicateScanCount == null) "Scan library for duplicate media titles."
-                            else if (duplicateScanCount == 0) "All media entries in catalog are unique."
-                            else "$duplicateScanCount duplicate media entries detected in database.",
+                            text = if (duplicateScanCount == null) "Scan catalog for duplicates & unmerged split slices."
+                            else if (duplicateScanCount == 0) "All media entries and multi-part slices are clean and unique."
+                            else "$duplicateScanCount duplicate media entries detected in catalog.",
                             color = TextSecondary,
                             fontSize = 11.sp,
                             maxLines = 1,
@@ -614,24 +615,38 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         )
                     }
 
-                    NothingPillButton(
-                        text = "Scan",
-                        onClick = {
-                            val res = viewModel.scanDuplicates()
-                            duplicateScanCount = res
-                            Toast.makeText(context, if (res == 0) "✓ Catalog clean: 0 duplicates" else "⚠ Found $res duplicate entries", Toast.LENGTH_SHORT).show()
-                        },
-                        variant = NothingButtonVariant.Secondary,
-                        height = 34.dp,
-                        modifier = Modifier.wrapContentWidth()
-                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        NothingPillButton(
+                            text = "Scan",
+                            onClick = {
+                                val res = viewModel.scanDuplicates()
+                                duplicateScanCount = res
+                                Toast.makeText(context, if (res == 0) "✓ Catalog clean: 0 duplicates" else "⚠ Found $res duplicate entries", Toast.LENGTH_SHORT).show()
+                            },
+                            variant = NothingButtonVariant.Ghost,
+                            height = 34.dp,
+                            modifier = Modifier.wrapContentWidth()
+                        )
+
+                        NothingPillButton(
+                            text = "Delete",
+                            onClick = {
+                                val res = viewModel.deleteDuplicates()
+                                duplicateScanCount = 0
+                                Toast.makeText(context, if (res > 0) "✓ Deleted $res duplicate items" else "✓ Catalog clean: 0 duplicates", Toast.LENGTH_SHORT).show()
+                            },
+                            variant = if (duplicateScanCount != null && duplicateScanCount!! > 0) NothingButtonVariant.Primary else NothingButtonVariant.Secondary,
+                            height = 34.dp,
+                            modifier = Modifier.wrapContentWidth()
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
                 DotDivider(dotsCount = 20)
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Dead Files Scan
+                // 2. Dead Files Management
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -643,7 +658,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Text(
-                                text = "Check Dead Files",
+                                text = "Dead & Broken Entries",
                                 color = TextPrimary,
                                 fontSize = 13.5.sp,
                                 fontWeight = FontWeight.SemiBold
@@ -658,7 +673,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         }
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = if (deadFilesScanCount == null) "Scan library for deleted channel videos."
+                            text = if (deadFilesScanCount == null) "Scan library for 0-byte or deleted message entries."
                             else if (deadFilesScanCount == 0) "All indexed media files are online and valid."
                             else "$deadFilesScanCount inaccessible files detected.",
                             color = TextSecondary,
@@ -668,14 +683,118 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         )
                     }
 
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        NothingPillButton(
+                            text = "Scan",
+                            onClick = {
+                                val res = viewModel.scanDeadFiles()
+                                deadFilesScanCount = res
+                                Toast.makeText(context, if (res == 0) "✓ All indexed media files accessible" else "⚠ Detected $res inaccessible files", Toast.LENGTH_SHORT).show()
+                            },
+                            variant = NothingButtonVariant.Ghost,
+                            height = 34.dp,
+                            modifier = Modifier.wrapContentWidth()
+                        )
+
+                        NothingPillButton(
+                            text = "Purge",
+                            onClick = {
+                                val res = viewModel.purgeDeadFiles()
+                                deadFilesScanCount = 0
+                                Toast.makeText(context, if (res > 0) "✓ Purged $res dead entries" else "✓ Catalog clean: 0 dead files", Toast.LENGTH_SHORT).show()
+                            },
+                            variant = if (deadFilesScanCount != null && deadFilesScanCount!! > 0) NothingButtonVariant.Primary else NothingButtonVariant.Secondary,
+                            height = 34.dp,
+                            modifier = Modifier.wrapContentWidth()
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+                DotDivider(dotsCount = 20)
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // 3. Clear Cache
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "Clear Application Cache",
+                                color = TextPrimary,
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            NothingDotBadge(
+                                text = formatBytes(cacheSizeBytes),
+                                dotColor = AccentYellow,
+                                backgroundColor = Color(0x14FFD600),
+                                textColor = AccentYellow
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Free poster images, HTTP metadata cache, and temp files.",
+                            color = TextSecondary,
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
                     NothingPillButton(
-                        text = "Scan",
+                        text = "Clear Cache",
                         onClick = {
-                            val res = viewModel.scanDeadFiles()
-                            deadFilesScanCount = res
-                            Toast.makeText(context, if (res == 0) "✓ All indexed media files accessible" else "⚠ Detected $res inaccessible files", Toast.LENGTH_SHORT).show()
+                            val freed = viewModel.clearAppCache()
+                            cacheSizeBytes = viewModel.getAppCacheSizeBytes()
+                            Toast.makeText(context, "✓ Cache cleared (${formatBytes(freed)} freed)", Toast.LENGTH_SHORT).show()
                         },
                         variant = NothingButtonVariant.Secondary,
+                        height = 34.dp,
+                        modifier = Modifier.wrapContentWidth()
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+                DotDivider(dotsCount = 20)
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // 4. Clear Logs
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+                        Text(
+                            text = "Clear Diagnostic Logs",
+                            color = TextPrimary,
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Flush runtime streaming logs, error reports, and logcat buffer.",
+                            color = TextSecondary,
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    NothingPillButton(
+                        text = "Clear Logs",
+                        onClick = {
+                            val ok = viewModel.clearAppLogs()
+                            Toast.makeText(context, if (ok) "✓ Runtime and diagnostic logs cleared" else "Failed to clear logs", Toast.LENGTH_SHORT).show()
+                        },
+                        variant = NothingButtonVariant.Ghost,
                         height = 34.dp,
                         modifier = Modifier.wrapContentWidth()
                     )
@@ -1112,14 +1231,24 @@ private fun SettingsSectionCard(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = AccentSilver,
-                modifier = Modifier.size(17.dp)
-            )
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(SurfaceCardElevated)
+                    .border(1.dp, BorderSilver.copy(alpha = 0.45f), RoundedCornerShape(9.dp))
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = TextPrimary,
+                    modifier = Modifier.size(17.dp)
+                )
+            }
+
             Text(
                 text = title,
                 color = TextPrimary,
@@ -1130,13 +1259,13 @@ private fun SettingsSectionCard(
             )
         }
 
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
         Text(
             text = description,
             color = TextSecondary,
             fontSize = 11.5.sp,
-            lineHeight = 16.sp
+            lineHeight = 16.5.sp
         )
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -1185,4 +1314,11 @@ private fun FallbackPipelineRow(
             }
         }
     }
+}
+
+private fun formatBytes(bytes: Long): String {
+    if (bytes <= 0) return "0 B"
+    val units = arrayOf("B", "KB", "MB", "GB", "TB")
+    val digitGroups = (Math.log10(bytes.toDouble()) / Math.log10(1024.0)).toInt().coerceIn(0, units.size - 1)
+    return String.format(java.util.Locale.US, "%.1f %s", bytes / Math.pow(1024.0, digitGroups.toDouble()), units[digitGroups])
 }

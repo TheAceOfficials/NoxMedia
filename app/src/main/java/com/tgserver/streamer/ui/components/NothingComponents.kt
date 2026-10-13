@@ -7,6 +7,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,13 +23,19 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -511,74 +518,331 @@ fun AdaptiveScreenContainer(
 }
 
 /**
- * Tactile Pill Toggle Switch (Signature Nothing OS style matching reference image).
+ * Pixel Cyber Coin Toggle Switch (Inspired by Uiverse.io santhosh_2608 tactile design).
+ * Features rich oled track, glowing on/off indicators, 360° rotating coin thumb,
+ * 3D bevel sheen, and animated happy/sad cyber expressions.
  */
 @Composable
 fun NothingSwitch(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    activeColor: Color = Color(0xFF00FFAA),
+    inactiveColor: Color = Color(0xFFFF007F)
 ) {
-    val trackWidth = 46.dp
-    val trackHeight = 26.dp
-    val thumbSize = 20.dp
+    PixelCyberSwitch(
+        checked = checked,
+        onCheckedChange = onCheckedChange,
+        modifier = modifier,
+        enabled = enabled,
+        activeColor = activeColor,
+        inactiveColor = inactiveColor
+    )
+}
+
+@Composable
+fun PixelCyberSwitch(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    activeColor: Color = Color(0xFF00FFAA),
+    inactiveColor: Color = Color(0xFFFF007F)
+) {
+    val trackWidth = 56.dp
+    val trackHeight = 30.dp
+    val thumbSize = 24.dp
     val padding = 3.dp
 
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+
+    // Slide offset animation with bouncy tactile spring
     val thumbOffset by animateDpAsState(
         targetValue = if (checked) trackWidth - thumbSize - padding else padding,
         animationSpec = spring(
-            dampingRatio = Spring.DampingRatioLowBouncy,
-            stiffness = Spring.StiffnessMediumLow
+            dampingRatio = 0.65f,
+            stiffness = 420f
         ),
-        label = "switch_thumb_offset"
+        label = "cyber_thumb_offset"
     )
 
-    val trackColor by animateColorAsState(
-        targetValue = when {
-            !enabled -> Color(0xFF1B1B20)
-            checked -> Color(0xFFFFFFFF)
-            else -> Color(0xFF1E1E24)
-        },
-        animationSpec = tween(220, easing = FastOutSlowInEasing),
-        label = "switch_track_color"
+    // 360-degree coin roll rotation
+    val coinRotation by animateFloatAsState(
+        targetValue = if (checked) 360f else 0f,
+        animationSpec = spring(
+            dampingRatio = 0.72f,
+            stiffness = 380f
+        ),
+        label = "cyber_coin_rotation"
     )
 
-    val thumbColor by animateColorAsState(
+    // Track colors
+    val trackBgColor by animateColorAsState(
         targetValue = when {
-            !enabled -> Color(0xFF383842)
-            checked -> Color(0xFF070709)
-            else -> Color(0xFFD4D4D8)
+            !enabled -> Color(0xFF14151A)
+            checked -> Color(0xFF091410)
+            else -> Color(0xFF0E0F14)
         },
-        animationSpec = tween(220, easing = FastOutSlowInEasing),
-        label = "switch_thumb_color"
+        animationSpec = tween(300),
+        label = "cyber_track_bg"
     )
 
     val trackBorderColor by animateColorAsState(
-        targetValue = if (checked) Color.Transparent else BorderSubtle,
-        animationSpec = tween(220),
-        label = "switch_border_color"
+        targetValue = when {
+            !enabled -> Color(0xFF1E2028)
+            checked -> Color(0xFF132B20)
+            else -> Color(0xFF1C1E26)
+        },
+        animationSpec = tween(300),
+        label = "cyber_track_border"
+    )
+
+    // Indicator states on the track
+    val onIndicatorAlpha by animateFloatAsState(
+        targetValue = if (checked) 0.88f else 0.12f,
+        animationSpec = tween(280),
+        label = "cyber_on_ind_alpha"
+    )
+    val onIndicatorScale by animateFloatAsState(
+        targetValue = if (checked) 1.15f else 0.8f,
+        animationSpec = tween(280),
+        label = "cyber_on_ind_scale"
+    )
+
+    val offIndicatorAlpha by animateFloatAsState(
+        targetValue = if (checked) 0.10f else 0.85f,
+        animationSpec = tween(280),
+        label = "cyber_off_ind_alpha"
+    )
+    val offIndicatorScale by animateFloatAsState(
+        targetValue = if (checked) 0.8f else 1.1f,
+        animationSpec = tween(280),
+        label = "cyber_off_ind_scale"
+    )
+
+    // Thumb coin colors & press response
+    val coinBgColor by animateColorAsState(
+        targetValue = when {
+            !enabled -> Color(0xFF383842)
+            checked -> activeColor
+            else -> inactiveColor
+        },
+        animationSpec = tween(320),
+        label = "cyber_coin_bg"
+    )
+
+    val pressScale = if (isPressed && enabled) 0.92f else 1f
+
+    // Animated face transitions inside the coin
+    val faceSadAlpha by animateFloatAsState(
+        targetValue = if (checked) 0f else 1f,
+        animationSpec = tween(240),
+        label = "face_sad_alpha"
+    )
+    val faceSadRotation by animateFloatAsState(
+        targetValue = if (checked) -180f else 0f,
+        animationSpec = tween(280),
+        label = "face_sad_rotation"
+    )
+    val faceSadScale by animateFloatAsState(
+        targetValue = if (checked) 0.65f else 1f,
+        animationSpec = tween(240),
+        label = "face_sad_scale"
+    )
+
+    val faceHappyAlpha by animateFloatAsState(
+        targetValue = if (checked) 1f else 0f,
+        animationSpec = tween(240),
+        label = "face_happy_alpha"
+    )
+    val faceHappyRotation by animateFloatAsState(
+        targetValue = if (checked) 0f else 180f,
+        animationSpec = tween(280),
+        label = "face_happy_rotation"
+    )
+    val faceHappyScale by animateFloatAsState(
+        targetValue = if (checked) 1f else 0.65f,
+        animationSpec = tween(240),
+        label = "face_happy_scale"
     )
 
     Box(
         modifier = modifier
             .size(width = trackWidth, height = trackHeight)
             .clip(CircleShape)
-            .border(1.dp, trackBorderColor, CircleShape)
-            .background(trackColor)
+            .border(1.5.dp, trackBorderColor, CircleShape)
+            .background(trackBgColor)
             .clickable(
-                interactionSource = remember { MutableInteractionSource() },
+                interactionSource = interactionSource,
                 indication = null,
                 enabled = enabled
             ) { onCheckedChange(!checked) },
         contentAlignment = Alignment.CenterStart
     ) {
+        // Track Background Indicators (Left: ON mint indicator, Right: OFF rose indicator)
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 9.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // ON Indicator Dot
+            Canvas(
+                modifier = Modifier
+                    .size(8.dp)
+                    .scale(onIndicatorScale)
+                    .alpha(if (enabled) onIndicatorAlpha else 0.05f)
+            ) {
+                // Outer subtle glow
+                drawCircle(
+                    color = activeColor.copy(alpha = 0.4f),
+                    radius = size.minDimension / 1.3f
+                )
+                // Core
+                drawCircle(
+                    color = activeColor,
+                    radius = size.minDimension / 2.2f
+                )
+            }
+
+            // OFF Indicator Ring
+            Canvas(
+                modifier = Modifier
+                    .size(8.dp)
+                    .scale(offIndicatorScale)
+                    .alpha(if (enabled) offIndicatorAlpha else 0.05f)
+            ) {
+                // Outer subtle glow
+                drawCircle(
+                    color = inactiveColor.copy(alpha = 0.35f),
+                    radius = size.minDimension / 1.3f
+                )
+                // Inner ring
+                drawCircle(
+                    color = inactiveColor,
+                    radius = size.minDimension / 2.2f,
+                    style = Stroke(width = 1.8.dp.toPx())
+                )
+            }
+        }
+
+        // Tactile Pixel Coin Thumb
         Box(
             modifier = Modifier
                 .padding(start = thumbOffset)
                 .size(thumbSize)
+                .scale(pressScale)
+                .rotate(coinRotation)
                 .clip(CircleShape)
-                .background(thumbColor)
-        )
+                .border(2.dp, Color(0xFF16171D), CircleShape)
+                .background(coinBgColor),
+            contentAlignment = Alignment.Center
+        ) {
+            // 3D Bevel, Diagonal Sheen Reflection, and Face Expressions
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val cx = size.width / 2f
+                val cy = size.height / 2f
+                val strokeW = 1.6.dp.toPx()
+
+                // 1. Top Bevel Highlight Arc
+                drawArc(
+                    color = Color.White.copy(alpha = 0.32f),
+                    startAngle = 180f,
+                    sweepAngle = 180f,
+                    useCenter = false,
+                    topLeft = Offset(1.5.dp.toPx(), 1.5.dp.toPx()),
+                    size = Size(size.width - 3.dp.toPx(), size.height - 3.dp.toPx()),
+                    style = Stroke(width = 1.dp.toPx())
+                )
+
+                // 2. Bottom Shadow Inset Arc
+                drawArc(
+                    color = Color.Black.copy(alpha = 0.28f),
+                    startAngle = 0f,
+                    sweepAngle = 180f,
+                    useCenter = false,
+                    topLeft = Offset(1.5.dp.toPx(), 1.5.dp.toPx()),
+                    size = Size(size.width - 3.dp.toPx(), size.height - 3.dp.toPx()),
+                    style = Stroke(width = 1.dp.toPx())
+                )
+
+                // 3. Diagonal Sheen Highlight Stripe
+                drawLine(
+                    color = Color.White.copy(alpha = 0.25f),
+                    start = Offset(cx - 5.dp.toPx(), 2.dp.toPx()),
+                    end = Offset(cx + 2.dp.toPx(), size.height - 2.dp.toPx()),
+                    strokeWidth = 2.dp.toPx()
+                )
+
+                val faceColor = Color(0xFF16171D)
+
+                // 4. Sad Face (when OFF)
+                if (faceSadAlpha > 0.01f) {
+                    val eyeRadius = 1.25.dp.toPx() * faceSadScale
+                    val eyeDist = 3.6.dp.toPx() * faceSadScale
+                    val eyeY = cy - 2.0.dp.toPx()
+
+                    // Eyes
+                    drawCircle(
+                        color = faceColor.copy(alpha = faceSadAlpha),
+                        radius = eyeRadius,
+                        center = Offset(cx - eyeDist, eyeY)
+                    )
+                    drawCircle(
+                        color = faceColor.copy(alpha = faceSadAlpha),
+                        radius = eyeRadius,
+                        center = Offset(cx + eyeDist, eyeY)
+                    )
+
+                    // Sad mouth (frown)
+                    val mouthW = 6.dp.toPx() * faceSadScale
+                    val mouthH = 3.8.dp.toPx() * faceSadScale
+                    drawArc(
+                        color = faceColor.copy(alpha = faceSadAlpha),
+                        startAngle = 190f,
+                        sweepAngle = 160f,
+                        useCenter = false,
+                        topLeft = Offset(cx - mouthW / 2f, cy + 0.5.dp.toPx()),
+                        size = Size(mouthW, mouthH),
+                        style = Stroke(width = strokeW * faceSadScale, cap = StrokeCap.Round)
+                    )
+                }
+
+                // 5. Happy Face (when ON)
+                if (faceHappyAlpha > 0.01f) {
+                    val eyeRadius = 1.25.dp.toPx() * faceHappyScale
+                    val eyeDist = 3.6.dp.toPx() * faceHappyScale
+                    val eyeY = cy - 2.0.dp.toPx()
+
+                    // Eyes
+                    drawCircle(
+                        color = faceColor.copy(alpha = faceHappyAlpha),
+                        radius = eyeRadius,
+                        center = Offset(cx - eyeDist, eyeY)
+                    )
+                    drawCircle(
+                        color = faceColor.copy(alpha = faceHappyAlpha),
+                        radius = eyeRadius,
+                        center = Offset(cx + eyeDist, eyeY)
+                    )
+
+                    // Happy mouth (smile)
+                    val mouthW = 6.dp.toPx() * faceHappyScale
+                    val mouthH = 3.8.dp.toPx() * faceHappyScale
+                    drawArc(
+                        color = faceColor.copy(alpha = faceHappyAlpha),
+                        startAngle = 10f,
+                        sweepAngle = 160f,
+                        useCenter = false,
+                        topLeft = Offset(cx - mouthW / 2f, cy - 0.5.dp.toPx()),
+                        size = Size(mouthW, mouthH),
+                        style = Stroke(width = strokeW * faceHappyScale, cap = StrokeCap.Round)
+                    )
+                }
+            }
+        }
     }
 }

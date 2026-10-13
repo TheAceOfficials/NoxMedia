@@ -76,11 +76,14 @@ import java.util.concurrent.TimeUnit
 private val NdotFont = FontFamily(Font(R.font.ndot))
 
 // In-memory poster and backdrop cache
-private object ImageMemoryCache {
+object ImageMemoryCache {
     private val cache = LruCache<String, ImageBitmap>(120)
     fun get(url: String): ImageBitmap? = cache.get(url)
     fun put(url: String, bmp: ImageBitmap) {
         cache.put(url, bmp)
+    }
+    fun clear() {
+        cache.evictAll()
     }
 }
 

@@ -675,16 +675,19 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         Toast.makeText(getApplication(), "✓ Backup schedule updated", Toast.LENGTH_SHORT).show()
     }
 
-    fun scanDuplicates(): Int {
-        val items = media.value
-        val titleCounts = items.groupBy { "${it.title.lowercase().trim()}_${it.season ?: 0}_${it.episode ?: 0}" }
-        return titleCounts.values.sumOf { if (it.size > 1) it.size - 1 else 0 }
-    }
+    fun scanDuplicates(): Int = tgClient.scanDuplicates()
 
-    fun scanDeadFiles(): Int {
-        // Scans if any file size is 0 or inaccessible
-        return media.value.count { it.sizeBytes <= 0 || it.fileName.isBlank() }
-    }
+    fun deleteDuplicates(): Int = tgClient.deleteDuplicates()
+
+    fun scanDeadFiles(): Int = tgClient.scanDeadFiles()
+
+    fun purgeDeadFiles(): Int = tgClient.purgeDeadFiles()
+
+    fun getAppCacheSizeBytes(): Long = tgClient.getAppCacheSizeBytes()
+
+    fun clearAppCache(): Long = tgClient.clearAppCache()
+
+    fun clearAppLogs(): Boolean = tgClient.clearAppLogs()
 
     fun exportBackupJson(): String {
         val cfg = _config.value
