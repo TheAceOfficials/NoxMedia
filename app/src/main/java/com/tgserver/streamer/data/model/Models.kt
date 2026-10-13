@@ -39,7 +39,7 @@ data class MediaItem(
     val channelId: Long,
     val messageId: Int,
     var title: String,
-    val type: String = "movie", // "movie" or "series"
+    var type: String = "movie", // "movie" or "series"
     var year: String? = null,
     val season: Int? = null,
     val episode: Int? = null,

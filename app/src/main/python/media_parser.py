@@ -63,6 +63,11 @@ _EPISODE_ONLY_RE = re.compile(r"(?i)\b(?:e|ep|episode\s*)(\d{1,4})\b")
 _ANIME_ABS_RE = re.compile(r"(?i)\s*[-–—]\s*(\d{2,4})(?:\s|$|\[|\()")
 _YEAR_RE = re.compile(r"(?:^|[\s._\-\(\[])((?:19|20)\d{2})(?:[\s._\-\)\]]|$)")
 
+# Bracket tags: quality, audio, codec, release group, CRC
+_TAG_BRACKET_RE = re.compile(r'[\(\[]\s*(?:1080p|720p|2160p|4k|bd|bluray|web-?rip|web-?dl|dual|multi|flac|hevc|x264|x265|ddp[^\]\)]*|atmos|hdr|dv|h\.?264|h\.?265|aac)[^\)\]]*[\)\]]', re.I)
+_REL_RE = re.compile(r'[\(\[](?:MomStealer|Anipulse|Judas|SubsPlease|Erai|YTS|PSA|TGx|Pahe|GalaxyRG)[^\)\]]*[\)\]]', re.I)
+_CRC_RE = re.compile(r'\[[0-9A-Fa-f]{8}\]')
+
 def parse_split_part(filename: str) -> Optional[Tuple[str, int]]:
     """
     Detects all variations of split parts:
@@ -176,77 +181,26 @@ def parse_media_filename(filename: str, caption: str = "", is_anime: bool = Fals
     year_match = _YEAR_RE.search(base_no_ext)
     if year_match:
         year = year_match.group(1)
-        
-    # Extract Season & Episode
-    season = None
-    episode = None
-    media_type = "series" if is_anime else "movie"
-    anime_match = None
-    
-    s_e_match = _SXXEXX_RE.search(base_no_ext)
-    if s_e_match:
-        season = int(s_e_match.group(1))
-        episode = int(s_e_match.group(2))
-        media_type = "series"
-    else:
-        nxnn = _NXNN_RE.search(base_no_ext)
-        if nxnn:
-            season = int(nxnn.group(1))
-            episode = int(nxnn.group(2))
-            media_type = "series"
-        else:
-            s_only = _SEASON_ONLY_RE.search(base_no_ext)
-            ep_only = _EPISODE_ONLY_RE.search(base_no_ext)
-            if s_only and ep_only:
-                season = int(s_only.group(1))
-                episode = int(ep_only.group(1))
-                media_type = "series"
-            elif ep_only:
-                episode = int(ep_only.group(1))
-                season = 1
-                media_type = "series"
-            else:
-                # Check anime absolute episode
-                anime_match = _ANIME_ABS_RE.search(base_no_ext)
-                if anime_match:
-                    episode = int(anime_match.group(1))
-                    season = 1
-                    media_type = "series"
-                elif is_anime:
-                    bare_nums = re.findall(r"(?:^|[\s\-_])0*(\d{1,4})(?:[\s\-_]|$)", base_no_ext)
-                    if bare_nums:
-                        try:
-                            episode = int(bare_nums[-1])
-                            season = 1
-                        except ValueError:
-                            pass
-                    
-    # Quality / Resolution
-    quality = "1080p"
-    for pat, label in _RES_PATTERNS:
-        if pat.search(base_no_ext):
-            quality = label
-            break
-            
+
     # Visual tags (HDR, DV, 10bit)
     visuals = set()
-    for v in _VISUAL_RE.findall(base_no_ext):
+    for v in _VISUAL_RE.findall(base_no_ext + " " + caption):
         v_upper = v.upper().replace("DOLBY VISION", "DV")
         visuals.add(v_upper)
         
     # Video codecs
     codecs = set()
-    for c in _CODEC_RE.findall(base_no_ext):
+    for c in _CODEC_RE.findall(base_no_ext + " " + caption):
         codecs.add(c.upper().replace("X265", "HEVC").replace("H.265", "HEVC").replace("X264", "AVC").replace("H.264", "AVC"))
         
     # Audio codecs
     audio_tags = set()
-    for a in _AUDIO_CODEC_RE.findall(base_no_ext):
+    for a in _AUDIO_CODEC_RE.findall(base_no_ext + " " + caption):
         audio_tags.add(a.upper().strip())
         
     # Audio channels
     channels = set()
-    for ch in _AUDIO_CHANNELS_RE.findall(base_no_ext):
+    for ch in _AUDIO_CHANNELS_RE.findall(base_no_ext + " " + caption):
         channels.add(ch)
         
     # Languages detected
@@ -255,36 +209,95 @@ def parse_media_filename(filename: str, caption: str = "", is_anime: bool = Fals
     for w in words:
         if w in _LANGUAGES_MAP:
             languages.add(_LANGUAGES_MAP[w])
-            
-    # Extract clean Title
-    clean_title = base_no_ext
-    # Remove release group tags at front like [SubsPlease], [Judas]
-    clean_title = re.sub(r"^\[[^\]]+\]\s*", "", clean_title)
-    
-    # Split anchors: Year or Season or Quality or Anime Ep
-    cutoff_indices = []
-    y_m = _YEAR_RE.search(clean_title)
-    if y_m:
-        cutoff_indices.append(y_m.start())
-    s_m = _SXXEXX_RE.search(clean_title)
-    if s_m:
-        cutoff_indices.append(s_m.start())
-    n_m = _NXNN_RE.search(clean_title)
-    if n_m:
-        cutoff_indices.append(n_m.start())
-    for pat, _ in _RES_PATTERNS:
-        m = pat.search(clean_title)
-        if m:
-            cutoff_indices.append(m.start())
-            
-    a_m = _ANIME_ABS_RE.search(clean_title)
-    if a_m and not s_m and not y_m:
-        cutoff_indices.append(a_m.start())
-        
-    if cutoff_indices:
-        earliest = min(cutoff_indices)
-        clean_title = clean_title[:earliest]
-        
+
+    # Quality / Resolution
+    quality = "1080p"
+    for pat, label in _RES_PATTERNS:
+        if pat.search(base_no_ext + " " + caption):
+            quality = label
+            break
+
+    # Clean working name for title and season/episode parsing
+    cleaned_work = _CRC_RE.sub("", base_no_ext)
+    cleaned_work = _TAG_BRACKET_RE.sub("", cleaned_work)
+    cleaned_work = _REL_RE.sub("", cleaned_work)
+    cleaned_work = re.sub(r"^\[[^\]]{1,12}\]\s*", "", cleaned_work)
+
+    # Extract Season & Episode
+    season = None
+    episode = None
+    media_type = "series" if is_anime else "movie"
+    clean_title = cleaned_work
+
+    s_e_match = _SXXEXX_RE.search(cleaned_work)
+    if s_e_match:
+        season = int(s_e_match.group(1))
+        episode = int(s_e_match.group(2))
+        media_type = "series"
+        clean_title = cleaned_work[:s_e_match.start()]
+    else:
+        nxnn = _NXNN_RE.search(cleaned_work)
+        if nxnn:
+            season = int(nxnn.group(1))
+            episode = int(nxnn.group(2))
+            media_type = "series"
+            clean_title = cleaned_work[:nxnn.start()]
+        else:
+            # Bracketed episode e.g. [12 - The Ramparts of Ice]
+            b_ep = re.search(r"^\[\s*(\d{1,4})\s*[-–—]\s*([^\]]+)\]", cleaned_work)
+            if b_ep:
+                episode = int(b_ep.group(1))
+                season = 1
+                media_type = "series"
+                clean_title = b_ep.group(2)
+            else:
+                # Anime hyphen episode: "Dandadan - 02" or "BTYBWTC 08 -"
+                a_ep = re.search(r"^([A-Za-z0-9\s._\-+]+?)\s*[-–—]\s*0*(\d{1,4})(?:\s|$|\[|\()", cleaned_work)
+                if a_ep:
+                    clean_title = a_ep.group(1).strip()
+                    episode = int(a_ep.group(2))
+                    season = 1
+                    media_type = "series"
+                else:
+                    # Title followed by number: "BTYBWTC 08"
+                    t_ep = re.search(r"^([A-Za-z0-9\s._\-+]+?)\s+(?:ep|episode|e)?0*(\d{1,4})(?:\s*[-–—]|\s*$)", cleaned_work)
+                    if t_ep:
+                        clean_title = t_ep.group(1).strip()
+                        episode = int(t_ep.group(2))
+                        season = 1
+                        media_type = "series"
+                    else:
+                        s_only = _SEASON_ONLY_RE.search(cleaned_work)
+                        ep_only = _EPISODE_ONLY_RE.search(cleaned_work)
+                        if s_only and ep_only:
+                            season = int(s_only.group(1))
+                            episode = int(ep_only.group(1))
+                            media_type = "series"
+                            clean_title = cleaned_work[:s_only.start()]
+                        elif ep_only:
+                            episode = int(ep_only.group(1))
+                            season = 1
+                            media_type = "series"
+                            clean_title = cleaned_work[:ep_only.start()]
+                        elif is_anime:
+                            bare_nums = re.findall(r"(?:^|[\s\-_])0*(\d{1,4})(?:[\s\-_]|$)", cleaned_work)
+                            if bare_nums:
+                                try:
+                                    episode = int(bare_nums[-1])
+                                    season = 1
+                                    media_type = "series"
+                                    clean_title = re.sub(rf"(?:^|[\s\-_])0*{episode}(?:[\s\-_]|$).*$", "", cleaned_work)
+                                except ValueError:
+                                    pass
+
+    # Strip year from clean_title if present
+    y_in_title = _YEAR_RE.search(clean_title)
+    if y_in_title:
+        clean_title = clean_title[:y_in_title.start()]
+
+    # Cut off at resolution / quality indicators or sources
+    clean_title = re.sub(r"(?i)\b(2160p|1080p|720p|480p|4k|uhd|hdr|hevc|x264|x265|aac|dts|bluray|web-?dl|web-?rip|proper|repack)\b.*$", "", clean_title)
+
     # Clean delimiters
     clean_title = re.sub(r"[\._\(\)\[\]\-]+", " ", clean_title).strip()
     clean_title = re.sub(r"\s+", " ", clean_title)

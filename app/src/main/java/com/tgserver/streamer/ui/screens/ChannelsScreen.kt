@@ -1765,11 +1765,27 @@ private fun ManualMatchCandidateDialog(
     viewModel: MainAppViewModel,
     onDismiss: () -> Unit
 ) {
-    val coroutineScope = rememberCoroutineScope()
-    var searchTitle by remember { mutableStateOf(unmatched.fileName.replace(Regex("(?i)\\.(mkv|mp4|avi|ts)$"), "")) }
-    var searchType by remember { mutableStateOf("movie") } // "movie" or "series"
+    val initialTitle = remember(unmatched) {
+        val parsed = unmatched.parsedMediaItem?.title?.trim()
+        if (!parsed.isNullOrBlank() && !parsed.contains(".mkv", ignoreCase = true) && !parsed.contains(".mp4", ignoreCase = true)) {
+            parsed
+        } else {
+            unmatched.fileName.replace(Regex("(?i)\\.(mkv|mp4|avi|ts|webm)$"), "")
+        }
+    }
+    val initialType = remember(unmatched) {
+        val parsed = unmatched.parsedMediaItem
+        when {
+            parsed?.type == "series" -> "series"
+            parsed?.season != null || parsed?.episode != null -> "series"
+            else -> "movie"
+        }
+    }
+    var searchTitle by remember { mutableStateOf(initialTitle) }
+    var searchType by remember { mutableStateOf(initialType) }
     var isSearching by remember { mutableStateOf(false) }
     var candidates by remember { mutableStateOf<List<EnrichedMetadata>>(emptyList()) }
+    val coroutineScope = rememberCoroutineScope()
 
     fun doSearch() {
         if (searchTitle.isBlank()) return

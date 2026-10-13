@@ -976,16 +976,24 @@ class TelegramClientManager(private val context: Context) {
         matchedMeta: com.tgserver.streamer.metadata.EnrichedMetadata
     ): MediaItem? = withContext(Dispatchers.IO) {
         val unmatched = unmatchedIndex[unmatchedId] ?: return@withContext null
-        val baseItem = unmatched.parsedMediaItem ?: MediaItem(
+        val origItem = unmatched.parsedMediaItem
+        val resolvedType = when {
+            matchedMeta.kitsuId != null -> "series"
+            origItem?.season != null || origItem?.episode != null -> "series"
+            origItem != null && origItem.type.isNotBlank() -> origItem.type
+            else -> "movie"
+        }
+        val baseItem = origItem ?: MediaItem(
             id = "tg_${unmatched.channelId}_${unmatched.messageId}",
             channelId = unmatched.channelId,
             messageId = unmatched.messageId,
             title = matchedMeta.title ?: unmatched.fileName,
-            type = if (matchedMeta.kitsuId != null) "series" else "movie",
+            type = resolvedType,
             sizeBytes = unmatched.sizeBytes,
             mimeType = unmatched.mimeType,
             fileName = unmatched.fileName
         )
+        baseItem.type = resolvedType
 
         if (!matchedMeta.title.isNullOrBlank()) baseItem.title = matchedMeta.title
         if (!matchedMeta.year.isNullOrBlank()) baseItem.year = matchedMeta.year
@@ -1285,13 +1293,14 @@ class TelegramClientManager(private val context: Context) {
                                 rawFileName = rawFn,
                                 sizeBytes = item.sizeBytes,
                                 scannedAt = System.currentTimeMillis(),
-                                reason = "No match found on TMDB / TVDB / Kitsu",
+                                reason = if (item.title.isNotBlank()) "Uncertain match / low confidence for '${item.title}'" else "No match found on TMDB / TVDB / Kitsu",
                                 mimeType = item.mimeType,
                                 isVideo = true,
                                 parsedMediaItem = item
                             )
                             unmatchedIndex[un.id] = un
                         }
+                        delay(20)
                     }
                 }
 
@@ -1389,7 +1398,7 @@ class TelegramClientManager(private val context: Context) {
                                 rawFileName = rawFn,
                                 sizeBytes = runningStart,
                                 scannedAt = System.currentTimeMillis(),
-                                reason = "No match found on TMDB / TVDB / Kitsu",
+                                reason = if (splitItem.title.isNotBlank()) "Uncertain match / low confidence for '${splitItem.title}'" else "No match found on TMDB / TVDB / Kitsu",
                                 mimeType = splitItem.mimeType,
                                 isVideo = true,
                                 parsedMediaItem = splitItem
