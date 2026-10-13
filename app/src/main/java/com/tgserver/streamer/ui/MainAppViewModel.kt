@@ -115,7 +115,9 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     private val startTime = System.currentTimeMillis()
 
     init {
-        _config.value = loadStoredConfig()
+        val loaded = loadStoredConfig()
+        _config.value = loaded
+        StreamerForegroundService.activeConfig = loaded
         startTelemetryLoop()
     }
 
@@ -557,7 +559,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             apply()
         }
         _config.value = cfg
-        com.tgserver.streamer.service.StreamerForegroundService.activeConfig = cfg
+        StreamerForegroundService.activeConfig = cfg
     }
 
     suspend fun verifyAndSaveMetadataKeys(tmdb: String, tvdb: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {

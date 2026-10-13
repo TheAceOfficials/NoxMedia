@@ -35,7 +35,6 @@ class StreamerForegroundService : Service() {
             private set
 
         var activeConfig = ServerConfig()
-            private set
 
         var activeTgClient: TelegramClientManager? = null
             private set

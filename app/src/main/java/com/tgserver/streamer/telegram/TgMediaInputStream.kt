@@ -64,7 +64,7 @@ class TgMediaInputStream(
         val buf = currentBuffer!!
         val available = buf.size - bufferPos
         val remainingTotal = totalBytesToRead - totalBytesRead
-        val toCopy = minOf(len.toLong(), available.toLong(), remainingTotal).toInt()
+        val toCopy = minOf(minOf(len.toLong(), available.toLong()), remainingTotal).toInt()
 
         if (toCopy <= 0) return -1
 
