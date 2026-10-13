@@ -462,20 +462,36 @@ class LocalHttpServer(
         }
 
         // Deduplicate streams:
-        // 1. Identify all messageIds that are parts of split items
+        // 1. Identify all messageIds that are parts of split items, and all split file clean base names
         val splitPartMessageIds = allMedia.filter { it.isSplit }.flatMap { it.parts.map { p -> p.messageId } }.toSet()
+        val splitCleanBases = allMedia.filter { it.isSplit }.map {
+            it.fileName.lowercase()
+                .replace(Regex("""\.(mkv|mp4|avi|webm)$""", RegexOption.IGNORE_CASE), "")
+                .trim()
+        }.filter { it.isNotBlank() }.toSet()
 
         // 2. Filter out any standalone items that are just parts of a split item
         var finalItems = matchedItems.filter { item ->
-            if (!item.isSplit && splitPartMessageIds.contains(item.messageId)) {
-                false // Skip standalone part because the merged split item exists!
-            } else {
-                true
+            if (item.isSplit) return@filter true
+
+            // If messageId is part of a split item
+            if (splitPartMessageIds.contains(item.messageId)) return@filter false
+
+            // If filename has split part extension (.001, .002, etc.) and cleanBase matches a split item
+            val cleanName = item.fileName.lowercase()
+                .replace(Regex("""\.(mkv|mp4|avi|webm)(\.\d{2,3})?$""", RegexOption.IGNORE_CASE), "")
+                .trim()
+            if (splitCleanBases.contains(cleanName) && item.fileName.matches(Regex(""".*\.\d{2,3}$"""))) {
+                return@filter false
             }
+
+            true
         }
 
         // 3. Skip Exact Duplicate Files if enabled (or deduplicate same file releases)
-        if (config.skipExactDuplicates) {
+        val shouldSkipDuplicates = config.skipExactDuplicates ||
+                com.tgserver.streamer.service.StreamerForegroundService.activeConfig.skipExactDuplicates
+        if (shouldSkipDuplicates) {
             val seen = mutableSetOf<String>()
             val deduped = mutableListOf<MediaItem>()
             // Sort so split items and larger sizes come first
@@ -485,7 +501,14 @@ class LocalHttpServer(
                     .replace(Regex("""\.(mkv|mp4|avi|webm)(\.\d{2,3})?$""", RegexOption.IGNORE_CASE), "")
                     .replace(Regex("""[\s._-]+"""), " ")
                     .trim()
-                val groupKey = "${cleanKey}_${item.quality}_${item.season ?: 0}_${item.episode ?: 0}"
+                val normQuality = when {
+                    item.quality.contains("4k", ignoreCase = true) || item.quality.contains("2160", ignoreCase = true) -> "4k"
+                    item.quality.contains("1080", ignoreCase = true) -> "1080p"
+                    item.quality.contains("720", ignoreCase = true) -> "720p"
+                    item.quality.contains("480", ignoreCase = true) -> "480p"
+                    else -> item.quality.lowercase().trim()
+                }
+                val groupKey = "${cleanKey}_${normQuality}_${item.season ?: 0}_${item.episode ?: 0}"
                 if (seen.add(groupKey)) {
                     deduped.add(item)
                 }
@@ -528,8 +551,10 @@ class LocalHttpServer(
         val channelId = parts[3].toLongOrNull() ?: 0L
         val targetParam = parts[4]
         // targetParam is now an item.id (e.g. "tg_-1004424883082_2") NOT a raw integer.
-        // Only use toIntOrNull as legacy fallback for old-style numeric URLs.
-        val targetParamAsInt = targetParam.toIntOrNull() ?: 0
+        // Extract numeric messageId from targetParam (e.g. tg_-100xxx_123_split -> 123, or raw integer)
+        val targetParamAsInt = targetParam.toIntOrNull()
+            ?: targetParam.removePrefix("tg_").removeSuffix("_split").substringAfterLast("_").toIntOrNull()
+            ?: 0
         val fileName = if (parts.size >= 6) {
             try { java.net.URLDecoder.decode(parts[5], "UTF-8") } catch (_: Exception) { parts[5] }
         } else "video.mp4"
@@ -540,14 +565,14 @@ class LocalHttpServer(
             ?: allMedia.find { it.channelId == channelId && it.id == targetParam }
             // Prefer split items over standalone parts if multiple exist
             ?: if (targetParamAsInt > 0) allMedia.find {
-                it.channelId == channelId && it.isSplit &&
+                (it.channelId == channelId || channelId == 0L) && it.isSplit &&
                 (it.messageId == targetParamAsInt || it.parts.any { p -> p.messageId == targetParamAsInt })
             } else null
             ?: if (targetParamAsInt > 0) allMedia.find {
-                (it.channelId == channelId && it.messageId == targetParamAsInt) || (it.messageId == targetParamAsInt)
+                ((it.channelId == channelId || channelId == 0L) && it.messageId == targetParamAsInt) || (it.messageId == targetParamAsInt)
             } else null
             ?: tgClient.getUnmatchedMedia().find {
-                it.id == targetParam || (it.channelId == channelId && it.messageId == targetParamAsInt)
+                it.id == targetParam || ((it.channelId == channelId || channelId == 0L) && it.messageId == targetParamAsInt)
             }?.parsedMediaItem
 
         // Use the real messageId from the resolved media item, NOT from URL parsing
@@ -566,6 +591,7 @@ class LocalHttpServer(
             val response = newFixedLengthResponse(Response.Status.OK, mime, "")
             response.addHeader("Accept-Ranges", "bytes")
             response.addHeader("Content-Range", "bytes 0-${totalSize - 1}/$totalSize")
+            response.addHeader("Content-Length", "$totalSize")
             response.addHeader("Content-Disposition", "inline; filename=\"$fileName\"")
             return response
         }

@@ -222,12 +222,28 @@ class TelegramClientManager(private val context: Context) {
 
     private fun cleanupSplitDuplicates() {
         val splitPartMessageIds = mediaIndex.values.filter { it.isSplit }.flatMap { it.parts.map { p -> p.messageId } }.toSet()
-        if (splitPartMessageIds.isNotEmpty()) {
-            val toRemove = mediaIndex.values.filter { !it.isSplit && splitPartMessageIds.contains(it.messageId) }
-            if (toRemove.isNotEmpty()) {
-                toRemove.forEach { mediaIndex.remove(it.id) }
-                saveMediaIndex()
+        val splitCleanBases = mediaIndex.values.filter { it.isSplit }.map {
+            it.fileName.lowercase()
+                .replace(Regex("""\.(mkv|mp4|avi|webm)$""", RegexOption.IGNORE_CASE), "")
+                .trim()
+        }.filter { it.isNotBlank() }.toSet()
+
+        val toRemove = mediaIndex.values.filter { item ->
+            if (item.isSplit) false
+            else {
+                splitPartMessageIds.contains(item.messageId) || (
+                    item.fileName.matches(Regex(""".*\.\d{2,3}$""")) &&
+                    splitCleanBases.contains(
+                        item.fileName.lowercase()
+                            .replace(Regex("""\.(mkv|mp4|avi|webm)(\.\d{2,3})?$""", RegexOption.IGNORE_CASE), "")
+                            .trim()
+                    )
+                )
             }
+        }
+        if (toRemove.isNotEmpty()) {
+            toRemove.forEach { mediaIndex.remove(it.id) }
+            saveMediaIndex()
         }
     }
 
@@ -1068,7 +1084,7 @@ class TelegramClientManager(private val context: Context) {
                         }.keys
                         toRemoveKeys.forEach { mediaIndex.remove(it) }
 
-                        val splitItem = mediaIndex[splitItemId] ?: MediaItem(
+                        val splitItem = (mediaIndex[splitItemId] ?: MediaItem(
                             id = splitItemId,
                             channelId = channelId,
                             messageId = firstMsgId,
@@ -1085,7 +1101,9 @@ class TelegramClientManager(private val context: Context) {
                             fileName = cleanBase,
                             isSplit = true,
                             parts = computedParts
-                        ).copy(
+                        )).copy(
+                            id = splitItemId,
+                            messageId = firstMsgId,
                             sizeBytes = runningStart,
                             parts = computedParts
                         )
@@ -1235,25 +1253,31 @@ class TelegramClientManager(private val context: Context) {
         endByte: Long,
         mediaId: String? = null
     ): StreamChunkResult {
-        // Skip messageId-based lookups when messageId=0 (caller resolves via item.id not numeric id)
+        val extractedMsgId = mediaId?.removePrefix("tg_")?.removeSuffix("_split")
+            ?.substringAfterLast("_")
+            ?.toIntOrNull() ?: if (messageId > 0) messageId else null
+
         val media = (if (!mediaId.isNullOrBlank()) mediaIndex[mediaId] else null)
             ?: (if (!mediaId.isNullOrBlank()) mediaIndex.values.find { it.id == mediaId } else null)
-            ?: if (messageId > 0) mediaIndex.values.find {
-                it.channelId == channelId && it.isSplit && (it.messageId == messageId || it.parts.any { p -> p.messageId == messageId })
+            ?: if (extractedMsgId != null && extractedMsgId > 0) mediaIndex.values.find {
+                (it.channelId == channelId || channelId == 0L) && it.isSplit &&
+                (it.messageId == extractedMsgId || it.parts.any { p -> p.messageId == extractedMsgId })
             } else null
-            ?: if (messageId > 0) mediaIndex.values.find {
-                (it.channelId == channelId && it.messageId == messageId) ||
-                (it.channelId == channelId && it.isSplit && it.parts.any { p -> p.messageId == messageId })
+            ?: if (extractedMsgId != null && extractedMsgId > 0) mediaIndex.values.find {
+                ((it.channelId == channelId || channelId == 0L) && it.messageId == extractedMsgId) ||
+                (it.channelId == channelId && it.isSplit && it.parts.any { p -> p.messageId == extractedMsgId })
             } else null
-            ?: if (messageId > 0) mediaIndex.values.find { it.messageId == messageId } else null
+            ?: if (extractedMsgId != null && extractedMsgId > 0) mediaIndex.values.find { it.messageId == extractedMsgId } else null
             ?: unmatchedIndex.values.find {
-                (!mediaId.isNullOrBlank() && it.id == mediaId) || (messageId > 0 && it.channelId == channelId && it.messageId == messageId)
+                (!mediaId.isNullOrBlank() && it.id == mediaId) || (extractedMsgId != null && extractedMsgId > 0 && it.channelId == channelId && it.messageId == extractedMsgId)
             }?.parsedMediaItem
 
         val effectiveChannelId = media?.channelId ?: channelId
         val totalSize = media?.sizeBytes ?: 50_000_000L
         val effectiveEnd = if (endByte <= 0L || endByte >= totalSize) totalSize - 1 else endByte
         val contentLength = effectiveEnd - startByte + 1
+
+        Log.d(TAG, "getStreamSource: mediaId=$mediaId, effectiveMsgId=$extractedMsgId, isSplit=${media?.isSplit}, partsCount=${media?.parts?.size}, range=$startByte-$effectiveEnd/$totalSize")
 
         val apiId = getApiId()
         val apiHash = getApiHash()
@@ -1263,7 +1287,7 @@ class TelegramClientManager(private val context: Context) {
         if (bridge != null && sessionStr.isNotBlank() && apiId > 0) {
             try {
                 val partsList = if (media != null && media.isSplit && media.parts.isNotEmpty()) {
-                    media.parts.map {
+                    media.parts.sortedBy { it.partNumber }.map {
                         mapOf(
                             "messageId" to it.messageId,
                             "partNumber" to it.partNumber,
@@ -1272,8 +1296,7 @@ class TelegramClientManager(private val context: Context) {
                         )
                     }
                 } else {
-                    // Use media.messageId (correct resolved ID), NOT the `messageId` param which may be 0
-                    val effectiveMsgId = media?.messageId ?: messageId
+                    val effectiveMsgId = media?.messageId ?: extractedMsgId ?: messageId
                     listOf(
                         mapOf(
                             "messageId" to effectiveMsgId,

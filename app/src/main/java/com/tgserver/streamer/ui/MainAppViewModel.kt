@@ -557,6 +557,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             apply()
         }
         _config.value = cfg
+        com.tgserver.streamer.service.StreamerForegroundService.activeConfig = cfg
     }
 
     suspend fun verifyAndSaveMetadataKeys(tmdb: String, tvdb: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {

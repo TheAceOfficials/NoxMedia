@@ -777,13 +777,27 @@ class VirtualStreamSession:
     def __init__(self, client: Client, chat_id: int, parts: List[Dict[str, Any]], start_byte: int, end_byte: int):
         self.client = client
         self.chat_id = chat_id
-        self.parts = sorted(parts, key=lambda p: p.get("partNumber", 1))
+        # Dynamically sort parts by partNumber and compute cumStart from sizeBytes reliably
+        sorted_parts = sorted(parts, key=lambda p: int(p.get("partNumber", 1)))
+        running_cum = 0
+        computed = []
+        for p in sorted_parts:
+            p_size = int(p.get("sizeBytes") or p.get("size", 0))
+            computed.append({
+                "messageId": int(p.get("messageId") or p.get("message_id")),
+                "partNumber": int(p.get("partNumber", 1)),
+                "sizeBytes": p_size,
+                "cumStart": running_cum
+            })
+            running_cum += p_size
+        self.parts = computed
         self.start_byte = start_byte
         self.end_byte = end_byte
         self.total_to_read = max(0, end_byte - start_byte + 1)
         self.bytes_read = 0
         self.gen = self._stream_generator()
         self.buffer = bytearray()
+        print(f"[VirtualStreamSession] Init stream chat={chat_id}, parts_count={len(self.parts)}, range={start_byte}-{end_byte}")
 
     async def _stream_generator(self):
         CHUNK_SIZE = 1024 * 1024 # 1 MB MTProto chunk
@@ -816,6 +830,8 @@ class VirtualStreamSession:
 
             for i in range(part_count):
                 fetch_off = offset + (i * CHUNK_SIZE)
+                if fetch_off >= part_size:
+                    break
                 chunk = await _fetch_chunk_bytes(self.client, self.chat_id, msg_id, file_id_obj, fetch_off, CHUNK_SIZE)
                 if not chunk:
                     break
