@@ -1,5 +1,11 @@
 package com.tgserver.streamer.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -22,6 +28,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
@@ -32,22 +39,34 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tgserver.streamer.R
 import com.tgserver.streamer.data.model.ChannelInfo
+import com.tgserver.streamer.data.model.ScanProgressState
+import com.tgserver.streamer.data.model.UnmatchedItem
+import com.tgserver.streamer.metadata.EnrichedMetadata
 import com.tgserver.streamer.theme.*
 import com.tgserver.streamer.ui.MainAppViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 // Pixel Dot-Matrix Font (Exact match with HomeScreen / LibraryScreen design)
 private val NdotFont = FontFamily(Font(R.font.ndot))
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChannelsScreen(viewModel: MainAppViewModel) {
     val channels by viewModel.channels.collectAsState()
     val isAddingChannel by viewModel.isAddingChannel.collectAsState()
     val scanningChannelIds by viewModel.scanningChannelIds.collectAsState()
     val isScanningAll by viewModel.isScanningAll.collectAsState()
+    val unmatchedMedia by viewModel.unmatchedMedia.collectAsState()
+    val scanProgress by viewModel.scanProgress.collectAsState()
+    val config by viewModel.config.collectAsState()
     val haptic = LocalHapticFeedback.current
+    val context = LocalContext.current
 
     var channelInput by remember { mutableStateOf("") }
     var isAnimeChannel by remember { mutableStateOf(false) }
+    var showUnmatchedSheet by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier
@@ -484,9 +503,14 @@ fun ChannelsScreen(viewModel: MainAppViewModel) {
                 ChannelItemCard(
                     channel = channel,
                     isScanning = isScanning,
+                    progress = scanProgress[channel.id],
                     onScan = {
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         viewModel.syncChannel(channel.id)
+                    },
+                    onStopScan = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        viewModel.stopScan(channel.id)
                     },
                     onRescanFromScratch = {
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -503,6 +527,28 @@ fun ChannelsScreen(viewModel: MainAppViewModel) {
                 )
             }
         }
+
+        // 5. UNMATCHED & SKIPPED CONTENT MINIMAL SECTION
+        if (unmatchedMedia.isNotEmpty()) {
+            item {
+                UnmatchedContentPreviewCard(
+                    unmatchedItems = unmatchedMedia,
+                    onViewAll = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        showUnmatchedSheet = true
+                    }
+                )
+            }
+        }
+    }
+
+    if (showUnmatchedSheet) {
+        UnmatchedContentBottomSheet(
+            viewModel = viewModel,
+            unmatchedItems = unmatchedMedia,
+            port = config.port,
+            onDismiss = { showUnmatchedSheet = false }
+        )
     }
 }
 
@@ -513,7 +559,9 @@ fun ChannelsScreen(viewModel: MainAppViewModel) {
 private fun ChannelItemCard(
     channel: ChannelInfo,
     isScanning: Boolean,
+    progress: ScanProgressState? = null,
     onScan: () -> Unit,
+    onStopScan: () -> Unit,
     onRescanFromScratch: () -> Unit,
     onToggleAnime: () -> Unit,
     onDelete: () -> Unit
@@ -765,8 +813,18 @@ private fun ChannelItemCard(
                         )
                     }
 
+                    val statusText = if (isScanning) {
+                        if (progress != null) {
+                            if (progress.isCooldown) {
+                                "⚠️ Rate limit: wait ${progress.cooldownSeconds}s"
+                            } else {
+                                "Batch #${progress.currentBatch} • ${progress.indexedMedia} vids • ${progress.scannedMessages} msgs"
+                            }
+                        } else "syncing..."
+                    } else channel.scanStatusText
+
                     Text(
-                        text = if (isScanning) "syncing..." else channel.scanStatusText,
+                        text = statusText,
                         color = if (isScanning) Color(0xFFFBBF24) else Color(0xFF64748B),
                         fontFamily = FontFamily.Default,
                         fontSize = 11.5.sp,
@@ -775,60 +833,1156 @@ private fun ChannelItemCard(
                     )
                 }
 
-                // SCAN BUTTON (Crisp, Fixed Height, Single-Line)
-                Box(
-                    modifier = Modifier
-                        .height(28.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (isScanning) Color(0xFF2E1C0A) else Color(0xFF1E1729))
-                        .border(
-                            1.dp,
-                            if (isScanning) Color(0xFFF59E0B) else Color(0xFF5B21B6),
-                            RoundedCornerShape(8.dp)
-                        )
-                        .clickable(enabled = !isScanning) { onScan() }
-                        .padding(horizontal = 10.dp),
-                    contentAlignment = Alignment.Center
+                // Action Buttons Row: SCAN or SCANNING + STOP
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        if (isScanning) {
-                            CircularProgressIndicator(
-                                strokeWidth = 2.dp,
-                                color = Color(0xFFFBBF24),
-                                modifier = Modifier.size(11.dp)
-                            )
-                            Text(
-                                text = "SCANNING",
-                                color = Color(0xFFFBBF24),
-                                fontFamily = NdotFont,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                softWrap = false
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = null,
-                                tint = Color(0xFFC084FC),
-                                modifier = Modifier.size(11.dp)
-                            )
-                            Text(
-                                text = "SCAN",
-                                color = Color(0xFFC084FC),
-                                fontFamily = NdotFont,
-                                fontSize = 9.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                softWrap = false
-                            )
+                    if (isScanning) {
+                        Box(
+                            modifier = Modifier
+                                .height(28.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF2E1C0A))
+                                .border(1.dp, Color(0xFFF59E0B), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                CircularProgressIndicator(
+                                    strokeWidth = 2.dp,
+                                    color = Color(0xFFFBBF24),
+                                    modifier = Modifier.size(11.dp)
+                                )
+                                Text(
+                                    text = "SCANNING",
+                                    color = Color(0xFFFBBF24),
+                                    fontFamily = NdotFont,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                        }
+
+                        // Stop Button
+                        Box(
+                            modifier = Modifier
+                                .height(28.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF3B1219))
+                                .border(1.dp, Color(0xFFEF4444), RoundedCornerShape(8.dp))
+                                .clickable { onStopScan() }
+                                .padding(horizontal = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Stop",
+                                    tint = Color(0xFFEF4444),
+                                    modifier = Modifier.size(10.dp)
+                                )
+                                Text(
+                                    text = "STOP",
+                                    color = Color(0xFFEF4444),
+                                    fontFamily = NdotFont,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .height(28.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF1E1729))
+                                .border(1.dp, Color(0xFF5B21B6), RoundedCornerShape(8.dp))
+                                .clickable { onScan() }
+                                .padding(horizontal = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = null,
+                                    tint = Color(0xFFC084FC),
+                                    modifier = Modifier.size(11.dp)
+                                )
+                                Text(
+                                    text = "SCAN",
+                                    color = Color(0xFFC084FC),
+                                    fontFamily = NdotFont,
+                                    fontSize = 9.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
                         }
                     }
                 }
             }
         }
     }
+}
+
+/**
+ * Minimal sleek preview card on ChannelsScreen showing unmatched & skipped media count + 2-3 sample items
+ */
+@Composable
+private fun UnmatchedContentPreviewCard(
+    unmatchedItems: List<UnmatchedItem>,
+    onViewAll: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF13141B))
+            .border(1.dp, Color(0xFF2E2438), RoundedCornerShape(16.dp))
+            .clickable { onViewAll() }
+            .padding(16.dp)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // Header Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF2E1C0A)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.FilterList,
+                            contentDescription = null,
+                            tint = Color(0xFFFBBF24),
+                            modifier = Modifier.size(13.dp)
+                        )
+                    }
+
+                    Text(
+                        text = "UNMATCHED CONTENT",
+                        color = Color.White,
+                        fontFamily = NdotFont,
+                        fontSize = 11.sp,
+                        letterSpacing = 0.5.sp
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFF2E1C0A))
+                            .border(1.dp, Color(0xFFF59E0B), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "${unmatchedItems.size} SKIPPED",
+                            color = Color(0xFFFBBF24),
+                            fontFamily = NdotFont,
+                            fontSize = 8.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "VIEW ALL",
+                        color = Color(0xFFC084FC),
+                        fontFamily = NdotFont,
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Icon(
+                        imageVector = Icons.Default.ArrowForward,
+                        contentDescription = null,
+                        tint = Color(0xFFC084FC),
+                        modifier = Modifier.size(11.dp)
+                    )
+                }
+            }
+
+            Text(
+                text = "Files not found on TMDB/TVDB/Kitsu or skipped due to unsupported formats. Tap to review, search, or stream directly.",
+                color = Color(0xFF94A3B8),
+                fontSize = 11.5.sp,
+                lineHeight = 15.sp
+            )
+
+            HorizontalDivider(color = Color(0xFF222430), thickness = 1.dp)
+
+            // Preview of latest 2-3 items
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                unmatchedItems.take(3).forEach { item ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF181A24))
+                            .padding(horizontal = 10.dp, vertical = 7.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (item.isVideo) Icons.Default.Movie else Icons.Default.Description,
+                                contentDescription = null,
+                                tint = if (item.isVideo) Color(0xFFC084FC) else Color(0xFF94A3B8),
+                                modifier = Modifier.size(14.dp)
+                            )
+
+                            Text(
+                                text = item.fileName,
+                                color = Color(0xFFE2E8F0),
+                                fontSize = 11.5.sp,
+                                fontFamily = FontFamily.Default,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color(0xFF222533))
+                                    .padding(horizontal = 5.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = item.formattedSize,
+                                    color = Color(0xFF94A3B8),
+                                    fontSize = 9.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(if (item.isVideo) Color(0xFF2A1C14) else Color(0xFF222533))
+                                    .padding(horizontal = 5.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = if (item.isVideo) "No Match" else "Skipped",
+                                    color = if (item.isVideo) Color(0xFFF59E0B) else Color(0xFF64748B),
+                                    fontFamily = NdotFont,
+                                    fontSize = 8.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Full Interactive BottomSheet for Unmatched & Skipped Content
+ * Includes real-time search, filters, details (actual telegram file name, scan time, size),
+ * and actions (manual TMDB matching, direct streaming, copy stream URL, delete).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun UnmatchedContentBottomSheet(
+    viewModel: MainAppViewModel,
+    unmatchedItems: List<UnmatchedItem>,
+    port: Int,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedFilter by remember { mutableStateOf("ALL") } // "ALL", "NO_MATCH", "SKIPPED"
+    var matchTargetItem by remember { mutableStateOf<UnmatchedItem?>(null) }
+    var showClearConfirm by remember { mutableStateOf(false) }
+
+    val filteredItems = remember(unmatchedItems, searchQuery, selectedFilter) {
+        unmatchedItems.filter { item ->
+            val matchesFilter = when (selectedFilter) {
+                "NO_MATCH" -> item.isVideo
+                "SKIPPED" -> !item.isVideo
+                else -> true
+            }
+            val matchesQuery = searchQuery.isBlank() ||
+                    item.fileName.contains(searchQuery, ignoreCase = true) ||
+                    item.rawFileName.contains(searchQuery, ignoreCase = true) ||
+                    item.channelTitle.contains(searchQuery, ignoreCase = true)
+            matchesFilter && matchesQuery
+        }
+    }
+
+    val totalBytes = remember(unmatchedItems) { unmatchedItems.sumOf { it.sizeBytes } }
+    val totalSizeStr = remember(totalBytes) {
+        val gb = totalBytes.toDouble() / (1024 * 1024 * 1024)
+        if (gb >= 1.0) String.format("%.2f GB", gb) else String.format("%.1f MB", totalBytes.toDouble() / (1024 * 1024))
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF101117),
+        tonalElevation = 0.dp,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 10.dp)
+                    .width(36.dp)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Color(0xFF333647))
+            )
+        }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.9f)
+                .padding(horizontal = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            // Top Bar
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "UNMATCHED CONTENT",
+                            color = Color.White,
+                            fontFamily = NdotFont,
+                            fontSize = 16.sp,
+                            letterSpacing = 0.5.sp
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(0xFF2E1C0A))
+                                .border(1.dp, Color(0xFFF59E0B), RoundedCornerShape(6.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "${unmatchedItems.size} ITEMS",
+                                color = Color(0xFFFBBF24),
+                                fontFamily = NdotFont,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "Total volume: $totalSizeStr • Items skipped or lacking metadata",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 11.5.sp
+                    )
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (unmatchedItems.isNotEmpty()) {
+                        IconButton(
+                            onClick = { showClearConfirm = true },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.DeleteSweep,
+                                contentDescription = "Clear All",
+                                tint = Color(0xFFEF4444),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = Color(0xFF94A3B8),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+
+            // Search Bar
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFF181A24))
+                    .border(1.dp, Color(0xFF282B3A), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = null,
+                        tint = Color(0xFF64748B),
+                        modifier = Modifier.size(16.dp)
+                    )
+
+                    Box(modifier = Modifier.weight(1f)) {
+                        if (searchQuery.isEmpty()) {
+                            Text(
+                                text = "Search telegram filename or channel...",
+                                color = Color(0xFF64748B),
+                                fontSize = 12.5.sp
+                            )
+                        }
+                        BasicTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            singleLine = true,
+                            cursorBrush = SolidColor(Color(0xFFC084FC)),
+                            textStyle = TextStyle(
+                                color = Color.White,
+                                fontSize = 12.5.sp,
+                                fontFamily = FontFamily.Default
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    if (searchQuery.isNotEmpty()) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Clear",
+                            tint = Color(0xFF94A3B8),
+                            modifier = Modifier
+                                .size(16.dp)
+                                .clickable { searchQuery = "" }
+                        )
+                    }
+                }
+            }
+
+            // Filter Chips Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                val chips = listOf(
+                    "ALL" to "All (${unmatchedItems.size})",
+                    "NO_MATCH" to "No TMDB (${unmatchedItems.count { it.isVideo }})",
+                    "SKIPPED" to "Skipped (${unmatchedItems.count { !it.isVideo }})"
+                )
+
+                chips.forEach { (key, label) ->
+                    val isSelected = selectedFilter == key
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isSelected) Color(0xFF7C3AED) else Color(0xFF181A24))
+                            .border(
+                                1.dp,
+                                if (isSelected) Color(0xFFA855F7) else Color(0xFF282B3A),
+                                RoundedCornerShape(8.dp)
+                            )
+                            .clickable { selectedFilter = key }
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = label,
+                            color = if (isSelected) Color.White else Color(0xFF94A3B8),
+                            fontSize = 10.sp,
+                            fontFamily = NdotFont,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            // List of Unmatched Items
+            if (filteredItems.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DoneAll,
+                            contentDescription = null,
+                            tint = Color(0xFF10B981),
+                            modifier = Modifier.size(36.dp)
+                        )
+                        Text(
+                            text = if (searchQuery.isNotBlank()) "No files match '$searchQuery'" else "No unmatched items found!",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(bottom = 30.dp)
+                ) {
+                    items(filteredItems, key = { it.id }) { item ->
+                        UnmatchedItemCard(
+                            item = item,
+                            port = port,
+                            onMatch = { matchTargetItem = item },
+                            onPlay = {
+                                val safeFileName = try {
+                                    java.net.URLEncoder.encode(item.fileName, "UTF-8")
+                                } catch (_: Exception) { "video.mp4" }
+                                val streamUrl = "http://127.0.0.1:$port/stream/video/${item.channelId}/${item.messageId}/$safeFileName"
+                                val playIntent = Intent(Intent.ACTION_VIEW).apply {
+                                    setDataAndType(Uri.parse(streamUrl), "video/*")
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                try {
+                                    context.startActivity(Intent.createChooser(playIntent, "Play video with"))
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "No video player installed", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            onCopyLink = {
+                                val safeFileName = try {
+                                    java.net.URLEncoder.encode(item.fileName, "UTF-8")
+                                } catch (_: Exception) { "video.mp4" }
+                                val streamUrl = "http://127.0.0.1:$port/stream/video/${item.channelId}/${item.messageId}/$safeFileName"
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("Stream Link", streamUrl))
+                                Toast.makeText(context, "✓ Stream URL copied", Toast.LENGTH_SHORT).show()
+                            },
+                            onAddAnyway = {
+                                viewModel.addUnmatchedToLibraryAnyway(item.id)
+                            },
+                            onDismiss = {
+                                viewModel.removeUnmatched(item.id)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // Clear Confirmation Dialog
+    if (showClearConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirm = false },
+            title = {
+                Text(
+                    text = "Clear Unmatched List?",
+                    color = Color.White,
+                    fontFamily = FontFamily.Default,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                )
+            },
+            text = {
+                Text(
+                    text = "This will remove all skipped and unmatched file records from the list. It will not delete anything from Telegram.",
+                    color = Color(0xFF94A3B8),
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearConfirm = false
+                        viewModel.clearAllUnmatched()
+                    }
+                ) {
+                    Text("Clear All", color = Color(0xFFEF4444), fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirm = false }) {
+                    Text("Cancel", color = Color(0xFF94A3B8))
+                }
+            },
+            containerColor = Color(0xFF1E202B)
+        )
+    }
+
+    // Manual Candidate Match Dialog
+    if (matchTargetItem != null) {
+        ManualMatchCandidateDialog(
+            unmatched = matchTargetItem!!,
+            viewModel = viewModel,
+            onDismiss = { matchTargetItem = null }
+        )
+    }
+}
+
+/**
+ * Detailed Unmatched Card showing raw file name, scan timestamp, size, reason, and interactive actions.
+ */
+@Composable
+private fun UnmatchedItemCard(
+    item: UnmatchedItem,
+    port: Int,
+    onMatch: () -> Unit,
+    onPlay: () -> Unit,
+    onCopyLink: () -> Unit,
+    onAddAnyway: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xFF151720))
+            .border(1.dp, Color(0xFF262938), RoundedCornerShape(14.dp))
+            .padding(14.dp)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Filename and Dismiss Button
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Icon(
+                        imageVector = if (item.isVideo) Icons.Default.Movie else Icons.Default.Description,
+                        contentDescription = null,
+                        tint = if (item.isVideo) Color(0xFFC084FC) else Color(0xFF94A3B8),
+                        modifier = Modifier
+                            .padding(top = 2.dp)
+                            .size(16.dp)
+                    )
+
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = item.fileName,
+                            color = Color.White,
+                            fontFamily = FontFamily.Default,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+
+                        if (item.rawFileName.isNotBlank() && item.rawFileName != item.fileName) {
+                            Text(
+                                text = "Raw: ${item.rawFileName}",
+                                color = Color(0xFF64748B),
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 10.5.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Dismiss",
+                        tint = Color(0xFF64748B),
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+            }
+
+            // Metadata Badges Row: Size, Timestamp, MsgId, Channel
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Size Badge
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(Color(0xFF1E212E))
+                        .padding(horizontal = 6.dp, vertical = 2.5.dp)
+                ) {
+                    Text(
+                        text = item.formattedSize,
+                        color = Color(0xFFC084FC),
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                // Scan Timestamp
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(Color(0xFF1E212E))
+                        .padding(horizontal = 6.dp, vertical = 2.5.dp)
+                ) {
+                    Text(
+                        text = item.formattedDate,
+                        color = Color(0xFF94A3B8),
+                        fontSize = 9.5.sp
+                    )
+                }
+
+                // Message ID
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(Color(0xFF1E212E))
+                        .padding(horizontal = 6.dp, vertical = 2.5.dp)
+                ) {
+                    Text(
+                        text = "#${item.messageId}",
+                        color = Color(0xFF64748B),
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 9.5.sp
+                    )
+                }
+
+                if (item.channelTitle.isNotBlank()) {
+                    Text(
+                        text = item.channelTitle,
+                        color = Color(0xFF64748B),
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            // Reason Pill
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Info,
+                    contentDescription = null,
+                    tint = if (item.isVideo) Color(0xFFFBBF24) else Color(0xFF94A3B8),
+                    modifier = Modifier.size(12.dp)
+                )
+                Text(
+                    text = item.reason,
+                    color = if (item.isVideo) Color(0xFFFBBF24) else Color(0xFF94A3B8),
+                    fontSize = 11.sp
+                )
+            }
+
+            HorizontalDivider(color = Color(0xFF202330), thickness = 1.dp)
+
+            // Action Buttons Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (item.isVideo) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        // Search & Match Button
+                        Box(
+                            modifier = Modifier
+                                .height(26.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(0xFF28103F))
+                                .border(1.dp, Color(0xFF7C3AED), RoundedCornerShape(6.dp))
+                                .clickable { onMatch() }
+                                .padding(horizontal = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Search,
+                                    contentDescription = null,
+                                    tint = Color(0xFFC084FC),
+                                    modifier = Modifier.size(11.dp)
+                                )
+                                Text(
+                                    text = "MATCH METADATA",
+                                    color = Color(0xFFC084FC),
+                                    fontFamily = NdotFont,
+                                    fontSize = 8.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        // Play Button
+                        Box(
+                            modifier = Modifier
+                                .height(26.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(0xFF0F291E))
+                                .border(1.dp, Color(0xFF059669), RoundedCornerShape(6.dp))
+                                .clickable { onPlay() }
+                                .padding(horizontal = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                    tint = Color(0xFF34D399),
+                                    modifier = Modifier.size(11.dp)
+                                )
+                                Text(
+                                    text = "PLAY",
+                                    color = Color(0xFF34D399),
+                                    fontFamily = NdotFont,
+                                    fontSize = 8.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        // Copy Stream Link
+                        Box(
+                            modifier = Modifier
+                                .height(26.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(0xFF1E212E))
+                                .border(1.dp, Color(0xFF33384B), RoundedCornerShape(6.dp))
+                                .clickable { onCopyLink() }
+                                .padding(horizontal = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ContentCopy,
+                                    contentDescription = null,
+                                    tint = Color(0xFF94A3B8),
+                                    modifier = Modifier.size(10.dp)
+                                )
+                                Text(
+                                    text = "LINK",
+                                    color = Color(0xFF94A3B8),
+                                    fontFamily = NdotFont,
+                                    fontSize = 8.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    // Add anyway
+                    Text(
+                        text = "+ Add to library",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 10.5.sp,
+                        modifier = Modifier.clickable { onAddAnyway() }
+                    )
+                } else {
+                    Text(
+                        text = "Non-video document file skipped",
+                        color = Color(0xFF64748B),
+                        fontSize = 11.sp
+                    )
+
+                    Text(
+                        text = "Dismiss",
+                        color = Color(0xFFEF4444),
+                        fontSize = 11.sp,
+                        modifier = Modifier.clickable { onDismiss() }
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Interactive Candidate Search Dialog to manually match an unmatched item with TMDB / Kitsu
+ */
+@Composable
+private fun ManualMatchCandidateDialog(
+    unmatched: UnmatchedItem,
+    viewModel: MainAppViewModel,
+    onDismiss: () -> Unit
+) {
+    val coroutineScope = rememberCoroutineScope()
+    var searchTitle by remember { mutableStateOf(unmatched.fileName.replace(Regex("(?i)\\.(mkv|mp4|avi|ts)$"), "")) }
+    var searchType by remember { mutableStateOf("movie") } // "movie" or "series"
+    var isSearching by remember { mutableStateOf(false) }
+    var candidates by remember { mutableStateOf<List<EnrichedMetadata>>(emptyList()) }
+
+    fun doSearch() {
+        if (searchTitle.isBlank()) return
+        isSearching = true
+        coroutineScope.launch {
+            candidates = viewModel.searchMetadataCandidates(searchTitle.trim(), searchType)
+            isSearching = false
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        doSearch()
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "Match Media Metadata",
+                color = Color.White,
+                fontFamily = FontFamily.Default,
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 450.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Search Input Box
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF14151D))
+                        .border(1.dp, Color(0xFF282B3A), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                ) {
+                    BasicTextField(
+                        value = searchTitle,
+                        onValueChange = { searchTitle = it },
+                        singleLine = true,
+                        cursorBrush = SolidColor(Color(0xFFC084FC)),
+                        textStyle = TextStyle(color = Color.White, fontSize = 13.sp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                // Type toggles + Search Button
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("movie" to "Movie", "series" to "Series").forEach { (typeKey, label) ->
+                            val isSel = searchType == typeKey
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (isSel) Color(0xFF7C3AED) else Color(0xFF1A1C26))
+                                    .clickable {
+                                        searchType = typeKey
+                                        doSearch()
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = label,
+                                    color = if (isSel) Color.White else Color(0xFF94A3B8),
+                                    fontSize = 10.sp,
+                                    fontFamily = NdotFont,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .height(26.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFF7C3AED))
+                            .clickable { doSearch() }
+                            .padding(horizontal = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "SEARCH",
+                            color = Color.White,
+                            fontFamily = NdotFont,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                HorizontalDivider(color = Color(0xFF252837), thickness = 1.dp)
+
+                // Candidates List
+                if (isSearching) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(150.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            strokeWidth = 2.dp,
+                            color = Color(0xFFC084FC),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                } else if (candidates.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(120.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "No candidates found. Try adjusting title query.",
+                            color = Color(0xFF94A3B8),
+                            fontSize = 12.sp
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 300.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(candidates) { cand ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF181A24))
+                                    .border(1.dp, Color(0xFF282B3A), RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        viewModel.matchUnmatchedItem(unmatched.id, cand) { success ->
+                                            if (success) onDismiss()
+                                        }
+                                    }
+                                    .padding(8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Poster Thumbnail
+                                RemoteImage(
+                                    url = cand.posterUrl,
+                                    contentDescription = cand.title,
+                                    modifier = Modifier
+                                        .size(width = 36.dp, height = 52.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                )
+
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    Text(
+                                        text = cand.title ?: "Unknown",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 12.5.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+
+                                    if (!cand.year.isNullOrBlank()) {
+                                        Text(
+                                            text = cand.year,
+                                            color = Color(0xFFC084FC),
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 10.sp
+                                        )
+                                    }
+
+                                    if (!cand.overview.isNullOrBlank()) {
+                                        Text(
+                                            text = cand.overview,
+                                            color = Color(0xFF94A3B8),
+                                            fontSize = 10.sp,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                            lineHeight = 13.sp
+                                        )
+                                    }
+                                }
+
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Select",
+                                    tint = Color(0xFF10B981),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = Color(0xFF94A3B8))
+            }
+        },
+        containerColor = Color(0xFF1E202B)
+    )
 }

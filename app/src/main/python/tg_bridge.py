@@ -464,6 +464,146 @@ def sync_channel_media(api_id: int, api_hash: str, session_str: str, channel_id:
         traceback.print_exc()
         return json.dumps({"status": "error", "error": str(e)})
 
+def scan_channel_batch(api_id: int, api_hash: str, session_str: str, channel_id: int, offset_id: int = 0, limit: int = 100, is_anime: bool = False) -> str:
+    """
+    Scans a single batch (chunk) of messages from chat_history starting at offset_id.
+    Returns JSON with items, split parts, skipped/unsupported files, last_msg_id, and has_more flag.
+    Gracefully handles FloodWait.
+    """
+    async def _async_scan():
+        client = await _get_connected_stream_client(api_id, api_hash, session_str)
+        chat_id = int(channel_id)
+
+        try:
+            await client.get_chat(chat_id)
+        except Exception:
+            try:
+                async for dialog in client.get_dialogs():
+                    if dialog.chat and (dialog.chat.id == chat_id or str(abs(dialog.chat.id)).endswith(str(abs(chat_id)))):
+                        break
+            except Exception:
+                pass
+
+        items = []
+        split_parts = []
+        skipped = []
+        last_msg_id = 0
+        messages_scanned = 0
+        video_exts = (".mkv", ".mp4", ".avi", ".ts", ".m4v", ".mov", ".webm", ".flv", ".wmv", ".m2ts")
+
+        try:
+            async for msg in client.get_chat_history(chat_id, limit=int(limit), offset_id=int(offset_id)):
+                messages_scanned += 1
+                last_msg_id = msg.id
+
+                media = msg.video or msg.document or msg.animation
+                if not media:
+                    continue
+
+                try:
+                    _file_id_cache[(chat_id, msg.id)] = FileId.decode(media.file_id)
+                except Exception:
+                    pass
+
+                file_name = getattr(media, "file_name", None) or f"video_{msg.id}.mp4"
+                file_size = getattr(media, "file_size", 0) or 0
+                mime_type = getattr(media, "mime_type", "") or ""
+                duration = getattr(media, "duration", 0) or 0
+                caption = msg.caption or ""
+
+                best_file_name = media_parser.extract_best_filename(file_name, caption)
+                split_info = media_parser.parse_split_part(best_file_name)
+
+                is_video = (
+                    mime_type.startswith("video/") or
+                    any(best_file_name.lower().endswith(ext) for ext in video_exts) or
+                    split_info is not None
+                )
+
+                if not is_video or file_size <= 0:
+                    skipped.append({
+                        "messageId": msg.id,
+                        "fileName": best_file_name,
+                        "rawFileName": file_name,
+                        "sizeBytes": file_size,
+                        "mimeType": mime_type or "application/octet-stream",
+                        "reason": "Unsupported format (non-video file)" if file_size > 0 else "Empty file (0 bytes)"
+                    })
+                    continue
+
+                parsed = media_parser.parse_media_filename(best_file_name, caption, is_anime=bool(is_anime))
+                clean_base = parsed["clean_base_name"]
+                is_split = parsed["is_split"]
+                part_num = parsed["part_number"]
+
+                if is_split:
+                    split_parts.append({
+                        "messageId": msg.id,
+                        "partNumber": part_num,
+                        "sizeBytes": file_size,
+                        "duration": duration,
+                        "mimeType": mime_type or "video/mp4",
+                        "cleanBase": clean_base,
+                        "rawFileName": file_name,
+                        "title": parsed["title"],
+                        "type": parsed["type"],
+                        "year": parsed["year"],
+                        "season": parsed["season"],
+                        "episode": parsed["episode"],
+                        "quality": parsed["quality"],
+                        "qualityBadge": parsed["quality_badge"]
+                    })
+                else:
+                    item_id = f"tg_{chat_id}_{msg.id}"
+                    items.append({
+                        "id": item_id,
+                        "channelId": chat_id,
+                        "messageId": msg.id,
+                        "title": parsed["title"],
+                        "type": parsed["type"],
+                        "year": parsed["year"],
+                        "season": parsed["season"],
+                        "episode": parsed["episode"],
+                        "quality": parsed["quality"],
+                        "qualityBadge": parsed["quality_badge"],
+                        "sizeBytes": file_size,
+                        "durationSeconds": duration,
+                        "mimeType": mime_type or "video/mp4",
+                        "fileName": parsed["clean_base_name"],
+                        "rawFileName": file_name,
+                        "isSplit": False,
+                        "parts": []
+                    })
+        except errors.FloodWait as e:
+            return {
+                "status": "flood_wait",
+                "wait_seconds": e.value,
+                "last_msg_id": last_msg_id,
+                "messages_scanned": messages_scanned,
+                "items": items,
+                "split_parts": split_parts,
+                "skipped": skipped
+            }
+
+        return {
+            "status": "success",
+            "items": items,
+            "split_parts": split_parts,
+            "skipped": skipped,
+            "last_msg_id": last_msg_id,
+            "messages_scanned": messages_scanned,
+            "has_more": messages_scanned >= int(limit) and last_msg_id > 0
+        }
+
+    try:
+        res = run_async(_async_scan(), timeout=45)
+        return json.dumps(res)
+    except errors.FloodWait as e:
+        return json.dumps({"status": "flood_wait", "wait_seconds": e.value, "last_msg_id": 0, "messages_scanned": 0, "items": [], "split_parts": [], "skipped": []})
+    except Exception as e:
+        traceback.print_exc()
+        return json.dumps({"status": "error", "error": str(e)})
+
 # --- Byte Streaming Across Single / Split Parts ---
 
 async def _get_media_session(client: Client, dc_id: int) -> Session:
@@ -582,8 +722,8 @@ class VirtualStreamSession:
         end = self.end_byte
 
         for p in self.parts:
-            part_size = p.get("sizeBytes") or p.get("size", 0)
-            cum_start = p.get("cumStart") or p.get("cum_start", 0)
+            part_size = int(p.get("sizeBytes") or p.get("size", 0))
+            cum_start = int(p.get("cumStart") or p.get("cum_start", 0))
             cum_end = cum_start + part_size - 1
 
             if cum_end < pos:
@@ -594,67 +734,80 @@ class VirtualStreamSession:
             local_start = max(pos, cum_start) - cum_start
             local_end = min(end, cum_end) - cum_start
 
-            msg_id = p.get("messageId") or p.get("message_id")
+            msg_id = int(p.get("messageId") or p.get("message_id"))
             file_id_obj = await _resolve_file_id(self.client, self.chat_id, msg_id)
             if not file_id_obj:
                 print(f"[VirtualStreamSession] Could not resolve file_id for {self.chat_id}:{msg_id}")
                 continue
 
-            dc_id = file_id_obj.dc_id
-            session = await _get_media_session(self.client, dc_id)
-            location = _get_location_from_file_id(file_id_obj)
+            start_chunk_idx = local_start // CHUNK_SIZE
+            end_chunk_idx = local_end // CHUNK_SIZE
+            num_chunks = end_chunk_idx - start_chunk_idx + 1
+            start_offset_in_chunk = local_start % CHUNK_SIZE
 
-            curr_pos = local_start
-            while curr_pos <= local_end:
-                fetch_off = curr_pos - (curr_pos % CHUNK_SIZE)
-                cut = curr_pos - fetch_off
-                bytes_left_in_part = local_end - curr_pos + 1
-                fetch_limit = CHUNK_SIZE
+            bytes_to_read_in_part = local_end - local_start + 1
+            curr_chunk_in_part = 0
 
-                try:
-                    r = await session.send(
-                        raw.functions.upload.GetFile(
-                            location=location,
-                            offset=fetch_off,
-                            limit=fetch_limit
-                        )
-                    )
-                    raw_chunk = getattr(r, "bytes", b"") if r else b""
-                except Exception as e:
-                    err_str = str(e)
-                    if "FILE_REFERENCE" in err_str or "file_reference" in err_str.lower():
-                        _file_id_cache.pop((self.chat_id, msg_id), None)
-                        refreshed = await _resolve_file_id(self.client, self.chat_id, msg_id)
-                        if refreshed:
-                            file_id_obj = refreshed
-                            location = _get_location_from_file_id(file_id_obj)
-                            r = await session.send(
-                                raw.functions.upload.GetFile(
-                                    location=location,
-                                    offset=fetch_off,
-                                    limit=fetch_limit
-                                )
-                            )
-                            raw_chunk = getattr(r, "bytes", b"") if r else b""
-                        else:
-                            break
-                    else:
-                        print(f"[VirtualStreamSession] GetFile error at offset {fetch_off}: {e}")
+            try:
+                async for raw_chunk in self.client.get_file(
+                    file_id=file_id_obj,
+                    file_size=part_size,
+                    limit=num_chunks,
+                    offset=start_chunk_idx
+                ):
+                    if not raw_chunk:
                         break
 
-                if not raw_chunk:
-                    break
+                    if curr_chunk_in_part == 0 and start_offset_in_chunk > 0:
+                        raw_chunk = raw_chunk[start_offset_in_chunk:]
 
-                if cut > 0:
-                    raw_chunk = raw_chunk[cut:]
+                    if len(raw_chunk) > bytes_to_read_in_part:
+                        raw_chunk = raw_chunk[:bytes_to_read_in_part]
 
-                if len(raw_chunk) > bytes_left_in_part:
-                    raw_chunk = raw_chunk[:bytes_left_in_part]
+                    if raw_chunk:
+                        yield raw_chunk
+                        bytes_to_read_in_part -= len(raw_chunk)
+                        pos += len(raw_chunk)
 
-                if raw_chunk:
-                    yield raw_chunk
-                    curr_pos += len(raw_chunk)
-                    pos += len(raw_chunk)
+                    curr_chunk_in_part += 1
+                    if bytes_to_read_in_part <= 0:
+                        break
+            except Exception as e:
+                err_str = str(e)
+                print(f"[VirtualStreamSession] get_file error on msg {msg_id}: {e}")
+                if "FILE_REFERENCE" in err_str or "file_reference" in err_str.lower():
+                    _file_id_cache.pop((self.chat_id, msg_id), None)
+                    refreshed = await _resolve_file_id(self.client, self.chat_id, msg_id)
+                    if refreshed and bytes_to_read_in_part > 0:
+                        part_curr_local = local_end - bytes_to_read_in_part + 1
+                        retry_start_chunk = part_curr_local // CHUNK_SIZE
+                        retry_offset_in_chunk = part_curr_local % CHUNK_SIZE
+                        retry_end_chunk = local_end // CHUNK_SIZE
+                        retry_num_chunks = retry_end_chunk - retry_start_chunk + 1
+                        retry_curr_chunk = 0
+
+                        try:
+                            async for raw_chunk in self.client.get_file(
+                                file_id=refreshed,
+                                file_size=part_size,
+                                limit=retry_num_chunks,
+                                offset=retry_start_chunk
+                            ):
+                                if not raw_chunk:
+                                    break
+                                if retry_curr_chunk == 0 and retry_offset_in_chunk > 0:
+                                    raw_chunk = raw_chunk[retry_offset_in_chunk:]
+                                if len(raw_chunk) > bytes_to_read_in_part:
+                                    raw_chunk = raw_chunk[:bytes_to_read_in_part]
+                                if raw_chunk:
+                                    yield raw_chunk
+                                    bytes_to_read_in_part -= len(raw_chunk)
+                                    pos += len(raw_chunk)
+                                retry_curr_chunk += 1
+                                if bytes_to_read_in_part <= 0:
+                                    break
+                        except Exception as re:
+                            print(f"[VirtualStreamSession] retry get_file error on msg {msg_id}: {re}")
 
     async def read_bytes(self, max_bytes: int) -> bytes:
         while len(self.buffer) < max_bytes:

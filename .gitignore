@@ -21,4 +21,5 @@ venv311/
 *.session
 *.session-journal
 .env
-
+__pycache__/
+*.pyc

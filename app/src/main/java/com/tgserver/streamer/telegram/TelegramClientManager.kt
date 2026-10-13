@@ -8,8 +8,14 @@ import com.google.gson.reflect.TypeToken
 import com.tgserver.streamer.data.model.AuthSession
 import com.tgserver.streamer.data.model.ChannelInfo
 import com.tgserver.streamer.data.model.MediaItem
+import com.tgserver.streamer.data.model.UnmatchedItem
+import com.tgserver.streamer.data.model.ScanProgressState
+import com.tgserver.streamer.data.model.SplitPart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -17,6 +23,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
+import java.io.File
 import java.io.InputStream
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -55,8 +62,16 @@ class TelegramClientManager(private val context: Context) {
     private val _mediaState = MutableStateFlow<List<MediaItem>>(emptyList())
     val mediaState: StateFlow<List<MediaItem>> = _mediaState.asStateFlow()
 
+    private val _unmatchedState = MutableStateFlow<List<UnmatchedItem>>(emptyList())
+    val unmatchedState: StateFlow<List<UnmatchedItem>> = _unmatchedState.asStateFlow()
+
+    private val _scanProgress = MutableStateFlow<Map<Long, ScanProgressState>>(emptyMap())
+    val scanProgress: StateFlow<Map<Long, ScanProgressState>> = _scanProgress.asStateFlow()
+
     private val channels = ConcurrentHashMap<Long, ChannelInfo>()
     private val mediaIndex = ConcurrentHashMap<String, MediaItem>()
+    private val unmatchedIndex = ConcurrentHashMap<String, UnmatchedItem>()
+    private val activeScanJobs = ConcurrentHashMap<Long, Job>()
 
     private val _apiCredentials = MutableStateFlow(
         Pair(
@@ -138,6 +153,7 @@ class TelegramClientManager(private val context: Context) {
         loadSession()
         loadChannels()
         loadMediaIndex()
+        loadUnmatchedIndex()
     }
 
     private fun loadSession() {
@@ -186,7 +202,12 @@ class TelegramClientManager(private val context: Context) {
     }
 
     private fun loadMediaIndex() {
-        val json = prefs.getString("media_index", null)
+        val file = File(context.filesDir, "media_index.json")
+        val json = if (file.exists()) {
+            try { file.readText() } catch (_: Exception) { prefs.getString("media_index", null) }
+        } else {
+            prefs.getString("media_index", null)
+        }
         mediaIndex.clear()
         if (!json.isNullOrBlank()) {
             val type = object : TypeToken<List<MediaItem>>() {}.type
@@ -226,8 +247,51 @@ class TelegramClientManager(private val context: Context) {
     private fun saveMediaIndex() {
         val list = mediaIndex.values.toList()
         val json = gson.toJson(list)
+        try {
+            val file = File(context.filesDir, "media_index.json")
+            file.writeText(json)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error saving media_index.json: ${e.message}")
+        }
         prefs.edit().putString("media_index", json).apply()
         _mediaState.value = list
+    }
+
+    private fun loadUnmatchedIndex() {
+        try {
+            val file = File(context.filesDir, "unmatched_media_index.json")
+            val json = if (file.exists()) {
+                try { file.readText() } catch (_: Exception) { prefs.getString("unmatched_media_index", null) }
+            } else {
+                prefs.getString("unmatched_media_index", null)
+            }
+            unmatchedIndex.clear()
+            if (!json.isNullOrBlank()) {
+                val type = object : TypeToken<List<UnmatchedItem>>() {}.type
+                val list: List<UnmatchedItem> = gson.fromJson(json, type) ?: emptyList()
+                list.forEach { unmatchedIndex[it.id] = it }
+            }
+            _unmatchedState.value = unmatchedIndex.values.sortedByDescending { it.scannedAt }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading unmatched media index: ${e.message}")
+        }
+    }
+
+    private fun saveUnmatchedIndex() {
+        try {
+            val list = unmatchedIndex.values.sortedByDescending { it.scannedAt }
+            val json = gson.toJson(list)
+            try {
+                val file = File(context.filesDir, "unmatched_media_index.json")
+                file.writeText(json)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error saving unmatched_media_index.json: ${e.message}")
+            }
+            prefs.edit().putString("unmatched_media_index", json).apply()
+            _unmatchedState.value = list
+        } catch (e: Exception) {
+            Log.e(TAG, "Error saving unmatched media index: ${e.message}")
+        }
     }
 
     // --- Authentication Engine (Session String) ---
@@ -589,18 +653,107 @@ class TelegramClientManager(private val context: Context) {
     }
 
     fun removeChannel(channelId: Long) {
+        stopChannelScan(channelId)
         channels.remove(channelId)
         saveChannels()
         val toRemove = mediaIndex.values.filter { it.channelId == channelId }.map { it.id }
         toRemove.forEach { mediaIndex.remove(it) }
         saveMediaIndex()
+        clearUnmatched(channelId)
     }
 
-    suspend fun rescanFromScratch(channelId: Long, limit: Int = 200): Result<Int> = withContext(Dispatchers.IO) {
+    suspend fun rescanFromScratch(channelId: Long): Result<Int> = withContext(Dispatchers.IO) {
+        stopChannelScan(channelId)
         val toRemove = mediaIndex.values.filter { it.channelId == channelId }.map { it.id }
         toRemove.forEach { mediaIndex.remove(it) }
         saveMediaIndex()
-        syncChannel(channelId, limit)
+        clearUnmatched(channelId)
+        scanChannelLive(channelId)
+    }
+
+    // --- Unmatched Content Operations ---
+
+    fun getUnmatchedMedia(): List<UnmatchedItem> = unmatchedIndex.values.sortedByDescending { it.scannedAt }
+
+    fun removeUnmatchedItem(id: String) {
+        unmatchedIndex.remove(id)
+        saveUnmatchedIndex()
+    }
+
+    fun clearUnmatched(channelId: Long? = null) {
+        if (channelId == null) {
+            unmatchedIndex.clear()
+        } else {
+            val toRemove = unmatchedIndex.values.filter { it.channelId == channelId }.map { it.id }
+            toRemove.forEach { unmatchedIndex.remove(it) }
+        }
+        saveUnmatchedIndex()
+    }
+
+    suspend fun matchUnmatchedItem(
+        unmatchedId: String,
+        matchedMeta: com.tgserver.streamer.metadata.EnrichedMetadata
+    ): MediaItem? = withContext(Dispatchers.IO) {
+        val unmatched = unmatchedIndex[unmatchedId] ?: return@withContext null
+        val baseItem = unmatched.parsedMediaItem ?: MediaItem(
+            id = "tg_${unmatched.channelId}_${unmatched.messageId}",
+            channelId = unmatched.channelId,
+            messageId = unmatched.messageId,
+            title = matchedMeta.title ?: unmatched.fileName,
+            type = if (matchedMeta.kitsuId != null) "series" else "movie",
+            sizeBytes = unmatched.sizeBytes,
+            mimeType = unmatched.mimeType,
+            fileName = unmatched.fileName
+        )
+
+        if (!matchedMeta.title.isNullOrBlank()) baseItem.title = matchedMeta.title
+        if (!matchedMeta.year.isNullOrBlank()) baseItem.year = matchedMeta.year
+        if (!matchedMeta.overview.isNullOrBlank()) baseItem.overview = matchedMeta.overview
+        if (!matchedMeta.posterUrl.isNullOrBlank()) baseItem.posterUrl = matchedMeta.posterUrl
+        if (!matchedMeta.backdropUrl.isNullOrBlank()) baseItem.backdropUrl = matchedMeta.backdropUrl
+        if (!matchedMeta.imdbId.isNullOrBlank()) baseItem.imdbId = matchedMeta.imdbId
+        if (matchedMeta.tmdbId != null && matchedMeta.tmdbId > 0) baseItem.tmdbId = matchedMeta.tmdbId
+        if (matchedMeta.kitsuId != null && matchedMeta.kitsuId > 0) baseItem.kitsuId = matchedMeta.kitsuId
+
+        mediaIndex[baseItem.id] = baseItem
+        saveMediaIndex()
+
+        unmatchedIndex.remove(unmatchedId)
+        saveUnmatchedIndex()
+
+        channels[baseItem.channelId]?.let { ch ->
+            channels[baseItem.channelId] = ch.copy(videoCount = mediaIndex.values.count { it.channelId == baseItem.channelId })
+            saveChannels()
+        }
+
+        baseItem
+    }
+
+    fun addUnmatchedToLibraryAnyway(unmatchedId: String): MediaItem? {
+        val unmatched = unmatchedIndex[unmatchedId] ?: return null
+        val item = unmatched.parsedMediaItem ?: MediaItem(
+            id = "tg_${unmatched.channelId}_${unmatched.messageId}",
+            channelId = unmatched.channelId,
+            messageId = unmatched.messageId,
+            title = unmatched.fileName,
+            type = "movie",
+            sizeBytes = unmatched.sizeBytes,
+            mimeType = unmatched.mimeType,
+            fileName = unmatched.fileName
+        )
+
+        mediaIndex[item.id] = item
+        saveMediaIndex()
+
+        unmatchedIndex.remove(unmatchedId)
+        saveUnmatchedIndex()
+
+        channels[item.channelId]?.let { ch ->
+            channels[item.channelId] = ch.copy(videoCount = mediaIndex.values.count { it.channelId == item.channelId })
+            saveChannels()
+        }
+
+        return item
     }
 
     // --- Library & Stream Operations ---
@@ -660,7 +813,34 @@ class TelegramClientManager(private val context: Context) {
         enriched
     }
 
-    suspend fun syncChannel(channelId: Long, limit: Int = 150): Result<Int> = withContext(Dispatchers.IO) {
+    fun stopChannelScan(channelId: Long) {
+        activeScanJobs[channelId]?.cancel()
+        activeScanJobs.remove(channelId)
+        val currentProgress = _scanProgress.value[channelId]
+        if (currentProgress != null) {
+            _scanProgress.value = _scanProgress.value + (channelId to currentProgress.copy(isScanning = false, statusMessage = "Scan stopped"))
+        }
+    }
+
+    private fun formatBytes(bytes: Long): String {
+        if (bytes <= 0) return "0 MB"
+        val gb = bytes.toDouble() / (1024 * 1024 * 1024)
+        return if (gb >= 1.0) {
+            String.format("%.2f GB", gb)
+        } else {
+            val mb = bytes.toDouble() / (1024 * 1024)
+            String.format("%.1f MB", mb)
+        }
+    }
+
+    suspend fun syncChannel(channelId: Long, limit: Int = 150): Result<Int> {
+        return scanChannelLive(channelId)
+    }
+
+    suspend fun scanChannelLive(
+        channelId: Long,
+        onProgress: (ScanProgressState) -> Unit = {}
+    ): Result<Int> = withContext(Dispatchers.IO) {
         try {
             val apiId = getApiId()
             val apiHash = getApiHash()
@@ -674,74 +854,357 @@ class TelegramClientManager(private val context: Context) {
 
             val ch = channels[channelId]
             val isAnime = ch?.isAnime ?: false
+            val tmdbKey = prefs.getString("tmdb_api_key", "") ?: ""
+            val tvdbKey = prefs.getString("tvdb_api_key", "") ?: ""
 
-            val jsonRes = bridge.callAttr("sync_channel_media", apiId, apiHash, sessionStr, channelId, limit, isAnime).toString()
-            val obj = JSONObject(jsonRes)
-            if (obj.optString("status") == "success") {
-                val mediaArray = obj.getJSONArray("media")
-                var added = 0
-                for (i in 0 until mediaArray.length()) {
-                    val mObj = mediaArray.getJSONObject(i)
-                    val partsList = mutableListOf<com.tgserver.streamer.data.model.SplitPart>()
-                    if (mObj.has("parts")) {
-                        val pArr = mObj.getJSONArray("parts")
-                        for (j in 0 until pArr.length()) {
-                            val p = pArr.getJSONObject(j)
-                            partsList.add(
-                                com.tgserver.streamer.data.model.SplitPart(
-                                    messageId = p.getInt("messageId"),
-                                    partNumber = p.getInt("partNumber"),
-                                    sizeBytes = p.getLong("sizeBytes"),
-                                    cumStart = p.getLong("cumStart")
+            var offsetId = 0
+            var totalMessagesScanned = 0
+            var newItemsAdded = 0
+            var totalBytesScanned = 0L
+            var batchNumber = 0
+            val batchSize = 100
+            val splitGroupsMap = mutableMapOf<String, MutableList<SplitPart>>()
+
+            // Initialize existing split parts from mediaIndex if already present
+            mediaIndex.values.filter { it.channelId == channelId && it.isSplit }.forEach { item ->
+                splitGroupsMap[item.fileName] = item.parts.toMutableList()
+            }
+
+            val initialProgress = ScanProgressState(
+                channelId = channelId,
+                channelTitle = ch?.title ?: "Channel",
+                scannedMessages = 0,
+                indexedMedia = mediaIndex.values.count { it.channelId == channelId },
+                totalBytes = totalBytesScanned,
+                currentBatch = 0,
+                isScanning = true,
+                statusMessage = "Starting scan..."
+            )
+            _scanProgress.value = _scanProgress.value + (channelId to initialProgress)
+            onProgress(initialProgress)
+
+            while (kotlin.coroutines.coroutineContext.isActive) {
+                batchNumber++
+
+                val progressReport = ScanProgressState(
+                    channelId = channelId,
+                    channelTitle = ch?.title ?: "Channel",
+                    scannedMessages = totalMessagesScanned,
+                    indexedMedia = mediaIndex.values.count { it.channelId == channelId },
+                    totalBytes = totalBytesScanned,
+                    currentBatch = batchNumber,
+                    isScanning = true,
+                    statusMessage = "Scanning batch #$batchNumber (offset message $offsetId)..."
+                )
+                _scanProgress.value = _scanProgress.value + (channelId to progressReport)
+                onProgress(progressReport)
+
+                val jsonRes = try {
+                    bridge.callAttr(
+                        "scan_channel_batch",
+                        apiId,
+                        apiHash,
+                        sessionStr,
+                        channelId,
+                        offsetId,
+                        batchSize,
+                        isAnime
+                    )?.toString() ?: "{}"
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error in scan_channel_batch: ${e.message}", e)
+                    break
+                }
+
+                val obj = JSONObject(jsonRes)
+                val status = obj.optString("status")
+
+                if (status == "flood_wait") {
+                    val waitSec = obj.optInt("wait_seconds", 30)
+                    Log.w(TAG, "Telegram FloodWait for $waitSec seconds on channel $channelId")
+                    val cooldownProgress = ScanProgressState(
+                        channelId = channelId,
+                        channelTitle = ch?.title ?: "Channel",
+                        scannedMessages = totalMessagesScanned,
+                        indexedMedia = mediaIndex.values.count { it.channelId == channelId },
+                        totalBytes = totalBytesScanned,
+                        currentBatch = batchNumber,
+                        isScanning = true,
+                        isCooldown = true,
+                        cooldownSeconds = waitSec,
+                        statusMessage = "Telegram rate limit: waiting $waitSec seconds..."
+                    )
+                    _scanProgress.value = _scanProgress.value + (channelId to cooldownProgress)
+                    onProgress(cooldownProgress)
+                    delay((waitSec + 1) * 1000L)
+                    continue
+                }
+
+                if (status != "success") {
+                    val err = obj.optString("error", "Failed to fetch batch")
+                    Log.e(TAG, "Batch scan failed: $err")
+                    break
+                }
+
+                val lastMsgId = obj.optInt("last_msg_id", 0)
+                val messagesScanned = obj.optInt("messages_scanned", 0)
+                val hasMore = obj.optBoolean("has_more", false)
+                totalMessagesScanned += messagesScanned
+
+                // 1. Process regular media items in this batch
+                val itemsArr = obj.optJSONArray("items")
+                if (itemsArr != null) {
+                    for (i in 0 until itemsArr.length()) {
+                        val mObj = itemsArr.getJSONObject(i)
+                        val item = MediaItem(
+                            id = mObj.getString("id"),
+                            channelId = mObj.getLong("channelId"),
+                            messageId = mObj.getInt("messageId"),
+                            title = mObj.getString("title"),
+                            type = mObj.getString("type"),
+                            year = if (mObj.isNull("year")) null else mObj.getString("year"),
+                            season = if (mObj.isNull("season")) null else mObj.getInt("season"),
+                            episode = if (mObj.isNull("episode")) null else mObj.getInt("episode"),
+                            quality = mObj.getString("quality"),
+                            qualityBadge = mObj.optString("qualityBadge", mObj.getString("quality")),
+                            sizeBytes = mObj.getLong("sizeBytes"),
+                            durationSeconds = mObj.optInt("durationSeconds", 0),
+                            mimeType = mObj.optString("mimeType", "video/mp4"),
+                            fileName = mObj.getString("fileName"),
+                            isSplit = false,
+                            parts = emptyList()
+                        )
+
+                        // Enrich metadata
+                        metadataEnricher.enrich(
+                            item = item,
+                            isAnimeChannel = isAnime,
+                            tmdbKey = tmdbKey,
+                            tvdbKey = tvdbKey
+                        )
+
+                        val isMatched = !item.posterUrl.isNullOrBlank() ||
+                                !item.imdbId.isNullOrBlank() ||
+                                item.tmdbId != null ||
+                                item.kitsuId != null
+
+                        if (isMatched) {
+                            mediaIndex[item.id] = item
+                            unmatchedIndex.remove("unmatched_${item.channelId}_${item.messageId}")
+                            newItemsAdded++
+                            totalBytesScanned += item.sizeBytes
+                        } else {
+                            // Unmatched media item
+                            val rawFn = mObj.optString("rawFileName", item.fileName)
+                            val un = UnmatchedItem(
+                                id = "unmatched_${item.channelId}_${item.messageId}",
+                                channelId = item.channelId,
+                                channelTitle = ch?.title ?: "",
+                                messageId = item.messageId,
+                                fileName = if (item.fileName.isNotBlank()) item.fileName else item.title,
+                                rawFileName = rawFn,
+                                sizeBytes = item.sizeBytes,
+                                scannedAt = System.currentTimeMillis(),
+                                reason = "No match found on TMDB / TVDB / Kitsu",
+                                mimeType = item.mimeType,
+                                isVideo = true,
+                                parsedMediaItem = item
+                            )
+                            unmatchedIndex[un.id] = un
+                        }
+                    }
+                }
+
+                // 2. Process split parts in this batch
+                val splitPartsArr = obj.optJSONArray("split_parts")
+                if (splitPartsArr != null && splitPartsArr.length() > 0) {
+                    for (i in 0 until splitPartsArr.length()) {
+                        val spObj = splitPartsArr.getJSONObject(i)
+                        val cleanBase = spObj.getString("cleanBase")
+                        val pNum = spObj.getInt("partNumber")
+                        val pSize = spObj.getLong("sizeBytes")
+                        val pMsgId = spObj.getInt("messageId")
+
+                        val list = splitGroupsMap.getOrPut(cleanBase) { mutableListOf() }
+                        if (list.none { it.partNumber == pNum && it.messageId == pMsgId }) {
+                            list.add(
+                                SplitPart(
+                                    messageId = pMsgId,
+                                    partNumber = pNum,
+                                    sizeBytes = pSize,
+                                    cumStart = 0L
                                 )
                             )
                         }
+
+                        // Recompute cumulative starts and total size
+                        list.sortBy { it.partNumber }
+                        var runningStart = 0L
+                        val computedParts = list.map { p ->
+                            val updated = p.copy(cumStart = runningStart)
+                            runningStart += p.sizeBytes
+                            updated
+                        }
+                        splitGroupsMap[cleanBase] = computedParts.toMutableList()
+
+                        val firstMsgId = computedParts.first().messageId
+                        val splitItemId = "tg_${channelId}_${firstMsgId}_split"
+
+                        val splitItem = mediaIndex[splitItemId] ?: MediaItem(
+                            id = splitItemId,
+                            channelId = channelId,
+                            messageId = firstMsgId,
+                            title = spObj.getString("title"),
+                            type = spObj.getString("type"),
+                            year = if (spObj.isNull("year")) null else spObj.getString("year"),
+                            season = if (spObj.isNull("season")) null else spObj.getInt("season"),
+                            episode = if (spObj.isNull("episode")) null else spObj.getInt("episode"),
+                            quality = spObj.getString("quality"),
+                            qualityBadge = spObj.optString("qualityBadge", spObj.getString("quality")),
+                            sizeBytes = runningStart,
+                            durationSeconds = spObj.optInt("duration", 0),
+                            mimeType = spObj.optString("mimeType", "video/mp4"),
+                            fileName = cleanBase,
+                            isSplit = true,
+                            parts = computedParts
+                        ).copy(
+                            sizeBytes = runningStart,
+                            parts = computedParts
+                        )
+
+                        // Enrich metadata
+                        metadataEnricher.enrich(
+                            item = splitItem,
+                            isAnimeChannel = isAnime,
+                            tmdbKey = tmdbKey,
+                            tvdbKey = tvdbKey
+                        )
+
+                        val isMatched = !splitItem.posterUrl.isNullOrBlank() ||
+                                !splitItem.imdbId.isNullOrBlank() ||
+                                splitItem.tmdbId != null ||
+                                splitItem.kitsuId != null
+
+                        if (isMatched) {
+                            mediaIndex[splitItem.id] = splitItem
+                            unmatchedIndex.remove("unmatched_${channelId}_${firstMsgId}")
+                            totalBytesScanned += pSize
+                        } else {
+                            val rawFn = spObj.optString("rawFileName", cleanBase)
+                            val un = UnmatchedItem(
+                                id = "unmatched_${channelId}_${firstMsgId}",
+                                channelId = channelId,
+                                channelTitle = ch?.title ?: "",
+                                messageId = firstMsgId,
+                                fileName = cleanBase,
+                                rawFileName = rawFn,
+                                sizeBytes = runningStart,
+                                scannedAt = System.currentTimeMillis(),
+                                reason = "No match found on TMDB / TVDB / Kitsu",
+                                mimeType = splitItem.mimeType,
+                                isVideo = true,
+                                parsedMediaItem = splitItem
+                            )
+                            unmatchedIndex[un.id] = un
+                        }
                     }
-
-                    val item = MediaItem(
-                        id = mObj.getString("id"),
-                        channelId = mObj.getLong("channelId"),
-                        messageId = mObj.getInt("messageId"),
-                        title = mObj.getString("title"),
-                        type = mObj.getString("type"),
-                        year = if (mObj.isNull("year")) null else mObj.getString("year"),
-                        season = if (mObj.isNull("season")) null else mObj.getInt("season"),
-                        episode = if (mObj.isNull("episode")) null else mObj.getInt("episode"),
-                        quality = mObj.getString("quality"),
-                        qualityBadge = mObj.optString("qualityBadge", mObj.getString("quality")),
-                        sizeBytes = mObj.getLong("sizeBytes"),
-                        durationSeconds = mObj.optInt("durationSeconds", 0),
-                        mimeType = mObj.optString("mimeType", "video/mp4"),
-                        fileName = mObj.getString("fileName"),
-                        isSplit = mObj.optBoolean("isSplit", false),
-                        parts = partsList
-                    )
-
-                    // Enrich metadata with Kitsu / TMDB / Cinemeta
-                    val tmdbKey = prefs.getString("tmdb_api_key", "") ?: ""
-                    val tvdbKey = prefs.getString("tvdb_api_key", "") ?: ""
-                    metadataEnricher.enrich(
-                        item = item,
-                        isAnimeChannel = isAnime,
-                        tmdbKey = tmdbKey,
-                        tvdbKey = tvdbKey
-                    )
-
-                    mediaIndex[item.id] = item
-                    added++
                 }
+
+                // 3. Process skipped / non-video files
+                val skippedArr = obj.optJSONArray("skipped")
+                if (skippedArr != null) {
+                    for (i in 0 until skippedArr.length()) {
+                        val sk = skippedArr.getJSONObject(i)
+                        val skMsgId = sk.getInt("messageId")
+                        val unId = "skipped_${channelId}_$skMsgId"
+                        val un = UnmatchedItem(
+                            id = unId,
+                            channelId = channelId,
+                            channelTitle = ch?.title ?: "",
+                            messageId = skMsgId,
+                            fileName = sk.optString("fileName", "Document #$skMsgId"),
+                            rawFileName = sk.optString("rawFileName", ""),
+                            sizeBytes = sk.optLong("sizeBytes", 0L),
+                            scannedAt = System.currentTimeMillis(),
+                            reason = sk.optString("reason", "Skipped: non-video document"),
+                            mimeType = sk.optString("mimeType", ""),
+                            isVideo = false
+                        )
+                        unmatchedIndex[un.id] = un
+                    }
+                }
+
+                // Live persist to disk and notify StateFlow
                 saveMediaIndex()
-                channels[channelId]?.let { ch ->
-                    channels[channelId] = ch.copy(videoCount = added, lastSyncTime = System.currentTimeMillis())
+                saveUnmatchedIndex()
+                channels[channelId]?.let { chInfo ->
+                    channels[channelId] = chInfo.copy(
+                        videoCount = mediaIndex.values.count { it.channelId == channelId },
+                        lastSyncTime = System.currentTimeMillis()
+                    )
                     saveChannels()
                 }
-                Result.success(added)
-            } else {
-                val err = obj.optString("error", "Failed to sync channel")
-                Result.failure(Exception(err))
+
+                // Progress notification
+                val batchDoneProgress = ScanProgressState(
+                    channelId = channelId,
+                    channelTitle = ch?.title ?: "Channel",
+                    scannedMessages = totalMessagesScanned,
+                    indexedMedia = mediaIndex.values.count { it.channelId == channelId },
+                    totalBytes = totalBytesScanned,
+                    currentBatch = batchNumber,
+                    isScanning = true,
+                    statusMessage = "Indexed ${mediaIndex.values.count { it.channelId == channelId }} videos (${formatBytes(totalBytesScanned)})"
+                )
+                _scanProgress.value = _scanProgress.value + (channelId to batchDoneProgress)
+                onProgress(batchDoneProgress)
+
+                // Check termination conditions
+                if (!hasMore || lastMsgId <= 0 || messagesScanned == 0) {
+                    Log.i(TAG, "Completed scan of channel $channelId. Total scanned: $totalMessagesScanned messages")
+                    break
+                }
+
+                offsetId = lastMsgId
+
+                // Polite cooperative delay between batches to avoid Telegram FloodWait
+                delay(250L)
             }
+
+            // Finished scanning
+            val finalCount = mediaIndex.values.count { it.channelId == channelId }
+            channels[channelId]?.let { chInfo ->
+                channels[channelId] = chInfo.copy(
+                    videoCount = finalCount,
+                    lastSyncTime = System.currentTimeMillis()
+                )
+                saveChannels()
+            }
+
+            val finalProgress = ScanProgressState(
+                channelId = channelId,
+                channelTitle = ch?.title ?: "Channel",
+                scannedMessages = totalMessagesScanned,
+                indexedMedia = finalCount,
+                totalBytes = totalBytesScanned,
+                currentBatch = batchNumber,
+                isScanning = false,
+                statusMessage = "Scan complete: $finalCount videos indexed"
+            )
+            _scanProgress.value = _scanProgress.value + (channelId to finalProgress)
+            onProgress(finalProgress)
+
+            Result.success(finalCount)
         } catch (e: Exception) {
-            Log.e(TAG, "Error syncing channel $channelId: ${e.message}", e)
+            Log.e(TAG, "Exception during live scan of channel $channelId: ${e.message}", e)
+            val errProgress = ScanProgressState(
+                channelId = channelId,
+                channelTitle = channels[channelId]?.title ?: "Channel",
+                scannedMessages = 0,
+                indexedMedia = mediaIndex.values.count { it.channelId == channelId },
+                isScanning = false,
+                statusMessage = "Scan stopped: ${e.message}"
+            )
+            _scanProgress.value = _scanProgress.value + (channelId to errProgress)
             Result.failure(e)
         }
     }
@@ -756,6 +1219,7 @@ class TelegramClientManager(private val context: Context) {
             (it.channelId == channelId && it.messageId == messageId) ||
             (it.channelId == channelId && it.isSplit && it.parts.any { p -> p.messageId == messageId })
         } ?: mediaIndex.values.find { it.messageId == messageId }
+          ?: unmatchedIndex.values.find { it.channelId == channelId && it.messageId == messageId }?.parsedMediaItem
 
         val effectiveChannelId = media?.channelId ?: channelId
         val totalSize = media?.sizeBytes ?: 50_000_000L

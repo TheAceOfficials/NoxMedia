@@ -81,6 +81,72 @@ data class MediaItem(
         }
 }
 
+data class UnmatchedItem(
+    val id: String, // e.g. "unmatched_${channelId}_${messageId}"
+    val channelId: Long,
+    val channelTitle: String = "",
+    val messageId: Int,
+    val fileName: String,
+    val rawFileName: String = fileName,
+    val sizeBytes: Long = 0L,
+    val scannedAt: Long = System.currentTimeMillis(),
+    val reason: String = "No match found on TMDB / TVDB / Kitsu",
+    val mimeType: String = "video/mp4",
+    val isVideo: Boolean = true,
+    val parsedMediaItem: MediaItem? = null
+) {
+    val formattedSize: String
+        get() {
+            if (sizeBytes <= 0) return "0 MB"
+            val gb = sizeBytes.toDouble() / (1024 * 1024 * 1024)
+            return if (gb >= 1.0) {
+                String.format("%.2f GB", gb)
+            } else {
+                val mb = sizeBytes.toDouble() / (1024 * 1024)
+                String.format("%.1f MB", mb)
+            }
+        }
+
+    val formattedDate: String
+        get() {
+            val elapsedSec = (System.currentTimeMillis() - scannedAt) / 1000
+            return when {
+                elapsedSec < 60 -> "just now"
+                elapsedSec < 3600 -> "${elapsedSec / 60}m ago"
+                elapsedSec < 86400 -> "${elapsedSec / 3600}h ago"
+                else -> {
+                    val sdf = java.text.SimpleDateFormat("dd MMM yyyy, HH:mm", java.util.Locale.getDefault())
+                    sdf.format(java.util.Date(scannedAt))
+                }
+            }
+        }
+}
+
+data class ScanProgressState(
+    val channelId: Long,
+    val channelTitle: String = "",
+    val scannedMessages: Int = 0,
+    val indexedMedia: Int = 0,
+    val totalBytes: Long = 0L,
+    val currentBatch: Int = 0,
+    val isScanning: Boolean = false,
+    val statusMessage: String = "",
+    val isCooldown: Boolean = false,
+    val cooldownSeconds: Int = 0
+) {
+    val formattedSize: String
+        get() {
+            if (totalBytes <= 0) return "0 MB"
+            val gb = totalBytes.toDouble() / (1024 * 1024 * 1024)
+            return if (gb >= 1.0) {
+                String.format("%.2f GB", gb)
+            } else {
+                val mb = totalBytes.toDouble() / (1024 * 1024)
+                String.format("%.1f MB", mb)
+            }
+        }
+}
+
 data class ServerConfig(
     var port: Int = 7788,
     var isRunning: Boolean = true,

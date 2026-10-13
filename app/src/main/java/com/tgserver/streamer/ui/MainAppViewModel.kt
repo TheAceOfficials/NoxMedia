@@ -55,6 +55,8 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     val session: StateFlow<AuthSession> = tgClient.sessionState
     val channels: StateFlow<List<ChannelInfo>> = tgClient.channelsState
     val media: StateFlow<List<MediaItem>> = tgClient.mediaState
+    val unmatchedMedia: StateFlow<List<com.tgserver.streamer.data.model.UnmatchedItem>> = tgClient.unmatchedState
+    val scanProgress: StateFlow<Map<Long, com.tgserver.streamer.data.model.ScanProgressState>> = tgClient.scanProgress
     val apiCredentials: StateFlow<Pair<Int, String>> = tgClient.apiCredentials
 
     private val _selectedTab = MutableStateFlow(AppTab.HOME)
@@ -252,16 +254,22 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             _scanningChannelIds.value = _scanningChannelIds.value + channelId
             val ch = channels.value.find { it.id == channelId }
-            val res = tgClient.syncChannel(channelId)
+            val res = tgClient.scanChannelLive(channelId)
             _scanningChannelIds.value = _scanningChannelIds.value - channelId
             if (res.isSuccess) {
                 val count = res.getOrDefault(0)
-                Toast.makeText(getApplication(), "✓ Scanned $count videos from ${ch?.title ?: "channel"}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(getApplication(), "✓ Scan complete: $count videos indexed from ${ch?.title ?: "channel"}", Toast.LENGTH_SHORT).show()
             } else {
                 val err = res.exceptionOrNull()?.message ?: "Scan failed"
                 Toast.makeText(getApplication(), "Error: $err", Toast.LENGTH_LONG).show()
             }
         }
+    }
+
+    fun stopScan(channelId: Long) {
+        tgClient.stopChannelScan(channelId)
+        _scanningChannelIds.value = _scanningChannelIds.value - channelId
+        Toast.makeText(getApplication(), "Scan stopped", Toast.LENGTH_SHORT).show()
     }
 
     fun syncAllChannels() {
@@ -275,7 +283,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             var total = 0
             for (ch in activeChannels) {
                 _scanningChannelIds.value = _scanningChannelIds.value + ch.id
-                val res = tgClient.syncChannel(ch.id)
+                val res = tgClient.scanChannelLive(ch.id)
                 _scanningChannelIds.value = _scanningChannelIds.value - ch.id
                 if (res.isSuccess) {
                     total += res.getOrDefault(0)
@@ -298,6 +306,37 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             } else {
                 Toast.makeText(getApplication(), "Rescan failed: ${res.exceptionOrNull()?.message}", Toast.LENGTH_SHORT).show()
             }
+        }
+    }
+
+    // --- Unmatched Content Actions ---
+
+    fun removeUnmatched(unmatchedId: String) {
+        tgClient.removeUnmatchedItem(unmatchedId)
+    }
+
+    fun clearAllUnmatched(channelId: Long? = null) {
+        tgClient.clearUnmatched(channelId)
+        Toast.makeText(getApplication(), "Cleared unmatched items", Toast.LENGTH_SHORT).show()
+    }
+
+    fun matchUnmatchedItem(unmatchedId: String, matchedMeta: EnrichedMetadata, onDone: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            val item = tgClient.matchUnmatchedItem(unmatchedId, matchedMeta)
+            if (item != null) {
+                Toast.makeText(getApplication(), "✓ Matched: ${item.title}", Toast.LENGTH_SHORT).show()
+                onDone(true)
+            } else {
+                Toast.makeText(getApplication(), "Could not match item", Toast.LENGTH_SHORT).show()
+                onDone(false)
+            }
+        }
+    }
+
+    fun addUnmatchedToLibraryAnyway(unmatchedId: String) {
+        val item = tgClient.addUnmatchedToLibraryAnyway(unmatchedId)
+        if (item != null) {
+            Toast.makeText(getApplication(), "✓ Added to library: ${item.title}", Toast.LENGTH_SHORT).show()
         }
     }
 

@@ -503,7 +503,9 @@ class LocalHttpServer(
             (it.channelId == channelId && it.messageId == messageId) ||
             (it.channelId == channelId && it.isSplit && it.parts.any { p -> p.messageId == messageId }) ||
             (it.messageId == messageId)
-        }
+        } ?: tgClient.getUnmatchedMedia().find {
+            it.channelId == channelId && it.messageId == messageId
+        }?.parsedMediaItem
 
         val totalSize = media?.sizeBytes ?: 50_000_000L
         val mime = if (fileName.contains(".mkv", ignoreCase = true) || uri.contains(".mkv", ignoreCase = true)) {
