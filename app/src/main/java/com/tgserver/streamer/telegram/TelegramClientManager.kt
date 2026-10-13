@@ -1235,16 +1235,20 @@ class TelegramClientManager(private val context: Context) {
         endByte: Long,
         mediaId: String? = null
     ): StreamChunkResult {
+        // Skip messageId-based lookups when messageId=0 (caller resolves via item.id not numeric id)
         val media = (if (!mediaId.isNullOrBlank()) mediaIndex[mediaId] else null)
             ?: (if (!mediaId.isNullOrBlank()) mediaIndex.values.find { it.id == mediaId } else null)
-            ?: mediaIndex.values.find {
+            ?: if (messageId > 0) mediaIndex.values.find {
                 it.channelId == channelId && it.isSplit && (it.messageId == messageId || it.parts.any { p -> p.messageId == messageId })
-            }
-            ?: mediaIndex.values.find {
+            } else null
+            ?: if (messageId > 0) mediaIndex.values.find {
                 (it.channelId == channelId && it.messageId == messageId) ||
                 (it.channelId == channelId && it.isSplit && it.parts.any { p -> p.messageId == messageId })
-            } ?: mediaIndex.values.find { it.messageId == messageId }
-              ?: unmatchedIndex.values.find { (!mediaId.isNullOrBlank() && it.id == mediaId) || (it.channelId == channelId && it.messageId == messageId) }?.parsedMediaItem
+            } else null
+            ?: if (messageId > 0) mediaIndex.values.find { it.messageId == messageId } else null
+            ?: unmatchedIndex.values.find {
+                (!mediaId.isNullOrBlank() && it.id == mediaId) || (messageId > 0 && it.channelId == channelId && it.messageId == messageId)
+            }?.parsedMediaItem
 
         val effectiveChannelId = media?.channelId ?: channelId
         val totalSize = media?.sizeBytes ?: 50_000_000L
@@ -1268,9 +1272,11 @@ class TelegramClientManager(private val context: Context) {
                         )
                     }
                 } else {
+                    // Use media.messageId (correct resolved ID), NOT the `messageId` param which may be 0
+                    val effectiveMsgId = media?.messageId ?: messageId
                     listOf(
                         mapOf(
-                            "messageId" to messageId,
+                            "messageId" to effectiveMsgId,
                             "partNumber" to 1,
                             "sizeBytes" to totalSize,
                             "cumStart" to 0L

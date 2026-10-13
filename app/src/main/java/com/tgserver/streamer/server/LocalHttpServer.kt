@@ -527,24 +527,32 @@ class LocalHttpServer(
 
         val channelId = parts[3].toLongOrNull() ?: 0L
         val targetParam = parts[4]
-        val messageId = targetParam.toIntOrNull() ?: 0
+        // targetParam is now an item.id (e.g. "tg_-1004424883082_2") NOT a raw integer.
+        // Only use toIntOrNull as legacy fallback for old-style numeric URLs.
+        val targetParamAsInt = targetParam.toIntOrNull() ?: 0
         val fileName = if (parts.size >= 6) {
             try { java.net.URLDecoder.decode(parts[5], "UTF-8") } catch (_: Exception) { parts[5] }
         } else "video.mp4"
 
         val allMedia = tgClient.getAllMedia()
+        // Priority: match by item.id first (new URL format), then fall back to messageId (legacy)
         val media = allMedia.find { it.id == targetParam }
             ?: allMedia.find { it.channelId == channelId && it.id == targetParam }
             // Prefer split items over standalone parts if multiple exist
-            ?: allMedia.find {
-                it.channelId == channelId && it.isSplit && (it.messageId == messageId || it.parts.any { p -> p.messageId == messageId })
-            }
-            ?: allMedia.find {
-                (it.channelId == channelId && it.messageId == messageId) || (it.messageId == messageId)
-            }
+            ?: if (targetParamAsInt > 0) allMedia.find {
+                it.channelId == channelId && it.isSplit &&
+                (it.messageId == targetParamAsInt || it.parts.any { p -> p.messageId == targetParamAsInt })
+            } else null
+            ?: if (targetParamAsInt > 0) allMedia.find {
+                (it.channelId == channelId && it.messageId == targetParamAsInt) || (it.messageId == targetParamAsInt)
+            } else null
             ?: tgClient.getUnmatchedMedia().find {
-                it.id == targetParam || (it.channelId == channelId && it.messageId == messageId)
+                it.id == targetParam || (it.channelId == channelId && it.messageId == targetParamAsInt)
             }?.parsedMediaItem
+
+        // Use the real messageId from the resolved media item, NOT from URL parsing
+        val resolvedMessageId = media?.messageId ?: targetParamAsInt
+        val effectiveChannelId = media?.channelId ?: channelId
 
         val totalSize = media?.sizeBytes ?: 50_000_000L
         val mime = if (fileName.contains(".mkv", ignoreCase = true) || uri.contains(".mkv", ignoreCase = true)) {
@@ -577,7 +585,8 @@ class LocalHttpServer(
             }
         }
 
-        val chunk = tgClient.getStreamSource(channelId, messageId, startByte, endByte, mediaId = targetParam)
+        // Pass resolvedMessageId (from actual media item) and targetParam (item.id) for lookup
+        val chunk = tgClient.getStreamSource(effectiveChannelId, resolvedMessageId, startByte, endByte, mediaId = targetParam)
 
         val response = if (rangeHeader != null) {
             newFixedLengthResponse(
