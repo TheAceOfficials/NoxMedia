@@ -151,21 +151,21 @@ class LocalHttpServer(
                 mapOf(
                     "type" to "movie",
                     "id" to "tg_movies",
-                    "name" to "Telegram Movies",
+                    "name" to "NoxMedia",
                     "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
                     "extraSupported" to listOf("search", "skip")
                 ),
                 mapOf(
                     "type" to "series",
                     "id" to "tg_series",
-                    "name" to "Telegram Series",
+                    "name" to "NoxMedia",
                     "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
                     "extraSupported" to listOf("search", "skip")
                 ),
                 mapOf(
                     "type" to "series",
                     "id" to "tg_anime",
-                    "name" to "Telegram Anime",
+                    "name" to "NoxMedia Anime",
                     "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
                     "extraSupported" to listOf("search", "skip")
                 )
@@ -534,18 +534,137 @@ class LocalHttpServer(
                 "video.mkv"
             }
             val streamUrl = "http://$localIp:${config.port}/stream/video/${item.channelId}/${item.id}/$safeFileName"
-            val epInfo = if (item.season != null && item.episode != null) "S%02dE%02d • ".format(item.season, item.episode) else ""
-            val epTitle = if (!item.episodeTitle.isNullOrBlank()) "${item.episodeTitle}\n" else ""
+            val (streamName, streamTitle) = formatStreamItem(item, rawFileName)
 
             mapOf(
-                "name" to "NoxMedia [${item.quality}]",
-                "title" to "📁 $rawFileName\n$epTitle$epInfo💾 ${item.formattedSize}",
+                "name" to streamName,
+                "title" to streamTitle,
                 "url" to streamUrl
             )
         }
 
         val res = mapOf("streams" to streams)
         return newFixedLengthResponse(Response.Status.OK, "application/json", gson.toJson(res))
+    }
+
+    private fun formatStreamItem(item: MediaItem, rawFileName: String): Pair<String, String> {
+        val fn = rawFileName
+        val fnLower = fn.lowercase()
+        val qLower = item.quality.lowercase()
+
+        // 1. Resolution & Badge
+        val (normRes, badge) = when {
+            fnLower.contains("2160p") || fnLower.contains("4k") || fnLower.contains("uhd") || qLower.contains("4k") || qLower.contains("2160p") -> 
+                "2160p" to "4K UltraHD"
+            fnLower.contains("1440p") || fnLower.contains("2k") || qLower.contains("1440p") || qLower.contains("2k") -> 
+                "1440p" to "2K"
+            fnLower.contains("1080p") || fnLower.contains("fhd") || qLower.contains("1080p") || qLower.contains("fhd") -> 
+                "1080p" to "FHD"
+            fnLower.contains("720p") || fnLower.contains("hd") || qLower.contains("720p") || qLower.contains("hd") -> 
+                "720p" to "HD+"
+            fnLower.contains("480p") || fnLower.contains("sd") || qLower.contains("480p") || qLower.contains("sd") -> 
+                "480p" to "SD"
+            else -> 
+                "N/A" to "N/A"
+        }
+        val streamName = "⌁ NoxMedia ・ $badge"
+
+        // 2. Line 1: Title, Year, Season/Episode, Duration
+        val yearStr = if (!item.year.isNullOrBlank()) " (${item.year})" else {
+            val yMatch = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(fn)
+            if (yMatch != null) " (${yMatch.groupValues[1]})" else ""
+        }
+        val epStr = if (item.season != null && item.episode != null) {
+            val baseEp = "・S%02dE%02d".format(item.season, item.episode)
+            if (!item.episodeTitle.isNullOrBlank()) "$baseEp - ${item.episodeTitle}" else baseEp
+        } else ""
+        val durStr = if (item.durationSeconds > 0) " ⌚️ ${item.formattedDuration}" else ""
+        val titleDisplay = if (item.title.isNotBlank()) item.title else rawFileName.substringBeforeLast(".")
+        val line1 = "Ϟ $titleDisplay$yearStr$epStr$durStr"
+
+        // 3. Line 2: Languages
+        val langMap = listOf(
+            "HIN" to Regex("(?i)(?:^|[^a-zA-Z])(hin|hindi)(?:[^a-zA-Z]|$)"),
+            "TAM" to Regex("(?i)(?:^|[^a-zA-Z])(tam|tamil)(?:[^a-zA-Z]|$)"),
+            "TEL" to Regex("(?i)(?:^|[^a-zA-Z])(tel|telugu)(?:[^a-zA-Z]|$)"),
+            "KAN" to Regex("(?i)(?:^|[^a-zA-Z])(kan|kannada)(?:[^a-zA-Z]|$)"),
+            "MAL" to Regex("(?i)(?:^|[^a-zA-Z])(mal|malayalam)(?:[^a-zA-Z]|$)"),
+            "ENG" to Regex("(?i)(?:^|[^a-zA-Z])(eng|english)(?:[^a-zA-Z]|$)"),
+            "JAP" to Regex("(?i)(?:^|[^a-zA-Z])(jap|japanese|jpn)(?:[^a-zA-Z]|$)"),
+            "KOR" to Regex("(?i)(?:^|[^a-zA-Z])(kor|korean)(?:[^a-zA-Z]|$)"),
+            "SPA" to Regex("(?i)(?:^|[^a-zA-Z])(spa|spanish)(?:[^a-zA-Z]|$)"),
+            "FRE" to Regex("(?i)(?:^|[^a-zA-Z])(fre|french)(?:[^a-zA-Z]|$)"),
+            "GER" to Regex("(?i)(?:^|[^a-zA-Z])(ger|german)(?:[^a-zA-Z]|$)"),
+            "ITA" to Regex("(?i)(?:^|[^a-zA-Z])(ita|italian)(?:[^a-zA-Z]|$)"),
+            "RUS" to Regex("(?i)(?:^|[^a-zA-Z])(rus|russian)(?:[^a-zA-Z]|$)"),
+            "CHI" to Regex("(?i)(?:^|[^a-zA-Z])(chi|chinese)(?:[^a-zA-Z]|$)"),
+            "MULTI" to Regex("(?i)(?:^|[^a-zA-Z])(multi|dual)(?:[^a-zA-Z]|$)")
+        )
+        val detectedLangs = langMap.filter { it.second.containsMatchIn(fn) }.map { it.first }
+        val line2 = if (detectedLangs.isNotEmpty()) "Ϟ 🎧 ${detectedLangs.joinToString(" | ")}" else null
+
+        // 4. Line 3: Audio Tags & Channels
+        val audioTags = mutableListOf<String>()
+        if (Regex("(?i)atmos").containsMatchIn(fn)) audioTags.add("Atmos")
+        if (Regex("(?i)(ddp|dd\\+|eac3)").containsMatchIn(fn)) audioTags.add("DDP")
+        else if (Regex("(?i)(ac3|\\bdd\\b)").containsMatchIn(fn)) audioTags.add("DD")
+        if (Regex("(?i)truehd").containsMatchIn(fn)) audioTags.add("TrueHD")
+        if (Regex("(?i)dts-hd").containsMatchIn(fn)) audioTags.add("DTS-HD")
+        else if (Regex("(?i)dts").containsMatchIn(fn)) audioTags.add("DTS")
+        if (Regex("(?i)\\baac\\b").containsMatchIn(fn)) audioTags.add("AAC")
+        if (Regex("(?i)\\bflac\\b").containsMatchIn(fn)) audioTags.add("FLAC")
+
+        val chMatch = Regex("(7\\.1|5\\.1|2\\.0)").find(fn)
+        val channels = chMatch?.value ?: ""
+        val line3 = if (audioTags.isNotEmpty() || channels.isNotBlank()) {
+            val atStr = audioTags.joinToString(" · ")
+            val combo = listOf(atStr, channels).filter { it.isNotBlank() }.joinToString(" ")
+            "Ϟ ◗◖ $combo"
+        } else null
+
+        // 5. Line 4: Resolution, Source/Quality, Visual Tags, Bitrate
+        val srcMatch = Regex("(?i)\\b(web-?rip|web-?dl|bluray|blu-ray|bdrip|brrip|hdtv|dvdrip|remux)\\b").find(fn)
+        val sourceQuality = srcMatch?.value?.uppercase()?.replace("-", "") ?: ""
+
+        val visualTags = mutableListOf<String>()
+        if (Regex("(?i)\\bimax\\b").containsMatchIn(fn)) visualTags.add("IMAX")
+        if (Regex("(?i)(dolby\\s*vision|\\bdv\\b)").containsMatchIn(fn)) visualTags.add("DV")
+        if (Regex("(?i)\\bhdr10\\+\\b").containsMatchIn(fn)) visualTags.add("HDR10+")
+        else if (Regex("(?i)\\bhdr10\\b").containsMatchIn(fn)) visualTags.add("HDR10")
+        else if (Regex("(?i)\\bhdr\\b").containsMatchIn(fn)) visualTags.add("HDR")
+        else if (Regex("(?i)\\bsdr\\b").containsMatchIn(fn)) visualTags.add("SDR")
+
+        if (Regex("(?i)\\b10bit\\b").containsMatchIn(fn)) visualTags.add("10bit")
+        if (Regex("(?i)(hevc|x265|h\\.?265)").containsMatchIn(fn)) visualTags.add("H.265")
+        else if (Regex("(?i)(avc|x264|h\\.?264)").containsMatchIn(fn)) visualTags.add("H.264")
+        else if (Regex("(?i)\\bav1\\b").containsMatchIn(fn)) visualTags.add("AV1")
+
+        val visPart = if (visualTags.isNotEmpty()) " 🔮 ${visualTags.joinToString(" · ")}" else ""
+        val bitratePart = if (item.durationSeconds > 60 && item.sizeBytes > 0) {
+            val mbps = (item.sizeBytes.toDouble() * 8.0) / (item.durationSeconds * 1_000_000.0)
+            if (mbps >= 0.1) " 🎡 %.1f Mbps".format(mbps) else ""
+        } else ""
+
+        val resDisplay = if (normRes != "N/A") normRes else item.quality
+        val line4 = "Ϟ 🍿 $resDisplay $sourceQuality$visPart$bitratePart".trim()
+
+        // 6. Line 5: Size
+        val line5 = "Ϟ 🗃️ ${item.formattedSize}"
+
+        // 7. Line 6: Release Group
+        val rgMatch = Regex("[\\(\\[]([A-Za-z0-9_\\-\\s]+)[\\)\\]](?:\\.[a-zA-Z0-9]+)?$").find(fn)
+        val candidateRg = rgMatch?.groupValues?.getOrNull(1)?.trim()
+        val ignoreWords = setOf("1080p", "720p", "2160p", "4k", "mkv", "mp4", "x264", "x265", "hevc")
+        val releaseGroup = if (!candidateRg.isNullOrBlank() && candidateRg.lowercase() !in ignoreWords) {
+            candidateRg
+        } else {
+            val knownGroups = listOf("MomStealer", "Anipulse", "Judas", "SubsPlease", "Erai-raws", "YTS", "PSA", "TGx", "Pahe", "GalaxyRG")
+            knownGroups.firstOrNull { Regex("(?i)\\b$it\\b").containsMatchIn(fn) }
+        }
+        val line6 = if (!releaseGroup.isNullOrBlank()) "Ϟ 🧣 $releaseGroup" else null
+
+        val fullTitle = listOfNotNull(line1, line2, line3, line4, line5, line6).joinToString("\n")
+        return Pair(streamName, fullTitle)
     }
 
     // --- Video Streaming Engine (HTTP 206 Partial Content) ---
