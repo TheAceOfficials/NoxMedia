@@ -95,11 +95,19 @@ jobs:
           path: release-apks
           merge-multiple: true
 
+      - name: Clean up old 'latest' release and tag
+        if: "!startsWith(github.ref, 'refs/tags/v')"
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'latest' }}
           name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'NoxMedia Latest APK' }}
+          target_commitish: ${{ github.sha }}
           body: |
             Direct APK downloads for NoxMedia Mobile Streamer engine:
 
