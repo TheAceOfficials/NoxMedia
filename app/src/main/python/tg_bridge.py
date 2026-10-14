@@ -10,9 +10,49 @@ import re
 from collections import OrderedDict
 from typing import List, Dict, Any, Optional, Tuple
 from pyrogram import Client, errors, raw
+import pyrogram.errors.rpc_error
 from pyrogram.file_id import FileId, FileType
 from pyrogram.session import Session, Auth
 import media_parser
+
+# Prevent Pyrogram from writing to read-only Android filesystem on unknown Telegram RPC errors
+def _safe_rpc_error_init(self, value=None, rpc_name=None, is_unknown=False, is_signed=False):
+    super(pyrogram.errors.rpc_error.RPCError, self).__init__("Telegram says: [{}{} {}] - {} {}".format(
+        "-" if is_signed else "",
+        self.CODE,
+        self.ID or self.NAME,
+        self.MESSAGE.format(value=value),
+        f'(caused by "{rpc_name}")' if rpc_name else ""
+    ))
+    try:
+        self.value = int(value)
+    except (ValueError, TypeError):
+        self.value = value
+    if is_unknown:
+        print(f"[Pyrogram RPC] Unknown Telegram error: {value} (caused by {rpc_name})", flush=True)
+
+pyrogram.errors.rpc_error.RPCError.__init__ = _safe_rpc_error_init
+
+def _format_auth_error(e: Exception) -> str:
+    msg = str(e)
+    if "SEND_CODE_UNAVAILABLE" in msg:
+        return "SMS delivery is currently not available for this session. Please check your official Telegram app."
+    if "PHONE_CODE_EXPIRED" in msg:
+        return "Verification code expired. Please request a new code."
+    if "PHONE_CODE_INVALID" in msg:
+        return "Invalid confirmation code. Please check and re-enter."
+    if "PHONE_NUMBER_APP_SIGNUP_FORBIDDEN" in msg:
+        return "Telegram requires you to register on the official Telegram app first."
+    if "AUTH_KEY_UNREGISTERED" in msg or "SESSION_REVOKED" in msg:
+        return "Session expired. Please request a new code."
+    if "FLOOD_WAIT" in msg:
+        m = re.search(r'(\d+)', msg)
+        sec = m.group(1) if m else "some"
+        return f"Too many attempts. Please wait {sec} seconds."
+    # Strip raw MTProto noise: 'Telegram says: [400 Bad Request] - [400 ...]'
+    clean = re.sub(r'Telegram says: \[\d+ [^\]]+\] - \[\d+ ([^\]]+)\]', r'\1', msg)
+    clean = re.sub(r'\(caused by "[^"]+"\)', '', clean).strip()
+    return clean if clean else msg
 
 # Global persistent client instances
 _auth_client = None
@@ -201,7 +241,7 @@ def send_code(api_id: int, api_hash: str, phone_number: str) -> str:
     except errors.PhoneNumberBanned:
         return json.dumps({"status": "error", "error": "This phone number is banned from Telegram."})
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)})
+        return json.dumps({"status": "error", "error": _format_auth_error(e)})
 
 def resend_code() -> str:
     global _auth_client, _auth_state
@@ -238,7 +278,7 @@ def resend_code() -> str:
     except errors.FloodWait as e:
         return json.dumps({"status": "error", "error": f"Please wait {e.value} seconds before requesting a new code."})
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)})
+        return json.dumps({"status": "error", "error": _format_auth_error(e)})
 
 def verify_code(code: str) -> str:
     global _auth_client, _auth_state
@@ -275,7 +315,7 @@ def verify_code(code: str) -> str:
     except errors.PhoneCodeExpired:
         return json.dumps({"status": "error", "error": "Verification code expired. Please request a new code."})
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)})
+        return json.dumps({"status": "error", "error": _format_auth_error(e)})
 
 def check_password(password: str) -> str:
     global _auth_client
@@ -302,7 +342,7 @@ def check_password(password: str) -> str:
     except errors.PasswordHashInvalid:
         return json.dumps({"status": "error", "error": "Incorrect 2FA password."})
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)})
+        return json.dumps({"status": "error", "error": _format_auth_error(e)})
 
 # --- Streaming Client & Media Session Management ---
 
