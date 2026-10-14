@@ -123,6 +123,11 @@ dependencies {
 chaquopy {
     defaultConfig {
         version = "3.11"
+        pyc {
+            src = true
+            pip = true
+            stdlib = true
+        }
         val venv311 = rootProject.file("venv311/bin/python")
         val venvPython = rootProject.file("venv/bin/python")
         if (venv311.exists()) {

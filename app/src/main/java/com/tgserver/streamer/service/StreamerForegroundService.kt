@@ -103,6 +103,7 @@ class StreamerForegroundService : Service() {
             server?.start()
             activeServer = server
             isServiceRunning = true
+            ServerQuickSettingsTileService.updateTileState(applicationContext)
 
             val ip = server?.getLocalIpAddress() ?: "127.0.0.1"
             updateNotification("Online at http://$ip:${activeConfig.port}/manifest.json")
@@ -117,6 +118,7 @@ class StreamerForegroundService : Service() {
             server = null
             activeServer = null
             isServiceRunning = false
+            ServerQuickSettingsTileService.updateTileState(applicationContext)
 
             if (wakeLock?.isHeld == true) wakeLock?.release()
             if (wifiLock?.isHeld == true) wifiLock?.release()

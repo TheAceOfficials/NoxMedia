@@ -118,7 +118,9 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         val loaded = loadStoredConfig()
         _config.value = loaded
         StreamerForegroundService.activeConfig = loaded
-        tgClient.cleanupSplitDuplicates()
+        viewModelScope.launch(Dispatchers.IO) {
+            tgClient.cleanupSplitDuplicates()
+        }
         startTelemetryLoop()
     }
 

@@ -2,7 +2,6 @@ package com.tgserver.streamer.ui
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -26,23 +25,23 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.VideoLibrary
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.tgserver.streamer.theme.*
 import com.tgserver.streamer.ui.screens.ApiCredentialsScreen
 import com.tgserver.streamer.ui.screens.ChannelsScreen
@@ -50,6 +49,8 @@ import com.tgserver.streamer.ui.screens.HomeScreen
 import com.tgserver.streamer.ui.screens.LibraryScreen
 import com.tgserver.streamer.ui.screens.SettingsScreen
 import com.tgserver.streamer.ui.screens.TelegramLoginScreen
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 private data class NavItemData(
     val tab: AppTab,
@@ -70,6 +71,7 @@ fun AppRootScreen(viewModel: MainAppViewModel) {
     val selectedTab by viewModel.selectedTab.collectAsState()
     val apiCreds by viewModel.apiCredentials.collectAsState()
     val session by viewModel.session.collectAsState()
+    val haptic = LocalHapticFeedback.current
 
     val hasCredentials = apiCreds.first > 0 && apiCreds.second.isNotBlank()
 
@@ -87,10 +89,33 @@ fun AppRootScreen(viewModel: MainAppViewModel) {
                 )
             }
         ) { innerPadding ->
+            var dragAccumulator by remember { mutableFloatStateOf(0f) }
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
+                    // Full-screen horizontal swipe switch between tabs
+                    .pointerInput(selectedTab) {
+                        detectHorizontalDragGestures(
+                            onDragStart = { dragAccumulator = 0f },
+                            onHorizontalDrag = { change, dragAmount ->
+                                change.consume()
+                                dragAccumulator += dragAmount
+                            },
+                            onDragEnd = {
+                                val currentIdx = NAV_TABS.indexOfFirst { it.tab == selectedTab }
+                                if (dragAccumulator < -90f && currentIdx < NAV_TABS.size - 1) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    viewModel.selectTab(NAV_TABS[currentIdx + 1].tab)
+                                } else if (dragAccumulator > 90f && currentIdx > 0) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    viewModel.selectTab(NAV_TABS[currentIdx - 1].tab)
+                                }
+                                dragAccumulator = 0f
+                            }
+                        )
+                    }
             ) {
                 AnimatedContent(
                     targetState = selectedTab,
@@ -98,11 +123,11 @@ fun AppRootScreen(viewModel: MainAppViewModel) {
                         val initialIdx = NAV_TABS.indexOfFirst { it.tab == initialState }
                         val targetIdx = NAV_TABS.indexOfFirst { it.tab == targetState }
                         if (targetIdx >= initialIdx) {
-                            (slideInHorizontally(tween(240)) { width -> width / 4 } + fadeIn(tween(220))) togetherWith
-                            (slideOutHorizontally(tween(180)) { width -> -width / 4 } + fadeOut(tween(180)))
+                            (slideInHorizontally(spring(dampingRatio = 0.82f, stiffness = 420f)) { width -> width / 3 } + fadeIn(tween(220))) togetherWith
+                            (slideOutHorizontally(spring(dampingRatio = 0.82f, stiffness = 420f)) { width -> -width / 3 } + fadeOut(tween(180)))
                         } else {
-                            (slideInHorizontally(tween(240)) { width -> -width / 4 } + fadeIn(tween(220))) togetherWith
-                            (slideOutHorizontally(tween(180)) { width -> width / 4 } + fadeOut(tween(180)))
+                            (slideInHorizontally(spring(dampingRatio = 0.82f, stiffness = 420f)) { width -> -width / 3 } + fadeIn(tween(220))) togetherWith
+                            (slideOutHorizontally(spring(dampingRatio = 0.82f, stiffness = 420f)) { width -> width / 3 } + fadeOut(tween(180)))
                         }
                     },
                     label = "tab_content_switch"
@@ -126,7 +151,48 @@ private fun EnhancedGlassBottomNav(
     onTabSelected: (AppTab) -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
+    val density = LocalDensity.current
+
     var barWidthPx by remember { mutableFloatStateOf(1f) }
+    val horizontalPaddingPx = remember(density) { with(density) { 6.dp.toPx() } }
+
+    val targetIndex = remember(currentTab) {
+        NAV_TABS.indexOfFirst { it.tab == currentTab }.coerceAtLeast(0).toFloat()
+    }
+
+    var isDragging by remember { mutableStateOf(false) }
+    var dragPosition by remember { mutableFloatStateOf(targetIndex) }
+    var lastHapticIndex by remember { mutableIntStateOf(targetIndex.toInt()) }
+
+    LaunchedEffect(targetIndex) {
+        if (!isDragging) {
+            dragPosition = targetIndex
+            lastHapticIndex = targetIndex.toInt()
+        }
+    }
+
+    val animatedPosition by animateFloatAsState(
+        targetValue = if (isDragging) dragPosition else targetIndex,
+        animationSpec = if (isDragging) spring(dampingRatio = 0.90f, stiffness = 950f)
+                        else spring(dampingRatio = 0.62f, stiffness = 380f),
+        label = "pill_position"
+    )
+
+    // Squishy physics: compute velocity and dynamic stretch factor
+    var prevPosition by remember { mutableFloatStateOf(targetIndex) }
+    val instantaneousVelocity = animatedPosition - prevPosition
+    SideEffect {
+        prevPosition = animatedPosition
+    }
+
+    val dynamicStretch by animateFloatAsState(
+        targetValue = (abs(instantaneousVelocity) * 2.6f).coerceIn(0f, 0.38f),
+        animationSpec = spring(dampingRatio = 0.55f, stiffness = 520f),
+        label = "pill_stretch"
+    )
+
+    val pillScaleX = 1.0f + dynamicStretch
+    val pillScaleY = (1.0f - dynamicStretch * 0.42f).coerceAtLeast(0.72f)
 
     Box(
         modifier = Modifier
@@ -145,7 +211,7 @@ private fun EnhancedGlassBottomNav(
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            Color(0x18FFFFFF),
+                            Color(0x1CFFFFFF),
                             Color(0x0AFFFFFF)
                         )
                     )
@@ -164,53 +230,113 @@ private fun EnhancedGlassBottomNav(
                     shape = RoundedCornerShape(28.dp)
                 )
                 .onSizeChanged { barWidthPx = it.width.toFloat() }
-                // Hold and drag/scrub across the bar to switch pages seamlessly
+                // Interactive horizontal swipe / drag scrub across the dock
                 .pointerInput(Unit) {
                     detectHorizontalDragGestures(
                         onDragStart = { offset ->
-                            val fraction = (offset.x / barWidthPx).coerceIn(0f, 0.999f)
-                            val targetIndex = (fraction * NAV_TABS.size).toInt().coerceIn(0, NAV_TABS.size - 1)
-                            val targetTab = NAV_TABS[targetIndex].tab
-                            if (targetTab != currentTab) {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                onTabSelected(targetTab)
-                            }
+                            isDragging = true
+                            val usableWidth = (barWidthPx - 2 * horizontalPaddingPx).coerceAtLeast(1f)
+                            val relativeX = (offset.x - horizontalPaddingPx).coerceIn(0f, usableWidth)
+                            val frac = (relativeX / usableWidth * NAV_TABS.size - 0.5f).coerceIn(0f, (NAV_TABS.size - 1).toFloat())
+                            dragPosition = frac
                         },
                         onHorizontalDrag = { change, _ ->
                             change.consume()
-                            val fraction = (change.position.x / barWidthPx).coerceIn(0f, 0.999f)
-                            val targetIndex = (fraction * NAV_TABS.size).toInt().coerceIn(0, NAV_TABS.size - 1)
-                            val targetTab = NAV_TABS[targetIndex].tab
-                            if (targetTab != currentTab) {
+                            val usableWidth = (barWidthPx - 2 * horizontalPaddingPx).coerceAtLeast(1f)
+                            val relativeX = (change.position.x - horizontalPaddingPx).coerceIn(0f, usableWidth)
+                            val frac = (relativeX / usableWidth * NAV_TABS.size - 0.5f).coerceIn(0f, (NAV_TABS.size - 1).toFloat())
+                            dragPosition = frac
+
+                            val closest = frac.roundToInt().coerceIn(0, NAV_TABS.size - 1)
+                            if (closest != lastHapticIndex) {
+                                lastHapticIndex = closest
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                onTabSelected(targetTab)
+                                onTabSelected(NAV_TABS[closest].tab)
                             }
+                        },
+                        onDragEnd = {
+                            isDragging = false
+                            val closest = dragPosition.roundToInt().coerceIn(0, NAV_TABS.size - 1)
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onTabSelected(NAV_TABS[closest].tab)
+                        },
+                        onDragCancel = {
+                            isDragging = false
                         }
                     )
                 }
         ) {
-            Row(
+            val usableWidthPx = (barWidthPx - 2 * horizontalPaddingPx).coerceAtLeast(1f)
+            val slotWidthPx = usableWidthPx / NAV_TABS.size
+            val slotWidthDp = with(density) { slotWidthPx.toDp() }
+
+            // Continuous Reactive Squishy Liquid Glass Pill Indicator
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 6.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(horizontal = 6.dp, vertical = 6.dp)
             ) {
-                NAV_TABS.forEach { item ->
-                    val isSelected = currentTab == item.tab
-                    EnhancedNavItem(
-                        item = item,
-                        isSelected = isSelected,
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onTabSelected(item.tab)
-                        },
-                        onHold = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onTabSelected(item.tab)
-                        },
-                        modifier = Modifier.weight(1f)
-                    )
+                Box(
+                    modifier = Modifier
+                        .width(slotWidthDp)
+                        .fillMaxHeight()
+                        .offset {
+                            IntOffset(
+                                x = (animatedPosition * slotWidthPx).roundToInt(),
+                                y = 0
+                            )
+                        }
+                        .graphicsLayer {
+                            scaleX = pillScaleX
+                            scaleY = pillScaleY
+                            transformOrigin = TransformOrigin(0.5f, 0.5f)
+                        }
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color(0x44FFFFFF),
+                                    Color(0x20FFFFFF)
+                                )
+                            )
+                        )
+                        .border(
+                            BorderStroke(
+                                1.dp,
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color(0x8CFFFFFF),
+                                        Color(0x38FFFFFF),
+                                        Color(0x18FFFFFF)
+                                    )
+                                )
+                            ),
+                            shape = RoundedCornerShape(22.dp)
+                        )
+                )
+
+                // Row of icons layered above the squishy pill
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    NAV_TABS.forEachIndexed { index, item ->
+                        val distance = abs(animatedPosition - index)
+                        val closeness = (1f - distance).coerceIn(0f, 1f)
+                        val isSelected = currentTab == item.tab
+
+                        EnhancedNavItem(
+                            item = item,
+                            isSelected = isSelected,
+                            closeness = closeness,
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onTabSelected(item.tab)
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
                 }
             }
         }
@@ -222,63 +348,40 @@ private fun EnhancedGlassBottomNav(
 private fun EnhancedNavItem(
     item: NavItemData,
     isSelected: Boolean,
+    closeness: Float,
     onClick: () -> Unit,
-    onHold: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val scale by animateFloatAsState(
-        targetValue = if (isSelected) 1.10f else 1.0f,
+    val bounceScale by animateFloatAsState(
+        targetValue = 1.0f + (closeness * 0.16f),
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessMedium
         ),
-        label = "nav_scale"
+        label = "nav_bounce"
     )
+
+    val iconAlpha = 0.55f + (closeness * 0.45f)
 
     Box(
         modifier = modifier
             .fillMaxHeight()
             .clip(RoundedCornerShape(22.dp))
-            .then(
-                if (isSelected) {
-                    Modifier
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    Color(0x3DFFFFFF),
-                                    Color(0x1FFFFFFF)
-                                )
-                            )
-                        )
-                        .border(
-                            BorderStroke(
-                                1.dp,
-                                Brush.verticalGradient(
-                                    colors = listOf(
-                                        Color(0x66FFFFFF),
-                                        Color(0x26FFFFFF)
-                                    )
-                                )
-                            ),
-                            shape = RoundedCornerShape(22.dp)
-                        )
-                } else Modifier
-            )
             .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick,
-                onLongClick = onHold
+                onLongClick = onClick
             ),
         contentAlignment = Alignment.Center
     ) {
         Icon(
             imageVector = if (isSelected) item.selectedIcon else item.unselectedIcon,
             contentDescription = item.label,
-            tint = if (isSelected) Color(0xFFFFFFFF) else Color(0x78FFFFFF),
+            tint = Color(0xFFFFFFFF).copy(alpha = iconAlpha),
             modifier = Modifier
                 .size(24.dp)
-                .scale(scale)
+                .scale(bounceScale)
         )
     }
 }

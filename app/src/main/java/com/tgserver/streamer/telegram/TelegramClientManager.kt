@@ -154,8 +154,22 @@ class TelegramClientManager(private val context: Context) {
     init {
         loadSession()
         loadChannels()
-        loadMediaIndex()
-        loadUnmatchedIndex()
+        CoroutineScope(Dispatchers.IO).launch {
+            loadMediaIndex()
+            loadUnmatchedIndex()
+        }
+        // Pre-warm Python runtime and tg_bridge module asynchronously in background
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                if (!Python.isStarted()) {
+                    Python.start(AndroidPlatform(context))
+                }
+                Python.getInstance().getModule("tg_bridge")
+                Log.d(TAG, "Python runtime pre-warmed successfully in background")
+            } catch (e: Exception) {
+                Log.w(TAG, "Background Python warm-up: ${e.message}")
+            }
+        }
     }
 
     private fun loadSession() {
