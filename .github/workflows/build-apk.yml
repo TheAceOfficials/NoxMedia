@@ -1,4 +1,4 @@
-name: Build & Release TG-Server APK
+name: Build & Release NoxMedia APK
 
 on:
   push:
@@ -27,15 +27,15 @@ jobs:
           - flavor: "arm64"
             task: "assembleArm64Debug"
             apk_subpath: "arm64/debug/app-arm64-debug.apk"
-            output_name: "TG-Server-arm64-v8a.apk"
+            output_name: "NoxMedia-arm64-v8a.apk"
           - flavor: "armv7"
             task: "assembleArmv7Debug"
             apk_subpath: "armv7/debug/app-armv7-debug.apk"
-            output_name: "TG-Server-armeabi-v7a.apk"
+            output_name: "NoxMedia-armeabi-v7a.apk"
           - flavor: "universal"
             task: "assembleUniversalDebug"
             apk_subpath: "universal/debug/app-universal-debug.apk"
-            output_name: "TG-Server-universal.apk"
+            output_name: "NoxMedia-universal.apk"
 
     steps:
       - name: Checkout Code
@@ -99,13 +99,13 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'latest' }}
-          name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'TG-Server Latest APK' }}
+          name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'NoxMedia Latest APK' }}
           body: |
-            Direct APK downloads for TG-Server Mobile Streamer engine:
+            Direct APK downloads for NoxMedia Mobile Streamer engine:
 
-            - 📱 **TG-Server-arm64-v8a.apk**: Modern 64-bit Android devices (Recommended, ~35MB)
-            - 📱 **TG-Server-armeabi-v7a.apk**: Older & budget 32-bit Android devices (Compatible with older phones, ~33MB)
-            - 📦 **TG-Server-universal.apk**: Universal build (Contains all architectures, ~65MB)
+            - 📱 **NoxMedia-arm64-v8a.apk**: Modern 64-bit Android devices (Recommended, ~35MB)
+            - 📱 **NoxMedia-armeabi-v7a.apk**: Older & budget 32-bit Android devices (Compatible with older phones, ~33MB)
+            - 📦 **NoxMedia-universal.apk**: Universal build (Contains all architectures, ~65MB)
           files: release-apks/*.apk
           draft: false
           prerelease: false
