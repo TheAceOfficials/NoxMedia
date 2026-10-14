@@ -449,9 +449,24 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun resendAuthCode(phoneNumber: String) {
-        // Reset codeSentSuccess before resending so UI reacts
-        _codeSentSuccess.value = false
-        sendAuthCode(phoneNumber)
+        viewModelScope.launch {
+            _isSendingCode.value = true
+            // Use proper resend_code MTProto call (keeps same phone_code_hash, switches delivery channel)
+            val res = tgClient.resendLoginCode()
+            _isSendingCode.value = false
+            if (res.isSuccess) {
+                _codeSentSuccess.value = true
+                Toast.makeText(getApplication(), "✓ ${res.getOrNull()}", Toast.LENGTH_LONG).show()
+            } else {
+                // Fallback: if resend fails (e.g. session lost), do fresh send
+                val err = res.exceptionOrNull()?.message ?: ""
+                if (err.contains("Session expired", ignoreCase = true)) {
+                    sendAuthCode(phoneNumber)
+                } else {
+                    Toast.makeText(getApplication(), err.ifBlank { "Failed to resend code" }, Toast.LENGTH_LONG).show()
+                }
+            }
+        }
     }
 
     fun verifyAuthCode(code: String) {

@@ -733,15 +733,51 @@ class TelegramClientManager(private val context: Context) {
 
             if (json.optString("status") == "success") {
                 val hash = json.optString("phone_code_hash")
+                val codeType = json.optString("type", "")
                 val updated = _sessionState.value.copy(
                     phoneNumber = cleanPhone,
                     phoneCodeHash = hash,
                     lastError = null
                 )
                 saveSession(updated)
-                Result.success("Code sent to $cleanPhone via Telegram app")
+                val deliveryMsg = when {
+                    codeType.contains("SentCodeTypeApp", ignoreCase = true) -> "Code sent to your Telegram app"
+                    codeType.contains("SentCodeTypeSms", ignoreCase = true) -> "Code sent via SMS"
+                    else -> "Code sent to $cleanPhone"
+                }
+                Result.success(deliveryMsg)
             } else {
                 val err = json.optString("error", "Failed to send code")
+                Result.failure(Exception(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Resends the login OTP using the existing session's phone_code_hash.
+     * Uses Pyrogram's resend_code MTProto call instead of sending a new code
+     * (which would trigger FloodWait and deliver to a different channel).
+     */
+    suspend fun resendLoginCode(): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val bridge = getPyBridge()
+                ?: return@withContext Result.failure(IllegalStateException("Python runtime could not be started"))
+
+            val jsonStr = bridge.callAttr("resend_code").toString()
+            val json = JSONObject(jsonStr)
+
+            if (json.optString("status") == "success") {
+                val codeType = json.optString("type", "")
+                val deliveryMsg = when {
+                    codeType.contains("SentCodeTypeApp", ignoreCase = true) -> "Code re-sent to your Telegram app"
+                    codeType.contains("SentCodeTypeSms", ignoreCase = true) -> "Code re-sent via SMS"
+                    else -> "Code re-sent successfully"
+                }
+                Result.success(deliveryMsg)
+            } else {
+                val err = json.optString("error", "Failed to resend code")
                 Result.failure(Exception(err))
             }
         } catch (e: Exception) {

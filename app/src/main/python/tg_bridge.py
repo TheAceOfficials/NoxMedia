@@ -162,19 +162,20 @@ def send_code(api_id: int, api_hash: str, phone_number: str) -> str:
     
     async def _async_send():
         global _auth_client
-        if _auth_client is not None and _auth_client.is_connected:
+        # Disconnect any existing auth client cleanly
+        if _auth_client is not None:
             try:
-                await _auth_client.disconnect()
+                if _auth_client.is_initialized:
+                    await _auth_client.disconnect()
             except Exception:
                 pass
-                
+
+        # Use Pyrogram defaults for app_version/device_model/system_version
+        # Custom values cause Telegram to silently block OTP delivery
         _auth_client = Client(
             ":memory:",
             api_id=_auth_state["api_id"],
             api_hash=_auth_state["api_hash"],
-            app_version="NoxMedia 1.0",
-            device_model="Android",
-            system_version="Android",
             in_memory=True
         )
         await _auth_client.connect()
@@ -205,9 +206,15 @@ def resend_code() -> str:
     
     async def _async_resend():
         global _auth_client
-        if not _auth_client or not _auth_client.is_connected:
+        # Reconnect if session was lost
+        if not _auth_client:
             return {"status": "error", "error": "Session expired. Please request a new code."}
-            
+        if not _auth_client.is_initialized:
+            try:
+                await _auth_client.connect()
+            except Exception as e:
+                return {"status": "error", "error": f"Could not reconnect: {e}"}
+
         res = await _auth_client.resend_code(
             _auth_state["phone"],
             _auth_state["phone_code_hash"]
@@ -234,7 +241,7 @@ def verify_code(code: str) -> str:
     
     async def _async_verify():
         global _auth_client
-        if not _auth_client or not _auth_client.is_connected:
+        if not _auth_client or not _auth_client.is_initialized:
             return {"status": "error", "error": "Session expired. Please request a new code."}
             
         clean_code = code.strip()
@@ -271,7 +278,7 @@ def check_password(password: str) -> str:
     
     async def _async_check_pwd():
         global _auth_client
-        if not _auth_client or not _auth_client.is_connected:
+        if not _auth_client or not _auth_client.is_initialized:
             return {"status": "error", "error": "Session expired. Please request a new code."}
             
         user = await _auth_client.check_password(password.strip())
