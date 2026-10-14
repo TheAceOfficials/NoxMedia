@@ -141,7 +141,7 @@ fun HomeScreen(viewModel: MainAppViewModel) {
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
-                    text = "TG-Server",
+                    text = "NoxMedia",
                     color = Color.White,
                     fontSize = 25.sp,
                     fontFamily = NdotFont,

@@ -99,7 +99,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 NothingDotBadge(
-                    text = "TG-SERVER",
+                    text = "NOXMEDIA",
                     dotColor = AccentApple,
                     backgroundColor = Color(0x1FFFFFFF),
                     textColor = TextPrimary
@@ -568,7 +568,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     onValueChange = { remoteUrlInput = it },
                     label = "REMOTE PUBLIC IP / TUNNEL URL",
                     badgeText = "OPTIONAL",
-                    placeholder = "https://tg-server.my-domain.ts.net",
+                    placeholder = "https://noxmedia.my-domain.ts.net",
                     isMonospace = true,
                     singleLine = true
                 )
@@ -1118,7 +1118,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         onClick = {
                             val json = viewModel.exportBackupJson()
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clipboard.setPrimaryClip(ClipData.newPlainText("TGServerBackup", json))
+                            clipboard.setPrimaryClip(ClipData.newPlainText("NoxMediaBackup", json))
                             Toast.makeText(context, "✓ Backup snapshot copied to clipboard!", Toast.LENGTH_SHORT).show()
                         },
                         variant = NothingButtonVariant.Secondary,

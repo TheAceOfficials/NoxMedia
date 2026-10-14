@@ -186,7 +186,7 @@ class MetadataEnricher {
         try {
             val enc = URLEncoder.encode(title, "UTF-8")
             val url = "https://kitsu.io/api/edge/anime?filter[text]=$enc&page[limit]=5"
-            val req = Request.Builder().url(url).header("User-Agent", "TG-Server/1.0").build()
+            val req = Request.Builder().url(url).header("User-Agent", "NoxMedia/1.0").build()
 
             httpClient.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return null
@@ -373,7 +373,7 @@ class MetadataEnricher {
             val enc = URLEncoder.encode(title, "UTF-8")
             val cType = if (type == "movie") "movie" else "series"
             val url = "https://v3-cinemeta.strem.io/catalog/$cType/top/search=$enc.json"
-            val req = Request.Builder().url(url).header("User-Agent", "TG-Server/1.0").build()
+            val req = Request.Builder().url(url).header("User-Agent", "NoxMedia/1.0").build()
 
             httpClient.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return null
@@ -437,7 +437,7 @@ class MetadataEnricher {
         if (cleanQuery.matches(Regex("(?i)^tt\\d+$"))) {
             try {
                 val url = "https://v3-cinemeta.strem.io/meta/$cType/$cleanQuery.json"
-                val req = Request.Builder().url(url).header("User-Agent", "TG-Server/1.0").build()
+                val req = Request.Builder().url(url).header("User-Agent", "NoxMedia/1.0").build()
                 httpClient.newCall(req).execute().use { resp ->
                     if (resp.isSuccessful) {
                         val body = resp.body?.string()
@@ -472,7 +472,7 @@ class MetadataEnricher {
         try {
             val enc = URLEncoder.encode(cleanQuery, "UTF-8")
             val url = "https://v3-cinemeta.strem.io/catalog/$cType/top/search=$enc.json"
-            val req = Request.Builder().url(url).header("User-Agent", "TG-Server/1.0").build()
+            val req = Request.Builder().url(url).header("User-Agent", "NoxMedia/1.0").build()
             httpClient.newCall(req).execute().use { resp ->
                 if (resp.isSuccessful) {
                     val body = resp.body?.string()

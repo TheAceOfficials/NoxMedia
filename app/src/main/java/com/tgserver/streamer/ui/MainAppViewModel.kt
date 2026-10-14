@@ -230,7 +230,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
 
     fun copyToClipboard(text: String, label: String = "Link copied") {
         val clipboard = getApplication<Application>().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("TGServer", text))
+        clipboard.setPrimaryClip(ClipData.newPlainText("NoxMedia", text))
         Toast.makeText(getApplication(), label, Toast.LENGTH_SHORT).show()
     }
 

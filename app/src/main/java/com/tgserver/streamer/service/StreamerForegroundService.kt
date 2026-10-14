@@ -130,7 +130,7 @@ class StreamerForegroundService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "TG-Server Streaming Service",
+                "NoxMedia Streaming Service",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Runs local Stremio manifest and video streaming service"
@@ -150,7 +150,7 @@ class StreamerForegroundService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("TG-Server Mobile Streamer")
+            .setContentTitle("NoxMedia Mobile Streamer")
             .setContentText(statusText)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setOngoing(true)

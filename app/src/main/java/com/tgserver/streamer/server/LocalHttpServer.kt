@@ -141,11 +141,11 @@ class LocalHttpServer(
 
     private fun handleManifest(): Response {
         val manifest = JsonObject().apply {
-            addProperty("id", "org.tgserver.streamer")
+            addProperty("id", "org.noxmedia.streamer")
             addProperty("version", "1.0.0")
-            addProperty("name", "TG-Server Streamer")
+            addProperty("name", "NoxMedia")
             addProperty("description", "Direct Telegram video streamer with Stremio & Kitsu/TMDB integration")
-            addProperty("logo", "https://lh3.googleusercontent.com/aida/AEtjO1XxF5nLod1dKj8IrkfY2sKq1asKsR74gub1jDyICCeoafQ6Dh5N6bGXc8PAqlJkXYlWXajcnx4pVNnZX2pM9Ra923Ml5jb0jvAdarsZqKIj-yYVPDpCufiBbr8kb-kHeO3ymMD4-VoMVeVlJYOx8J0b4lEJpK2yAgUA8edYgOHhCTWrPUrSYWP6ec9qa80nJgzFgxMxgeIMqJ4lOX40yq670kg84dITxJghMvwrPMzL_NtP5hBpi82AQyAN")
+            addProperty("logo", "http://${getLocalIpAddress()}:${config.port}/logo.png")
             add("types", gson.toJsonTree(listOf("movie", "series", "anime")))
             add("catalogs", gson.toJsonTree(listOf(
                 mapOf(
@@ -306,7 +306,7 @@ class LocalHttpServer(
             idTitleCache[key]?.let { return it }
             try {
                 val url = "https://kitsu.io/api/edge/anime/$kitsuId"
-                val req = Request.Builder().url(url).header("User-Agent", "TG-Server/1.0").build()
+                val req = Request.Builder().url(url).header("User-Agent", "NoxMedia/1.0").build()
                 streamHttpClient.newCall(req).execute().use { resp ->
                     if (resp.isSuccessful) {
                         val body = resp.body?.string() ?: return null
@@ -538,7 +538,7 @@ class LocalHttpServer(
             val epTitle = if (!item.episodeTitle.isNullOrBlank()) "${item.episodeTitle}\n" else ""
 
             mapOf(
-                "name" to "TG-Server [${item.quality}]",
+                "name" to "NoxMedia [${item.quality}]",
                 "title" to "📁 $rawFileName\n$epTitle$epInfo💾 ${item.formattedSize}",
                 "url" to streamUrl
             )
@@ -864,8 +864,32 @@ class LocalHttpServer(
     }
 
     private fun serveStaticAsset(uri: String): Response {
+        val cleanPath = uri.trimStart('/').substringBefore('?')
+        if (cleanPath.isNotBlank()) {
+            val assetPath = if (cleanPath.startsWith("web/")) cleanPath else "web/$cleanPath"
+            try {
+                val mimeType = when {
+                    cleanPath.endsWith(".ico") -> "image/x-icon"
+                    cleanPath.endsWith(".png") -> "image/png"
+                    cleanPath.endsWith(".jpg") || cleanPath.endsWith(".jpeg") -> "image/jpeg"
+                    cleanPath.endsWith(".svg") -> "image/svg+xml"
+                    cleanPath.endsWith(".webmanifest") || cleanPath.endsWith(".json") -> "application/manifest+json"
+                    cleanPath.endsWith(".html") -> "text/html"
+                    cleanPath.endsWith(".css") -> "text/css"
+                    cleanPath.endsWith(".js") -> "application/javascript"
+                    else -> null
+                }
+                if (mimeType != null) {
+                    val stream = context.assets.open(assetPath)
+                    return newChunkedResponse(Response.Status.OK, mimeType, stream)
+                }
+            } catch (_: Exception) {
+                // Asset not found, fall back to server info JSON
+            }
+        }
+
         val info = JsonObject().apply {
-            addProperty("name", "TG-Server Mobile Streamer")
+            addProperty("name", "NoxMedia Mobile Streamer")
             addProperty("version", "1.0.0")
             addProperty("status", if (config.isRunning) "online" else "paused")
             addProperty("port", config.port)

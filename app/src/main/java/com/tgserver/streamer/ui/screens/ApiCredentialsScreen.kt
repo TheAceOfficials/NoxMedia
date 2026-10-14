@@ -92,7 +92,7 @@ fun ApiCredentialsScreen(viewModel: MainAppViewModel) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 NothingDotBadge(
-                    text = "TG-SERVER",
+                    text = "NOXMEDIA",
                     dotColor = AccentApple,
                     backgroundColor = Color(0x1FFFFFFF),
                     textColor = TextPrimary

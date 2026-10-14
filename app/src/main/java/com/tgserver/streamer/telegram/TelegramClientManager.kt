@@ -125,7 +125,7 @@ class TelegramClientManager(private val context: Context) {
                 .url("https://api.telegram.org/bot$apiId:$apiHash/getMe")
                 .get()
                 .addHeader("Content-Type", "application/json")
-                .addHeader("User-Agent", "TG-Server/1.0")
+                .addHeader("User-Agent", "NoxMedia/1.0")
                 .build()
 
             try {

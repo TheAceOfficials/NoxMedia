@@ -1,7 +1,7 @@
-# TG-Server 🚀
+# NoxMedia 🚀
 ### Standalone Android Stremio Local Server for Telegram
 
-**TG-Server** is a standalone Android application that turns your mobile device into a high-speed local media streaming server for **Stremio**. Stream movies, TV series, and media files directly from your Telegram channels to any device (Android TV, Firestick, PC, Mac, Phone) on your local Wi-Fi network — **without needing any PC or external server running!**
+**NoxMedia** is a standalone Android application that turns your mobile device into a high-speed local media streaming server for **Stremio**. Stream movies, TV series, and media files directly from your Telegram channels to any device (Android TV, Firestick, PC, Mac, Phone) on your local Wi-Fi network — **without needing any PC or external server running!**
 
 ---
 
@@ -18,7 +18,7 @@
 ## 📋 Quick Setup Workflow
 
 ```
-[1. Get API Credentials] ──▶ [2. Generate Session String] ──▶ [3. Paste in TG-Server & Start] ──▶ [4. Stream in Stremio]
+[1. Get API Credentials] ──▶ [2. Generate Session String] ──▶ [3. Paste in NoxMedia & Start] ──▶ [4. Stream in Stremio]
    (my.telegram.org)           (Mobile Bot or PC Script)          (Turn On Foreground Service)     (Addon Manifest URL)
 ```
 
@@ -36,14 +36,14 @@
 
 ## 📱 Step 2: How to Generate Telegram Session String
 
-A **Session String** is a secure, persistent token that lets TG-Server stream media from your account without asking for phone codes every time.
+A **Session String** is a secure, persistent token that lets NoxMedia stream media from your account without asking for phone codes every time.
 
 ### Option A: 1-Click Google Colab (Safest & 100% Transparent — Mobile & PC) ⭐ *Recommended*
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/TheAceOfficials/TG-Server/blob/main/string_session.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/TheAceOfficials/NoxMedia/blob/main/string_session.ipynb)
 
 Run the generator in your own private Google Cloud sandbox without installing anything on your device:
-1. Tap on the **[Open in Colab](https://colab.research.google.com/github/TheAceOfficials/TG-Server/blob/main/string_session.ipynb)** button above.
+1. Tap on the **[Open in Colab](https://colab.research.google.com/github/TheAceOfficials/NoxMedia/blob/main/string_session.ipynb)** button above.
 2. Tap the **▶ Run** button on the code block.
 3. Enter your `API ID`, `API HASH`, and `Phone Number`.
 4. Enter the Telegram login OTP.
@@ -105,22 +105,22 @@ with Client("temp_session", api_id=api_id, api_hash=api_hash, in_memory=True) as
     print(session_string)
     print("---------------------------\n")
     # Send it directly to your Telegram Saved Messages
-    app.send_message("me", f"**Your TG-Server Session String:**\n`{session_string}`")
+    app.send_message("me", f"**Your NoxMedia Session String:**\n`{session_string}`")
     print("✓ Also sent directly to your Telegram Saved Messages!")
 ```
 
-Copy the generated session string token and paste it into TG-Server.
+Copy the generated session string token and paste it into NoxMedia.
 
 ---
 
-## 🚀 Step 3: Connect in TG-Server App & Start Server
+## 🚀 Step 3: Connect in NoxMedia App & Start Server
 
-1. Open **TG-Server** on your Android phone.
+1. Open **NoxMedia** on your Android phone.
 2. Enter your **API ID** & **API Hash** (saved permanently).
 3. On the **Connect Telegram** screen:
    - Tap the **Paste** button to paste your copied Session String.
    - Tap **Connect & Start Server**.
-4. TG-Server will instantly validate and connect to your Telegram account!
+4. NoxMedia will instantly validate and connect to your Telegram account!
 5. On the **Home Screen**, tap the **Server Switch** to toggle the server **ON**.
 6. You will see your local manifest URL:
    ```
@@ -146,8 +146,8 @@ Copy the generated session string token and paste it into TG-Server.
 
 ## ⚙️ Best Practices for Android Background Streaming
 
-- **Disable Battery Optimization:** In your phone's Android Settings -> Apps -> TG-Server -> Battery -> Select **"Unrestricted"**. This prevents Android from putting the server to sleep when your screen is locked.
-- **Keep Wi-Fi Active:** Make sure your phone stays connected to Wi-Fi while streaming. TG-Server automatically holds a high-performance Wi-Fi wake lock while the server is active.
+- **Disable Battery Optimization:** In your phone's Android Settings -> Apps -> NoxMedia -> Battery -> Select **"Unrestricted"**. This prevents Android from putting the server to sleep when your screen is locked.
+- **Keep Wi-Fi Active:** Make sure your phone stays connected to Wi-Fi while streaming. NoxMedia automatically holds a high-performance Wi-Fi wake lock while the server is active.
 
 ---
 

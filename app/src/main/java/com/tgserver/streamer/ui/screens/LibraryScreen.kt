@@ -120,7 +120,7 @@ fun RemoteImage(
             try {
                 val req = Request.Builder()
                     .url(url)
-                    .header("User-Agent", "TG-Server/1.0 (Android)")
+                    .header("User-Agent", "NoxMedia/1.0 (Android)")
                     .build()
                 imageHttpClient.newCall(req).execute().use { resp ->
                     if (resp.isSuccessful) {

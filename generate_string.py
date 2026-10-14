@@ -27,12 +27,12 @@ async def generate():
         
         # Also send to Saved Messages for easy copy-paste on mobile
         try:
-            await app.send_message("me", f"**TG-Server Session String:**\n\n`{session_str}`")
+            await app.send_message("me", f"**NoxMedia Session String:**\n\n`{session_str}`")
             print("✓ Sent to your Telegram 'Saved Messages' chat as well!")
         except Exception:
             pass
             
-        print("\nCopy this string and paste it into TG-Server app.\n")
+        print("\nCopy this string and paste it into NoxMedia app.\n")
 
 if __name__ == "__main__":
     asyncio.run(generate())

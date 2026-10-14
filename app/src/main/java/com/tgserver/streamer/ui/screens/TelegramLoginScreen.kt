@@ -110,7 +110,7 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 NothingDotBadge(
-                    text = "TG-SERVER",
+                    text = "NOXMEDIA",
                     dotColor = AccentApple,
                     backgroundColor = Color(0x1FFFFFFF),
                     textColor = TextPrimary
@@ -697,7 +697,7 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
-                            val url = "https://colab.research.google.com/github/TheAceOfficials/TG-Server/blob/main/string_session.ipynb"
+                            val url = "https://colab.research.google.com/github/TheAceOfficials/NoxMedia/blob/main/string_session.ipynb"
                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
                             context.startActivity(intent)
                         },
@@ -881,7 +881,7 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
                                 GuideStepItem(
                                     step = "01",
                                     title = "Run in Terminal",
-                                    desc = "In your PC terminal inside TG-Server: venv/bin/python generate_string.py"
+                                    desc = "In your PC terminal inside NoxMedia: venv/bin/python generate_string.py"
                                 )
                                 Spacer(modifier = Modifier.height(10.dp))
                                 GuideStepItem(
