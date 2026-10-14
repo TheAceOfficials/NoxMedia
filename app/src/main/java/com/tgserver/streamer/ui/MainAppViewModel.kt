@@ -83,6 +83,8 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     private val _codeSentSuccess = MutableStateFlow(false)
     val codeSentSuccess: StateFlow<Boolean> = _codeSentSuccess.asStateFlow()
 
+    val codeDeliveryType: StateFlow<String> = tgClient.codeDeliveryType
+
     private val _is2FARequired = MutableStateFlow(false)
     val is2FARequired: StateFlow<Boolean> = _is2FARequired.asStateFlow()
 
@@ -437,7 +439,8 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             _isSendingCode.value = false
             if (res.isSuccess) {
                 _codeSentSuccess.value = true
-                Toast.makeText(getApplication(), "✓ Code sent to your Telegram app", Toast.LENGTH_LONG).show()
+                val msg = res.getOrNull() ?: "Code sent successfully"
+                Toast.makeText(getApplication(), "✓ $msg", Toast.LENGTH_LONG).show()
             } else {
                 Toast.makeText(
                     getApplication(),

@@ -43,6 +43,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import androidx.compose.ui.unit.sp
 import com.tgserver.streamer.theme.*
 import com.tgserver.streamer.ui.MainAppViewModel
@@ -61,8 +62,20 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
     val isSendingCode by viewModel.isSendingCode.collectAsState()
     val isVerifyingCode by viewModel.isVerifyingCode.collectAsState()
     val codeSentSuccess by viewModel.codeSentSuccess.collectAsState()
+    val codeDeliveryType by viewModel.codeDeliveryType.collectAsState()
     val is2FARequired by viewModel.is2FARequired.collectAsState()
     val isVerifying2FA by viewModel.isVerifying2FA.collectAsState()
+
+    var resendCountdown by remember { mutableIntStateOf(60) }
+    LaunchedEffect(codeSentSuccess) {
+        if (codeSentSuccess) {
+            resendCountdown = 60
+            while (resendCountdown > 0) {
+                delay(1000)
+                resendCountdown--
+            }
+        }
+    }
 
     val (apiId, apiHash) = viewModel.apiCredentials.collectAsState().value
 
@@ -419,11 +432,12 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
 
                     Spacer(modifier = Modifier.height(14.dp))
 
-                    // HELPER BANNER TO INFORM USER TO CHECK TELEGRAM APP
+                    // DYNAMIC HELPER BANNER (APP vs SMS)
+                    val isSmsDelivery = codeDeliveryType.equals("SMS", ignoreCase = true)
                     NothingCard(
                         modifier = Modifier.fillMaxWidth(),
-                        backgroundColor = Color(0x1F00B4D8),
-                        borderColor = Color(0x4000B4D8)
+                        backgroundColor = if (isSmsDelivery) Color(0x1F22C55E) else Color(0x1F00B4D8),
+                        borderColor = if (isSmsDelivery) Color(0x4022C55E) else Color(0x4000B4D8)
                     ) {
                         Row(
                             modifier = Modifier.padding(14.dp),
@@ -431,21 +445,25 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Info,
+                                imageVector = if (isSmsDelivery) Icons.Default.CheckCircle else Icons.Default.Info,
                                 contentDescription = null,
-                                tint = Color(0xFF00B4D8),
+                                tint = if (isSmsDelivery) Color(0xFF22C55E) else Color(0xFF00B4D8),
                                 modifier = Modifier.size(18.dp).padding(top = 1.dp)
                             )
                             Column {
                                 Text(
-                                    text = "Check Your Telegram App!",
+                                    text = if (isSmsDelivery) "Check SMS Messages" else "Check Your Telegram App!",
                                     color = TextPrimary,
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Spacer(modifier = Modifier.height(3.dp))
                                 Text(
-                                    text = "Telegram does NOT send SMS if you are already logged in on any device! Open your official Telegram app and look for a message from 'Telegram' (verified service chat).",
+                                    text = if (isSmsDelivery) {
+                                        "Telegram dispatched a verification code via SMS to $phoneInput. Please check your SMS inbox."
+                                    } else {
+                                        "Telegram sends login codes to your active Telegram app (service chat from 'Telegram' with blue checkmark). If not received, you can request an SMS below."
+                                    },
                                     color = TextSecondary,
                                     fontSize = 11.5.sp,
                                     lineHeight = 16.sp
@@ -472,7 +490,46 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
                         }
                     )
 
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // RESEND CODE ROW WITH COUNTDOWN
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (isSmsDelivery) "Didn't receive SMS?" else "Didn't get code in app?",
+                            color = TextTertiary,
+                            fontSize = 12.sp
+                        )
+
+                        if (resendCountdown > 0) {
+                            Text(
+                                text = "Resend via SMS in ${resendCountdown}s",
+                                color = TextTertiary,
+                                fontSize = 12.sp
+                            )
+                        } else {
+                            Text(
+                                text = "Resend via SMS →",
+                                color = AccentApple,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable(enabled = !isSendingCode) {
+                                        viewModel.resendAuthCode(phoneInput)
+                                        resendCountdown = 60
+                                    }
+                                    .padding(vertical = 4.dp, horizontal = 4.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
 
                     NothingPillButton(
                         text = "Verify & Connect →",
@@ -496,7 +553,7 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Not receiving code? Use Session String (100% instant) →",
+                            text = "Or generate Session String instantly (100% reliable) →",
                             color = AccentApple,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium

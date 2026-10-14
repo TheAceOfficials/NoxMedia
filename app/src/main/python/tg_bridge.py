@@ -165,7 +165,7 @@ def send_code(api_id: int, api_hash: str, phone_number: str) -> str:
         # Disconnect any existing auth client cleanly
         if _auth_client is not None:
             try:
-                if _auth_client.is_initialized:
+                if _auth_client.is_connected:
                     await _auth_client.disconnect()
             except Exception:
                 pass
@@ -182,11 +182,13 @@ def send_code(api_id: int, api_hash: str, phone_number: str) -> str:
         sent_code = await _auth_client.send_code(clean_phone)
         _auth_state["phone_code_hash"] = sent_code.phone_code_hash
         sent_type = getattr(sent_code.type, "name", str(sent_code.type))
+        next_type = getattr(sent_code.next_type, "name", str(sent_code.next_type)) if getattr(sent_code, "next_type", None) else ""
         return {
             "status": "success",
             "phone_code_hash": sent_code.phone_code_hash,
             "timeout": getattr(sent_code, "timeout", 60),
-            "type": sent_type
+            "type": sent_type,
+            "next_type": next_type
         }
 
     try:
@@ -209,7 +211,7 @@ def resend_code() -> str:
         # Reconnect if session was lost
         if not _auth_client:
             return {"status": "error", "error": "Session expired. Please request a new code."}
-        if not _auth_client.is_initialized:
+        if not _auth_client.is_connected:
             try:
                 await _auth_client.connect()
             except Exception as e:
@@ -221,11 +223,13 @@ def resend_code() -> str:
         )
         _auth_state["phone_code_hash"] = res.phone_code_hash
         sent_type = getattr(res.type, "name", str(res.type))
+        next_type = getattr(res.next_type, "name", str(res.next_type)) if getattr(res, "next_type", None) else ""
         return {
             "status": "success",
             "phone_code_hash": res.phone_code_hash,
             "timeout": getattr(res, "timeout", 60),
-            "type": sent_type
+            "type": sent_type,
+            "next_type": next_type
         }
 
     try:
@@ -241,7 +245,7 @@ def verify_code(code: str) -> str:
     
     async def _async_verify():
         global _auth_client
-        if not _auth_client or not _auth_client.is_initialized:
+        if not _auth_client or not _auth_client.is_connected:
             return {"status": "error", "error": "Session expired. Please request a new code."}
             
         clean_code = code.strip()
@@ -278,7 +282,7 @@ def check_password(password: str) -> str:
     
     async def _async_check_pwd():
         global _auth_client
-        if not _auth_client or not _auth_client.is_initialized:
+        if not _auth_client or not _auth_client.is_connected:
             return {"status": "error", "error": "Session expired. Please request a new code."}
             
         user = await _auth_client.check_password(password.strip())

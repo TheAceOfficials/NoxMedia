@@ -83,6 +83,9 @@ class TelegramClientManager(private val context: Context) {
     )
     val apiCredentials: StateFlow<Pair<Int, String>> = _apiCredentials.asStateFlow()
 
+    private val _codeDeliveryType = MutableStateFlow("APP")
+    val codeDeliveryType: StateFlow<String> = _codeDeliveryType.asStateFlow()
+
     fun getApiId(): Int = _apiCredentials.value.first
     fun getApiHash(): String = _apiCredentials.value.second
 
@@ -740,9 +743,12 @@ class TelegramClientManager(private val context: Context) {
                     lastError = null
                 )
                 saveSession(updated)
+                val isApp = codeType.equals("APP", ignoreCase = true) || codeType.contains("App", ignoreCase = true)
+                val isSms = codeType.equals("SMS", ignoreCase = true) || codeType.contains("Sms", ignoreCase = true)
+                _codeDeliveryType.value = if (isSms) "SMS" else "APP"
                 val deliveryMsg = when {
-                    codeType.contains("SentCodeTypeApp", ignoreCase = true) -> "Code sent to your Telegram app"
-                    codeType.contains("SentCodeTypeSms", ignoreCase = true) -> "Code sent via SMS"
+                    isApp -> "Code sent to your Telegram app (check service chat)"
+                    isSms -> "Code sent via SMS to $cleanPhone"
                     else -> "Code sent to $cleanPhone"
                 }
                 Result.success(deliveryMsg)
@@ -770,9 +776,12 @@ class TelegramClientManager(private val context: Context) {
 
             if (json.optString("status") == "success") {
                 val codeType = json.optString("type", "")
+                val isApp = codeType.equals("APP", ignoreCase = true) || codeType.contains("App", ignoreCase = true)
+                val isSms = codeType.equals("SMS", ignoreCase = true) || codeType.contains("Sms", ignoreCase = true)
+                _codeDeliveryType.value = if (isSms) "SMS" else "APP"
                 val deliveryMsg = when {
-                    codeType.contains("SentCodeTypeApp", ignoreCase = true) -> "Code re-sent to your Telegram app"
-                    codeType.contains("SentCodeTypeSms", ignoreCase = true) -> "Code re-sent via SMS"
+                    isSms -> "Code re-sent via SMS"
+                    isApp -> "Code re-sent to your Telegram app"
                     else -> "Code re-sent successfully"
                 }
                 Result.success(deliveryMsg)
