@@ -172,15 +172,20 @@ def send_code(api_id: int, api_hash: str, phone_number: str) -> str:
             ":memory:",
             api_id=_auth_state["api_id"],
             api_hash=_auth_state["api_hash"],
+            app_version="NoxMedia 1.0",
+            device_model="Android",
+            system_version="Android",
             in_memory=True
         )
         await _auth_client.connect()
         sent_code = await _auth_client.send_code(clean_phone)
         _auth_state["phone_code_hash"] = sent_code.phone_code_hash
+        sent_type = getattr(sent_code.type, "name", str(sent_code.type))
         return {
             "status": "success",
             "phone_code_hash": sent_code.phone_code_hash,
-            "timeout": getattr(sent_code, "timeout", 60)
+            "timeout": getattr(sent_code, "timeout", 60),
+            "type": sent_type
         }
 
     try:
@@ -192,6 +197,35 @@ def send_code(api_id: int, api_hash: str, phone_number: str) -> str:
         return json.dumps({"status": "error", "error": "Invalid phone number. Include country code (e.g. +91...)"})
     except errors.PhoneNumberBanned:
         return json.dumps({"status": "error", "error": "This phone number is banned from Telegram."})
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)})
+
+def resend_code() -> str:
+    global _auth_client, _auth_state
+    
+    async def _async_resend():
+        global _auth_client
+        if not _auth_client or not _auth_client.is_connected:
+            return {"status": "error", "error": "Session expired. Please request a new code."}
+            
+        res = await _auth_client.resend_code(
+            _auth_state["phone"],
+            _auth_state["phone_code_hash"]
+        )
+        _auth_state["phone_code_hash"] = res.phone_code_hash
+        sent_type = getattr(res.type, "name", str(res.type))
+        return {
+            "status": "success",
+            "phone_code_hash": res.phone_code_hash,
+            "timeout": getattr(res, "timeout", 60),
+            "type": sent_type
+        }
+
+    try:
+        res = run_async(_async_resend(), timeout=30)
+        return json.dumps(res)
+    except errors.FloodWait as e:
+        return json.dumps({"status": "error", "error": f"Please wait {e.value} seconds before requesting a new code."})
     except Exception as e:
         return json.dumps({"status": "error", "error": str(e)})
 

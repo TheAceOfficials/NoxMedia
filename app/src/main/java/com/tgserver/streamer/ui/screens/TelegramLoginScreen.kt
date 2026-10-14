@@ -417,7 +417,44 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // HELPER BANNER TO INFORM USER TO CHECK TELEGRAM APP
+                    NothingCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        backgroundColor = Color(0x1F00B4D8),
+                        borderColor = Color(0x4000B4D8)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.Top,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = null,
+                                tint = Color(0xFF00B4D8),
+                                modifier = Modifier.size(18.dp).padding(top = 1.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = "Check Your Telegram App!",
+                                    color = TextPrimary,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Text(
+                                    text = "Telegram does NOT send SMS if you are already logged in on any device! Open your official Telegram app and look for a message from 'Telegram' (verified service chat).",
+                                    color = TextSecondary,
+                                    fontSize = 11.5.sp,
+                                    lineHeight = 16.sp
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
 
                     NothingTextField(
                         value = otpInput,
@@ -446,6 +483,25 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
                         variant = NothingButtonVariant.Primary,
                         height = 54.dp
                     )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { selectedAuthMode = 1 }
+                            .padding(vertical = 6.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Not receiving code? Use Session String (100% instant) →",
+                            color = AccentApple,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
 
                 } else {
                     // STEP 3: 2FA PASSWORD
