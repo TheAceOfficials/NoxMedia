@@ -48,7 +48,7 @@ data class MediaItem(
     val quality: String = "1080p", // "4K", "1080p", "720p", "HDR"
     val qualityBadge: String = quality,
     val sizeBytes: Long = 0L,
-    val durationSeconds: Int = 0,
+    var durationSeconds: Int = 0,
     val mimeType: String = "video/mp4",
     val fileName: String = "",
     var posterUrl: String? = null,

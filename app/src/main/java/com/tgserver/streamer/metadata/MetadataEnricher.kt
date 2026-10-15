@@ -21,7 +21,8 @@ data class EnrichedMetadata(
     val episodeTitle: String? = null,
     val imdbId: String? = null,
     val tmdbId: Int? = null,
-    val kitsuId: Int? = null
+    val kitsuId: Int? = null,
+    val runtimeMinutes: Int? = null
 )
 
 class MetadataEnricher {
@@ -37,6 +38,25 @@ class MetadataEnricher {
         ): MediaItem {
             defaultInstance.enrich(item, isAnimeChannel, tmdbKey, tvdbKey)
             return item
+        }
+
+        fun resolveRuntimeSeconds(item: MediaItem): Int {
+            return defaultInstance.resolveRuntimeSeconds(item)
+        }
+
+        fun clearCache() {
+            defaultInstance.clearCache()
+        }
+
+        fun invalidateTitle(title: String) {
+            defaultInstance.invalidateTitle(title)
+        }
+
+        fun fetchFullMetadataDetails(
+            meta: EnrichedMetadata,
+            tmdbKey: String = ""
+        ): Pair<EnrichedMetadata, Map<Pair<Int, Int>, String>> {
+            return defaultInstance.fetchFullMetadataDetails(meta, tmdbKey)
         }
 
         fun searchCandidates(
@@ -59,10 +79,169 @@ class MetadataEnricher {
 
     private val cache = ConcurrentHashMap<String, EnrichedMetadata>()
     private val showCache = ConcurrentHashMap<String, EnrichedMetadata>()
+    private val runtimeCache = ConcurrentHashMap<String, Int>()
 
     fun clearCache() {
         cache.clear()
         showCache.clear()
+        runtimeCache.clear()
+    }
+
+    fun invalidateTitle(title: String) {
+        val clean = sanitizeTitle(title).lowercase()
+        if (clean.isBlank()) return
+        cache.keys.removeIf { it.lowercase().contains(clean) }
+        showCache.keys.removeIf { it.lowercase().contains(clean) }
+    }
+
+    fun fetchFullMetadataDetails(
+        meta: EnrichedMetadata,
+        tmdbKey: String = ""
+    ): Pair<EnrichedMetadata, Map<Pair<Int, Int>, String>> {
+        val episodeMap = mutableMapOf<Pair<Int, Int>, String>()
+        var resultMeta = meta
+        val cType = if (meta.type == "movie") "movie" else "series"
+
+        // 1. If IMDb ID is available, fetch full Cinemeta metadata + all episode names
+        val imdbId = meta.imdbId
+        if (!imdbId.isNullOrBlank() && imdbId.matches(Regex("(?i)^tt\\d+$"))) {
+            try {
+                val url = "https://v3-cinemeta.strem.io/meta/$cType/$imdbId.json"
+                val req = Request.Builder().url(url).header("User-Agent", "NoxMedia/1.0").build()
+                httpClient.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string()
+                        if (!body.isNullOrBlank()) {
+                            val root = JsonParser.parseString(body).asJsonObject
+                            val metaObj = root.getAsJsonObject("meta")
+                            if (metaObj != null) {
+                                val name = metaObj.get("name")?.asString
+                                val rawYear = metaObj.get("year")?.asString ?: metaObj.get("releaseInfo")?.asString
+                                val cleanYear = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(rawYear ?: "")?.groupValues?.get(1) ?: rawYear
+                                val poster = metaObj.get("poster")?.asString
+                                val bg = metaObj.get("background")?.asString
+                                val desc = metaObj.get("description")?.asString
+
+                                if (metaObj.has("videos")) {
+                                    val vids = metaObj.getAsJsonArray("videos")
+                                    for (v in vids) {
+                                        val vo = v.asJsonObject
+                                        val s = vo.get("season")?.asInt ?: 1
+                                        val e = vo.get("episode")?.asInt ?: vo.get("number")?.asInt
+                                        val epName = vo.get("name")?.asString ?: vo.get("title")?.asString
+                                        if (e != null && !epName.isNullOrBlank()) {
+                                            episodeMap[Pair(s, e)] = epName
+                                        }
+                                    }
+                                }
+
+                                resultMeta = resultMeta.copy(
+                                    title = name ?: resultMeta.title,
+                                    year = cleanYear ?: resultMeta.year,
+                                    overview = desc ?: resultMeta.overview,
+                                    posterUrl = poster ?: resultMeta.posterUrl,
+                                    backdropUrl = bg ?: resultMeta.backdropUrl,
+                                    imdbId = imdbId
+                                )
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.d(TAG, "Cinemeta full fetch failed: ${e.message}")
+            }
+
+            // Find matching TMDB ID if TMDB API key is provided
+            if (tmdbKey.isNotBlank()) {
+                try {
+                    val findUrl = "https://api.themoviedb.org/3/find/$imdbId?external_source=imdb_id&api_key=$tmdbKey"
+                    val req = Request.Builder().url(findUrl).build()
+                    httpClient.newCall(req).execute().use { resp ->
+                        if (resp.isSuccessful) {
+                            val body = resp.body?.string()
+                            if (!body.isNullOrBlank()) {
+                                val root = JsonParser.parseString(body).asJsonObject
+                                val tvResults = root.getAsJsonArray("tv_results")
+                                val movieResults = root.getAsJsonArray("movie_results")
+                                val found = if (meta.type == "movie") movieResults?.firstOrNull()?.asJsonObject else tvResults?.firstOrNull()?.asJsonObject
+                                if (found != null && found.has("id")) {
+                                    resultMeta = resultMeta.copy(tmdbId = found.get("id").asInt)
+                                }
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+
+        // 2. If TMDB ID is available and either IMDb was missing or episode titles still empty
+        val tmdbId = resultMeta.tmdbId
+        if (tmdbKey.isNotBlank() && tmdbId != null && tmdbId > 0) {
+            try {
+                val ep = if (meta.type == "movie") "movie/$tmdbId" else "tv/$tmdbId"
+                val url = "https://api.themoviedb.org/3/$ep?api_key=$tmdbKey&append_to_response=external_ids"
+                val req = Request.Builder().url(url).build()
+                httpClient.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string()
+                        if (!body.isNullOrBlank()) {
+                            val obj = JsonParser.parseString(body).asJsonObject
+                            val name = if (meta.type == "movie") obj.get("title")?.asString else obj.get("name")?.asString
+                            val relDate = if (meta.type == "movie") obj.get("release_date")?.asString else obj.get("first_air_date")?.asString
+                            val cleanYear = relDate?.split("-")?.firstOrNull()
+                            val desc = obj.get("overview")?.asString
+                            val posterPath = obj.get("poster_path")?.asString
+                            val bgPath = obj.get("backdrop_path")?.asString
+                            val extIds = obj.getAsJsonObject("external_ids")
+                            val resolvedImdb = extIds?.get("imdb_id")?.asString
+
+                            resultMeta = resultMeta.copy(
+                                title = resultMeta.title ?: name,
+                                year = cleanYear ?: resultMeta.year,
+                                overview = if (resultMeta.overview.isNullOrBlank()) desc else resultMeta.overview,
+                                posterUrl = resultMeta.posterUrl ?: posterPath?.let { "https://image.tmdb.org/t/p/w500$it" },
+                                backdropUrl = resultMeta.backdropUrl ?: bgPath?.let { "https://image.tmdb.org/t/p/original$it" },
+                                imdbId = resultMeta.imdbId ?: resolvedImdb
+                            )
+
+                            // If series and episodeMap is empty, fetch season episode titles from TMDB
+                            if (meta.type != "movie" && episodeMap.isEmpty() && obj.has("number_of_seasons")) {
+                                val numSeasons = obj.get("number_of_seasons").asInt
+                                for (s in 1..numSeasons) {
+                                    val sUrl = "https://api.themoviedb.org/3/tv/$tmdbId/season/$s?api_key=$tmdbKey"
+                                    val sReq = Request.Builder().url(sUrl).build()
+                                    httpClient.newCall(sReq).execute().use { sResp ->
+                                        if (sResp.isSuccessful) {
+                                            val sBody = sResp.body?.string()
+                                            if (!sBody.isNullOrBlank()) {
+                                                val sObj = JsonParser.parseString(sBody).asJsonObject
+                                                val eps = sObj.getAsJsonArray("episodes")
+                                                if (eps != null) {
+                                                    for (epElem in eps) {
+                                                        val epObj = epElem.asJsonObject
+                                                        val epNum = epObj.get("episode_number")?.asInt
+                                                        val epName = epObj.get("name")?.asString
+                                                        if (epNum != null && !epName.isNullOrBlank()) {
+                                                            episodeMap[Pair(s, epNum)] = epName
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        // Final sanitation on year: extract 4 digits if present
+        val finalYear = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(resultMeta.year ?: "")?.groupValues?.get(1) ?: resultMeta.year
+        resultMeta = resultMeta.copy(year = finalYear)
+
+        return Pair(resultMeta, episodeMap)
     }
 
     fun enrich(
@@ -161,9 +340,68 @@ class MetadataEnricher {
         if (!meta.imdbId.isNullOrBlank()) item.imdbId = meta.imdbId
         if (meta.tmdbId != null && meta.tmdbId > 0) item.tmdbId = meta.tmdbId
         if (meta.kitsuId != null && meta.kitsuId > 0) item.kitsuId = meta.kitsuId
+        if (item.durationSeconds <= 0 && meta.runtimeMinutes != null && meta.runtimeMinutes > 0) {
+            item.durationSeconds = meta.runtimeMinutes * 60
+        }
+    }
+
+    fun resolveRuntimeSeconds(item: MediaItem): Int {
+        if (item.durationSeconds > 60) return item.durationSeconds
+
+        val imdbId = item.imdbId
+        if (!imdbId.isNullOrBlank()) {
+            runtimeCache[imdbId]?.let { cachedSec ->
+                if (cachedSec > 0) {
+                    item.durationSeconds = cachedSec
+                    return cachedSec
+                }
+            }
+
+            try {
+                val cType = if (item.type == "movie") "movie" else "series"
+                val url = "https://v3-cinemeta.strem.io/meta/$cType/$imdbId.json"
+                val req = Request.Builder().url(url).header("User-Agent", "NoxMedia/1.0").build()
+                httpClient.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string()
+                        if (!body.isNullOrBlank()) {
+                            val root = JsonParser.parseString(body).asJsonObject
+                            val metaObj = root.getAsJsonObject("meta")
+                            var rtStr = metaObj?.get("runtime")?.asString
+                            if (rtStr.isNullOrBlank() && item.type == "series" && metaObj != null && metaObj.has("videos")) {
+                                val vids = metaObj.getAsJsonArray("videos")
+                                for (v in vids) {
+                                    val vo = v.asJsonObject
+                                    val s = vo.get("season")?.asInt
+                                    val e = vo.get("episode")?.asInt ?: vo.get("number")?.asInt
+                                    if (s == item.season && e == item.episode) {
+                                        rtStr = vo.get("runtime")?.asString
+                                        break
+                                    }
+                                }
+                            }
+                            if (!rtStr.isNullOrBlank()) {
+                                val mins = Regex("(\\d+)").find(rtStr)?.groupValues?.get(1)?.toIntOrNull()
+                                if (mins != null && mins > 0) {
+                                    val secs = mins * 60
+                                    runtimeCache[imdbId] = secs
+                                    item.durationSeconds = secs
+                                    return secs
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+        return 0
     }
 
     private fun fetchTmdbEpisodeTitle(tmdbId: Int, season: Int, episode: Int, apiKey: String): String? {
+        return fetchTmdbEpisodeInfo(tmdbId, season, episode, apiKey).first
+    }
+
+    private fun fetchTmdbEpisodeInfo(tmdbId: Int, season: Int, episode: Int, apiKey: String): Pair<String?, Int?> {
         return try {
             val epUrl = "https://api.themoviedb.org/3/tv/$tmdbId/season/$season/episode/$episode?api_key=$apiKey"
             val epReq = Request.Builder().url(epUrl).build()
@@ -172,12 +410,14 @@ class MetadataEnricher {
                     val epBody = epResp.body?.string()
                     if (!epBody.isNullOrBlank()) {
                         val epObj = JsonParser.parseString(epBody).asJsonObject
-                        epObj.get("name")?.asString
-                    } else null
-                } else null
+                        val epName = epObj.get("name")?.asString
+                        val runtime = epObj.get("runtime")?.asInt
+                        Pair(epName, runtime)
+                    } else Pair(null, null)
+                } else Pair(null, null)
             }
         } catch (_: Exception) {
-            null
+            Pair(null, null)
         }
     }
 
@@ -295,8 +535,11 @@ class MetadataEnricher {
                         val backdropUrl = if (!backdropPath.isNullOrBlank()) "https://image.tmdb.org/t/p/original$backdropPath" else null
 
                         var epTitle: String? = null
+                        var epRuntime: Int? = null
                         if (type == "series" && season != null && episode != null) {
-                            epTitle = fetchTmdbEpisodeTitle(tmdbId, season, episode, apiKey)
+                            val (t, rt) = fetchTmdbEpisodeInfo(tmdbId, season, episode, apiKey)
+                            epTitle = t
+                            epRuntime = rt
                         }
 
                         // Resolve IMDb ID from TMDB external_ids
@@ -324,7 +567,8 @@ class MetadataEnricher {
                             backdropUrl = backdropUrl,
                             episodeTitle = epTitle,
                             tmdbId = tmdbId,
-                            imdbId = tmdbImdbId
+                            imdbId = tmdbImdbId,
+                            runtimeMinutes = epRuntime
                         )
                     }
                 }
@@ -392,7 +636,8 @@ class MetadataEnricher {
                     val score = calculateSimilarity(title, name)
                     if (score > bestScore) {
                         bestScore = score
-                        val year = obj.get("year")?.asString
+                        val rawYear = obj.get("year")?.asString ?: obj.get("releaseInfo")?.asString
+                        val year = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(rawYear ?: "")?.groupValues?.get(1) ?: rawYear
                         val poster = obj.get("poster")?.asString
                         val background = obj.get("background")?.asString
                         val desc = obj.get("description")?.asString
@@ -410,7 +655,31 @@ class MetadataEnricher {
                 }
 
                 // Enforce minimum similarity threshold to reject loose/wrong matches (e.g. "08" -> "08/15")
-                if (bestScore >= 0.60) {
+                if (bestScore >= 0.60 && bestCandidate != null) {
+                    val candImdb = bestCandidate.imdbId
+                    if (!candImdb.isNullOrBlank()) {
+                        try {
+                            val metaUrl = "https://v3-cinemeta.strem.io/meta/$cType/$candImdb.json"
+                            val mReq = Request.Builder().url(metaUrl).header("User-Agent", "NoxMedia/1.0").build()
+                            httpClient.newCall(mReq).execute().use { mResp ->
+                                if (mResp.isSuccessful) {
+                                    val mBody = mResp.body?.string()
+                                    if (!mBody.isNullOrBlank()) {
+                                        val mRoot = JsonParser.parseString(mBody).asJsonObject
+                                        val mObj = mRoot.getAsJsonObject("meta")
+                                        val mRt = mObj?.get("runtime")?.asString
+                                        if (!mRt.isNullOrBlank()) {
+                                            val mins = Regex("(\\d+)").find(mRt)?.groupValues?.get(1)?.toIntOrNull()
+                                            if (mins != null && mins > 0) {
+                                                runtimeCache[candImdb] = mins * 60
+                                                bestCandidate = bestCandidate.copy(runtimeMinutes = mins)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (_: Exception) {}
+                    }
                     return bestCandidate
                 }
                 return null
@@ -446,7 +715,8 @@ class MetadataEnricher {
                             val metaObj = root.getAsJsonObject("meta")
                             if (metaObj != null) {
                                 val name = metaObj.get("name")?.asString
-                                val year = metaObj.get("year")?.asString
+                                val rawYear = metaObj.get("year")?.asString ?: metaObj.get("releaseInfo")?.asString
+                                val year = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(rawYear ?: "")?.groupValues?.get(1) ?: rawYear
                                 val poster = metaObj.get("poster")?.asString
                                 val bg = metaObj.get("background")?.asString
                                 val desc = metaObj.get("description")?.asString
@@ -483,7 +753,8 @@ class MetadataEnricher {
                             for (i in 0 until minOf(metas.size(), 12)) {
                                 val obj = metas[i].asJsonObject
                                 val name = obj.get("name")?.asString ?: continue
-                                val year = obj.get("year")?.asString
+                                val rawYear = obj.get("year")?.asString ?: obj.get("releaseInfo")?.asString
+                                val year = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(rawYear ?: "")?.groupValues?.get(1) ?: rawYear
                                 val poster = obj.get("poster")?.asString
                                 val bg = obj.get("background")?.asString
                                 val desc = obj.get("description")?.asString

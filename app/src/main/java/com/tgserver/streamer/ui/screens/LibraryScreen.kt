@@ -370,11 +370,7 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                         viewModel.copyToClipboard(url, "Stream link copied")
                     },
                     onRefreshMetadata = {
-                        val firstItem = currentGroup.items.firstOrNull()
-                        if (firstItem != null) {
-                            viewModel.refreshMediaMetadata(firstItem)
-                            viewModel.syncChannel(firstItem.channelId)
-                        }
+                        viewModel.refreshContentGroup(currentGroup.items)
                     }
                 )
             } else {

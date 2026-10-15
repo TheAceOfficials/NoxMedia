@@ -1433,3 +1433,59 @@ def close_stream(stream_id: str):
     session = _active_streams.pop(stream_id, None)
     if session:
         session.close()
+
+def check_dead_messages(api_id: int, api_hash: str, session_str: str, chat_id: int, message_ids_json: str) -> str:
+    """
+    Checks whether the specified message IDs in a channel still exist and contain media on Telegram.
+    Returns JSON string with 'dead_ids' and 'alive_ids'.
+    """
+    async def _async_check():
+        client = await _get_connected_stream_client(api_id, api_hash, session_str)
+        peer = await _ensure_channel_peer(client, int(chat_id))
+
+        try:
+            raw_ids = json.loads(message_ids_json)
+            msg_ids = [int(x) for x in raw_ids if int(x) > 0]
+        except Exception as e:
+            return json.dumps({"status": "error", "error": f"Invalid IDs: {e}", "dead_ids": [], "alive_ids": []})
+
+        if not msg_ids:
+            return json.dumps({"status": "ok", "dead_ids": [], "alive_ids": []})
+
+        dead_ids = []
+        alive_ids = []
+
+        # Batch in chunks of 100 messages (Pyrogram limit per RPC call)
+        batch_size = 100
+        for i in range(0, len(msg_ids), batch_size):
+            batch = msg_ids[i:i + batch_size]
+            try:
+                messages = await client.get_messages(peer, batch)
+                if not isinstance(messages, list):
+                    messages = [messages]
+
+                for idx, m in enumerate(messages):
+                    orig_id = batch[idx] if idx < len(batch) else (getattr(m, "id", None) or 0)
+                    if m is None or getattr(m, "empty", False):
+                        dead_ids.append(orig_id)
+                    else:
+                        has_media = bool(getattr(m, "video", None) or getattr(m, "document", None) or getattr(m, "audio", None) or getattr(m, "media", None))
+                        if not has_media:
+                            dead_ids.append(orig_id)
+                        else:
+                            alive_ids.append(orig_id)
+            except Exception as e:
+                print(f"Error checking message batch {batch} in chat {chat_id}: {e}", flush=True)
+
+        return json.dumps({
+            "status": "ok",
+            "dead_ids": dead_ids,
+            "alive_ids": alive_ids
+        })
+
+    try:
+        return run_async(_async_check(), timeout=45)
+    except Exception as e:
+        print(f"Error checking dead messages: {e}", flush=True)
+        return json.dumps({"status": "error", "error": str(e), "dead_ids": [], "alive_ids": []})
+

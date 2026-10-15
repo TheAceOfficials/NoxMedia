@@ -408,20 +408,47 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
 
     fun applyManualMetadata(groupItems: List<MediaItem>, meta: EnrichedMetadata) {
         viewModelScope.launch(Dispatchers.IO) {
+            val tmdbKey = prefs.getString("tmdb_api_key", "") ?: ""
+            val (enriched, episodeMap) = MetadataEnricher.fetchFullMetadataDetails(meta, tmdbKey)
+
             val updated = groupItems.map { item ->
+                val s = item.season
+                val e = item.episode
+                val newEpTitle = if (s != null && e != null) {
+                    episodeMap[Pair(s, e)] ?: item.episodeTitle
+                } else {
+                    item.episodeTitle
+                }
+
                 item.copy(
-                    title = meta.title ?: item.title,
-                    year = meta.year ?: item.year,
-                    overview = meta.overview ?: item.overview,
-                    posterUrl = meta.posterUrl ?: item.posterUrl,
-                    backdropUrl = meta.backdropUrl ?: item.backdropUrl,
-                    imdbId = meta.imdbId ?: item.imdbId,
-                    tmdbId = meta.tmdbId ?: item.tmdbId
+                    title = enriched.title ?: meta.title ?: item.title,
+                    year = enriched.year ?: meta.year ?: item.year,
+                    overview = enriched.overview ?: meta.overview ?: item.overview,
+                    posterUrl = enriched.posterUrl ?: meta.posterUrl ?: item.posterUrl,
+                    backdropUrl = enriched.backdropUrl ?: meta.backdropUrl ?: item.backdropUrl,
+                    episodeTitle = newEpTitle,
+                    imdbId = enriched.imdbId ?: meta.imdbId,
+                    tmdbId = enriched.tmdbId ?: meta.tmdbId
                 )
             }
+
+            // Invalidate caches for both old and new titles
+            val oldTitle = groupItems.firstOrNull()?.title
+            if (!oldTitle.isNullOrBlank()) {
+                MetadataEnricher.invalidateTitle(oldTitle)
+            }
+            if (!meta.title.isNullOrBlank()) {
+                MetadataEnricher.invalidateTitle(meta.title)
+            }
+            StreamerForegroundService.activeServer?.clearTitleCache()
+
             tgClient.updateMediaItems(updated)
             withContext(Dispatchers.Main) {
-                Toast.makeText(getApplication(), "✓ Metadata synced: ${meta.title}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    getApplication(),
+                    "✓ Metadata synced: ${enriched.title ?: meta.title} (${enriched.year ?: meta.year})",
+                    Toast.LENGTH_SHORT
+                ).show()
             }
         }
     }
@@ -732,7 +759,25 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
 
     fun scanDeadFiles(): Int = tgClient.scanDeadFiles()
 
+    suspend fun scanDeadFilesRemote(): Int = tgClient.scanDeadFilesRemote()
+
     fun purgeDeadFiles(): Int = tgClient.purgeDeadFiles()
+
+    fun refreshContentGroup(groupItems: List<MediaItem>, onFinished: ((Triple<Int, Int, Int>) -> Unit)? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = tgClient.refreshContentGroup(groupItems)
+            withContext(Dispatchers.Main) {
+                val (aliveCount, deadPurged, newAdded) = result
+                val msg = buildString {
+                    append("✓ Refreshed: $aliveCount active")
+                    if (deadPurged > 0) append(", $deadPurged dead removed")
+                    if (newAdded > 0) append(", $newAdded new added")
+                }
+                Toast.makeText(getApplication(), msg, Toast.LENGTH_SHORT).show()
+                onFinished?.invoke(result)
+            }
+        }
+    }
 
     fun getAppCacheSizeBytes(): Long = tgClient.getAppCacheSizeBytes()
 

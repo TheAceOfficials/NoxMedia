@@ -3,6 +3,10 @@ package com.tgserver.streamer.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.PowerManager
+import android.provider.Settings
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
@@ -77,6 +81,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
     // Library scan & storage state
     var duplicateScanCount by remember { mutableStateOf<Int?>(null) }
     var deadFilesScanCount by remember { mutableStateOf<Int?>(null) }
+    var isScanningDeadFiles by remember { mutableStateOf(false) }
     var cacheSizeBytes by remember { mutableStateOf(viewModel.getAppCacheSizeBytes()) }
 
     // Dialogs state
@@ -677,6 +682,68 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         onCheckedChange = { startOnBoot = it }
                     )
                 }
+
+                Spacer(modifier = Modifier.height(14.dp))
+                DotDivider(dotsCount = 20)
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Background Streaming / Battery Optimization Row
+                val powerManager = remember { context.getSystemService(Context.POWER_SERVICE) as? PowerManager }
+                var isIgnoringBattery by remember {
+                    mutableStateOf(powerManager?.isIgnoringBatteryOptimizations(context.packageName) == true)
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "Screen-Off Streaming Mode",
+                                color = TextPrimary,
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            NothingDotBadge(
+                                text = if (isIgnoringBattery) "UNRESTRICTED" else "OPTIMIZED",
+                                dotColor = if (isIgnoringBattery) StatusGreen else AccentYellow,
+                                textColor = if (isIgnoringBattery) StatusGreen else AccentYellow
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = if (isIgnoringBattery) "Battery optimization ignored. Background streaming will not disconnect."
+                            else "Android Doze may cut Wi-Fi when screen is off. Tap to allow unrestricted background execution.",
+                            color = TextTertiary,
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp
+                        )
+                    }
+
+                    if (!isIgnoringBattery) {
+                        NothingPillButton(
+                            text = "Unrestrict",
+                            onClick = {
+                                try {
+                                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                        data = Uri.parse("package:${context.packageName}")
+                                    }
+                                    context.startActivity(intent)
+                                } catch (_: Exception) {
+                                    try {
+                                        val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                                        context.startActivity(intent)
+                                    } catch (_: Exception) {}
+                                }
+                            },
+                            variant = NothingButtonVariant.Primary,
+                            height = 34.dp,
+                            modifier = Modifier.wrapContentWidth()
+                        )
+                    }
+                }
             }
 
             // ==================== 6. DATABASE & STORAGE MAINTENANCE ====================
@@ -792,11 +859,20 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
 
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         NothingPillButton(
-                            text = "Scan",
+                            text = if (isScanningDeadFiles) "Scanning..." else "Scan",
                             onClick = {
-                                val res = viewModel.scanDeadFiles()
-                                deadFilesScanCount = res
-                                Toast.makeText(context, if (res == 0) "✓ All indexed media files accessible" else "⚠ Detected $res inaccessible files", Toast.LENGTH_SHORT).show()
+                                if (isScanningDeadFiles) return@NothingPillButton
+                                coroutineScope.launch {
+                                    isScanningDeadFiles = true
+                                    val res = viewModel.scanDeadFilesRemote()
+                                    deadFilesScanCount = res
+                                    isScanningDeadFiles = false
+                                    Toast.makeText(
+                                        context,
+                                        if (res == 0) "✓ All indexed media files verified & online" else "⚠ Detected $res deleted or broken files",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
                             },
                             variant = NothingButtonVariant.Ghost,
                             height = 34.dp,

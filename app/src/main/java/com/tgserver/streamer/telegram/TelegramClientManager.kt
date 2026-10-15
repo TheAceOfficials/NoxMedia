@@ -21,7 +21,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
+import com.tgserver.streamer.metadata.EnrichedMetadata
+import com.tgserver.streamer.metadata.MetadataEnricher
+import com.tgserver.streamer.service.StreamerForegroundService
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.InputStream
@@ -74,6 +78,7 @@ class TelegramClientManager(private val context: Context) {
     private val mediaIndex = ConcurrentHashMap<String, MediaItem>()
     private val unmatchedIndex = ConcurrentHashMap<String, UnmatchedItem>()
     private val activeScanJobs = ConcurrentHashMap<Long, Job>()
+    private val detectedDeadIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     private val _apiCredentials = MutableStateFlow(
         Pair(
@@ -439,21 +444,252 @@ class TelegramClientManager(private val context: Context) {
     }
 
     fun scanDeadFiles(): Int {
-        return mediaIndex.values.count {
-            it.sizeBytes <= 0 || it.fileName.isBlank() || (it.channelId == 0L && it.messageId == 0) || (it.isSplit && it.parts.isEmpty())
+        val localDeadCount = mediaIndex.values.count {
+            detectedDeadIds.contains(it.id) ||
+            it.sizeBytes <= 0 ||
+            it.fileName.isBlank() ||
+            (it.channelId == 0L && it.messageId == 0) ||
+            (it.isSplit && it.parts.isEmpty())
         }
+        return localDeadCount
+    }
+
+    suspend fun scanDeadFilesRemote(): Int = withContext(Dispatchers.IO) {
+        detectedDeadIds.clear()
+
+        // 1. Check local corrupt items
+        val allItems = mediaIndex.values.toList()
+        for (item in allItems) {
+            if (item.sizeBytes <= 0 || item.fileName.isBlank() || (itIsInvalidMessage(item))) {
+                detectedDeadIds.add(item.id)
+            }
+        }
+
+        // 2. If logged in, verify on Telegram via Pyrogram
+        if (sessionState.value.isLoggedIn) {
+            val apiId = getApiId()
+            val apiHash = getApiHash()
+            val sessionStr = sessionState.value.sessionString
+            val bridge = getPyBridge()
+
+            if (bridge != null && sessionStr.isNotBlank() && apiId > 0) {
+                val byChannel = allItems.filter { it.channelId != 0L }.groupBy { it.channelId }
+                for ((channelId, items) in byChannel) {
+                    val msgIdToItemIds = mutableMapOf<Int, MutableList<String>>()
+                    for (item in items) {
+                        if (item.isSplit) {
+                            for (p in item.parts) {
+                                if (p.messageId > 0) {
+                                    msgIdToItemIds.getOrPut(p.messageId) { mutableListOf() }.add(item.id)
+                                }
+                            }
+                        } else if (item.messageId > 0) {
+                            msgIdToItemIds.getOrPut(item.messageId) { mutableListOf() }.add(item.id)
+                        }
+                    }
+
+                    val msgIds = msgIdToItemIds.keys.toList()
+                    if (msgIds.isEmpty()) continue
+
+                    for (chunk in msgIds.chunked(100)) {
+                        try {
+                            val jsonArrayStr = JSONArray(chunk).toString()
+                            val resStr = bridge.callAttr(
+                                "check_dead_messages",
+                                apiId,
+                                apiHash,
+                                sessionStr,
+                                channelId,
+                                jsonArrayStr
+                            ).toString()
+
+                            val resJson = JSONObject(resStr)
+                            if (resJson.optString("status") == "ok") {
+                                val deadArray = resJson.optJSONArray("dead_ids")
+                                if (deadArray != null) {
+                                    for (i in 0 until deadArray.length()) {
+                                        val deadMsgId = deadArray.getInt(i)
+                                        msgIdToItemIds[deadMsgId]?.forEach { itemId ->
+                                            detectedDeadIds.add(itemId)
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error checking dead messages for channel $channelId: ${e.message}")
+                        }
+                    }
+                }
+            }
+        }
+
+        scanDeadFiles()
+    }
+
+    private fun itIsInvalidMessage(item: MediaItem): Boolean {
+        return (item.channelId == 0L && item.messageId == 0) || (item.isSplit && item.parts.isEmpty())
     }
 
     fun purgeDeadFiles(): Int {
         val deadItems = mediaIndex.values.filter {
-            it.sizeBytes <= 0 || it.fileName.isBlank() || (it.channelId == 0L && it.messageId == 0) || (it.isSplit && it.parts.isEmpty())
+            detectedDeadIds.contains(it.id) ||
+            it.sizeBytes <= 0 ||
+            it.fileName.isBlank() ||
+            itIsInvalidMessage(it)
         }
         if (deadItems.isNotEmpty()) {
-            deadItems.forEach { mediaIndex.remove(it.id) }
+            deadItems.forEach {
+                mediaIndex.remove(it.id)
+                detectedDeadIds.remove(it.id)
+            }
             saveMediaIndex()
             _mediaState.value = mediaIndex.values.toList()
         }
+        detectedDeadIds.clear()
         return deadItems.size
+    }
+
+    suspend fun refreshContentGroup(groupItems: List<MediaItem>): Triple<Int, Int, Int> = withContext(Dispatchers.IO) {
+        if (groupItems.isEmpty()) return@withContext Triple(0, 0, 0)
+
+        var deadPurged = 0
+        var newAdded = 0
+        val remainingItems = mutableListOf<MediaItem>()
+
+        val primaryItem = groupItems.first()
+        val channelId = primaryItem.channelId
+
+        // 1. Check dead/deleted files on Telegram for this specific content group
+        if (sessionState.value.isLoggedIn && channelId != 0L) {
+            val apiId = getApiId()
+            val apiHash = getApiHash()
+            val sessionStr = sessionState.value.sessionString
+            val bridge = getPyBridge()
+
+            val msgIdToItemIds = mutableMapOf<Int, MutableList<String>>()
+            for (item in groupItems) {
+                if (item.isSplit) {
+                    for (p in item.parts) {
+                        if (p.messageId > 0) {
+                            msgIdToItemIds.getOrPut(p.messageId) { mutableListOf() }.add(item.id)
+                        }
+                    }
+                } else if (item.messageId > 0) {
+                    msgIdToItemIds.getOrPut(item.messageId) { mutableListOf() }.add(item.id)
+                }
+            }
+
+            val msgIds = msgIdToItemIds.keys.toList()
+            val groupDeadIds = mutableSetOf<String>()
+
+            if (bridge != null && sessionStr.isNotBlank() && msgIds.isNotEmpty()) {
+                for (chunk in msgIds.chunked(100)) {
+                    try {
+                        val jsonArrayStr = JSONArray(chunk).toString()
+                        val resStr = bridge.callAttr(
+                            "check_dead_messages",
+                            apiId,
+                            apiHash,
+                            sessionStr,
+                            channelId,
+                            jsonArrayStr
+                        ).toString()
+
+                        val resJson = JSONObject(resStr)
+                        if (resJson.optString("status") == "ok") {
+                            val deadArray = resJson.optJSONArray("dead_ids")
+                            if (deadArray != null) {
+                                for (i in 0 until deadArray.length()) {
+                                    val deadMsgId = deadArray.getInt(i)
+                                    msgIdToItemIds[deadMsgId]?.forEach { groupDeadIds.add(it) }
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error checking group dead messages: ${e.message}")
+                    }
+                }
+            }
+
+            // Purge any dead files from mediaIndex
+            for (item in groupItems) {
+                if (groupDeadIds.contains(item.id) || item.sizeBytes <= 0 || itIsInvalidMessage(item)) {
+                    mediaIndex.remove(item.id)
+                    deadPurged++
+                } else {
+                    remainingItems.add(item)
+                }
+            }
+        } else {
+            for (item in groupItems) {
+                if (item.sizeBytes <= 0 || item.fileName.isBlank() || itIsInvalidMessage(item)) {
+                    mediaIndex.remove(item.id)
+                    deadPurged++
+                } else {
+                    remainingItems.add(item)
+                }
+            }
+        }
+
+        // 2. Scan channel for new messages/episodes if channelId valid
+        if (sessionState.value.isLoggedIn && channelId != 0L) {
+            try {
+                val beforeCount = mediaIndex.size
+                syncChannel(channelId, limit = 100)
+                val afterCount = mediaIndex.size
+                newAdded = maxOf(0, afterCount - beforeCount)
+            } catch (e: Exception) {
+                Log.d(TAG, "Incremental channel sync error: ${e.message}")
+            }
+        }
+
+        // 3. Re-enrich metadata & refresh episode names for remaining items
+        val currentGroupItems = if (newAdded > 0) {
+            mediaIndex.values.filter { it.channelId == channelId && (it.imdbId == primaryItem.imdbId || it.title.equals(primaryItem.title, ignoreCase = true)) }
+        } else {
+            remainingItems
+        }
+
+        if (currentGroupItems.isNotEmpty()) {
+            val baseMeta = EnrichedMetadata(
+                title = primaryItem.title,
+                type = primaryItem.type,
+                year = primaryItem.year,
+                overview = primaryItem.overview,
+                posterUrl = primaryItem.posterUrl,
+                backdropUrl = primaryItem.backdropUrl,
+                imdbId = primaryItem.imdbId,
+                tmdbId = primaryItem.tmdbId
+            )
+            val tmdbKey = prefs.getString("tmdb_api_key", "") ?: ""
+
+            val (enriched, episodeMap) = MetadataEnricher.fetchFullMetadataDetails(baseMeta, tmdbKey)
+
+            for (item in currentGroupItems) {
+                val s = item.season
+                val e = item.episode
+                val epTitle = if (s != null && e != null) episodeMap[Pair(s, e)] ?: item.episodeTitle else item.episodeTitle
+
+                item.title = enriched.title ?: baseMeta.title ?: item.title
+                item.year = enriched.year ?: baseMeta.year ?: item.year
+                item.overview = enriched.overview ?: baseMeta.overview ?: item.overview
+                item.posterUrl = enriched.posterUrl ?: baseMeta.posterUrl ?: item.posterUrl
+                item.backdropUrl = enriched.backdropUrl ?: baseMeta.backdropUrl ?: item.backdropUrl
+                item.episodeTitle = epTitle
+                if (!enriched.imdbId.isNullOrBlank()) item.imdbId = enriched.imdbId
+                if (enriched.tmdbId != null && enriched.tmdbId > 0) item.tmdbId = enriched.tmdbId
+
+                mediaIndex[item.id] = item
+            }
+
+            MetadataEnricher.invalidateTitle(primaryItem.title)
+            StreamerForegroundService.activeServer?.clearTitleCache()
+        }
+
+        saveMediaIndex()
+        _mediaState.value = mediaIndex.values.toList()
+
+        Triple(currentGroupItems.size, deadPurged, newAdded)
     }
 
     fun getAppCacheSizeBytes(): Long {
@@ -1656,15 +1892,15 @@ class TelegramClientManager(private val context: Context) {
 
         val media = (if (!mediaId.isNullOrBlank()) mediaIndex[mediaId] else null)
             ?: (if (!mediaId.isNullOrBlank()) mediaIndex.values.find { it.id == mediaId } else null)
-            ?: if (extractedMsgId != null && extractedMsgId > 0) mediaIndex.values.find {
+            ?: (if (extractedMsgId != null && extractedMsgId > 0) mediaIndex.values.find {
                 (it.channelId == channelId || channelId == 0L) && it.isSplit &&
                 (it.messageId == extractedMsgId || it.parts.any { p -> p.messageId == extractedMsgId })
-            } else null
-            ?: if (extractedMsgId != null && extractedMsgId > 0) mediaIndex.values.find {
+            } else null)
+            ?: (if (extractedMsgId != null && extractedMsgId > 0) mediaIndex.values.find {
                 ((it.channelId == channelId || channelId == 0L) && it.messageId == extractedMsgId) ||
                 (it.channelId == channelId && it.isSplit && it.parts.any { p -> p.messageId == extractedMsgId })
-            } else null
-            ?: if (extractedMsgId != null && extractedMsgId > 0) mediaIndex.values.find { it.messageId == extractedMsgId } else null
+            } else null)
+            ?: (if (extractedMsgId != null && extractedMsgId > 0) mediaIndex.values.find { it.messageId == extractedMsgId } else null)
             ?: unmatchedIndex.values.find {
                 (!mediaId.isNullOrBlank() && it.id == mediaId) || (extractedMsgId != null && extractedMsgId > 0 && it.channelId == channelId && it.messageId == extractedMsgId)
             }?.parsedMediaItem
@@ -1693,8 +1929,8 @@ class TelegramClientManager(private val context: Context) {
             try {
                 val streamCacheDir = File(context.cacheDir, "stream_cache").apply { mkdirs() }.absolutePath
                 val activeCfg = com.tgserver.streamer.service.StreamerForegroundService.activeConfig
-                val diskMb = activeCfg?.diskCacheMb ?: 2048
-                val bufMb = activeCfg?.bufferPipelineMb ?: 20
+                val diskMb = activeCfg.diskCacheMb
+                val bufMb = activeCfg.bufferPipelineMb
                 try {
                     bridge.callAttr("configure_cache", streamCacheDir, diskMb, bufMb)
                 } catch (ce: Exception) {

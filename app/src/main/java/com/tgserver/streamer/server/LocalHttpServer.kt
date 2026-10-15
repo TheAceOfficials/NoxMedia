@@ -300,10 +300,16 @@ class LocalHttpServer(
         return newFixedLengthResponse(Response.Status.OK, "application/json", gson.toJson(res))
     }
 
-    private fun resolveTitleForId(imdbId: String?, kitsuId: Int?, mediaType: String): String? {
+    data class ResolvedMeta(val title: String?, val year: String?)
+
+    private fun resolveMetaForId(imdbId: String?, kitsuId: Int?, mediaType: String): ResolvedMeta? {
         if (kitsuId != null) {
             val key = "kitsu:$kitsuId"
-            idTitleCache[key]?.let { return it }
+            val metaKeyYear = "kitsu_year:$kitsuId"
+            val cachedTitle = idTitleCache[key]
+            if (cachedTitle != null) {
+                return ResolvedMeta(cachedTitle, idTitleCache[metaKeyYear])
+            }
             try {
                 val url = "https://kitsu.io/api/edge/anime/$kitsuId"
                 val req = Request.Builder().url(url).header("User-Agent", "NoxMedia/1.0").build()
@@ -314,16 +320,24 @@ class LocalHttpServer(
                         val title = root.getAsJsonObject("data")
                             ?.getAsJsonObject("attributes")
                             ?.get("canonicalTitle")?.asString
+                        val year = root.getAsJsonObject("data")
+                            ?.getAsJsonObject("attributes")
+                            ?.get("startDate")?.asString?.split("-")?.firstOrNull()
                         if (!title.isNullOrBlank()) {
                             idTitleCache[key] = title
-                            return title
+                            if (year != null) idTitleCache[metaKeyYear] = year
+                            return ResolvedMeta(title, year)
                         }
                     }
                 }
             } catch (_: Exception) {}
         } else if (!imdbId.isNullOrBlank() && imdbId.startsWith("tt", ignoreCase = true)) {
             val key = "imdb:$imdbId"
-            idTitleCache[key]?.let { return it }
+            val metaKeyYear = "imdb_year:$imdbId"
+            val cachedTitle = idTitleCache[key]
+            if (cachedTitle != null) {
+                return ResolvedMeta(cachedTitle, idTitleCache[metaKeyYear])
+            }
             try {
                 val cType = if (mediaType == "movie") "movie" else "series"
                 val url = "https://v3-cinemeta.strem.io/meta/$cType/$imdbId.json"
@@ -332,16 +346,24 @@ class LocalHttpServer(
                     if (resp.isSuccessful) {
                         val body = resp.body?.string() ?: return null
                         val root = JsonParser.parseString(body).asJsonObject
-                        val title = root.getAsJsonObject("meta")?.get("name")?.asString
+                        val metaObj = root.getAsJsonObject("meta")
+                        val title = metaObj?.get("name")?.asString
+                        val rawYear = metaObj?.get("year")?.asString ?: metaObj?.get("releaseInfo")?.asString
+                        val year = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(rawYear ?: "")?.groupValues?.get(1)
                         if (!title.isNullOrBlank()) {
                             idTitleCache[key] = title
-                            return title
+                            if (year != null) idTitleCache[metaKeyYear] = year
+                            return ResolvedMeta(title, year)
                         }
                     }
                 }
             } catch (_: Exception) {}
         }
         return null
+    }
+
+    fun clearTitleCache() {
+        idTitleCache.clear()
     }
 
     private fun cleanTitleForMatch(t: String): String {
@@ -437,16 +459,36 @@ class LocalHttpServer(
         // 2. Title-based resolution if direct ID didn't match (resolves IMDb/Kitsu ID to official title and matches strictly)
         if (matchedItems.isEmpty()) {
             val mediaType = parts.getOrNull(2) ?: "series"
-            val expectedTitle = resolveTitleForId(imdbId, kitsuId, mediaType)
+            val resolved = resolveMetaForId(imdbId, kitsuId, mediaType)
+            val expectedTitle = resolved?.title
+            val expectedYear = resolved?.year
             if (!expectedTitle.isNullOrBlank()) {
                 val cleanExpected = cleanTitleForMatch(expectedTitle)
                 if (cleanExpected.isNotBlank()) {
                     matchedItems = allMedia.filter { item ->
+                        // A. If item already has a verified IMDb ID or TMDB ID that belongs to another show, NEVER match it via title fallback!
+                        if (!item.imdbId.isNullOrBlank() && !imdbId.isNullOrBlank() && !item.imdbId.equals(imdbId, ignoreCase = true)) {
+                            return@filter false
+                        }
+                        if (item.tmdbId != null && !imdbId.isNullOrBlank() && (imdbId.startsWith("tmdb:", ignoreCase = true) || imdbId.all { it.isDigit() })) {
+                            val targetTmdb = imdbId.removePrefix("tmdb:").removePrefix("TMDB:").toIntOrNull()
+                            if (targetTmdb != null && item.tmdbId != targetTmdb) {
+                                return@filter false
+                            }
+                        }
+
+                        // B. Strict title match (Do NOT use startsWith which mixes up spinoffs like "Ben 10" with "Ben 10: Omniverse" or "Ben 10: Alien Force")
                         val cleanItem = cleanTitleForMatch(item.title)
-                        val titleMatches = cleanItem == cleanExpected ||
-                                cleanItem.startsWith(cleanExpected) ||
-                                cleanExpected.startsWith(cleanItem)
+                        val titleMatches = cleanItem == cleanExpected
                         if (!titleMatches) return@filter false
+
+                        // C. Strict year verification if both years are known
+                        if (!expectedYear.isNullOrBlank() && !item.year.isNullOrBlank()) {
+                            val itemYearClean = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(item.year!!)?.groupValues?.get(1)
+                            if (itemYearClean != null && itemYearClean != expectedYear) {
+                                return@filter false
+                            }
+                        }
 
                         if (targetSeason != null && targetEpisode != null) {
                             (item.season == null || item.season == targetSeason) && item.episode == targetEpisode
@@ -565,22 +607,27 @@ class LocalHttpServer(
             fnLower.contains("480p") || fnLower.contains("sd") || qLower.contains("480p") || qLower.contains("sd") -> 
                 "480p" to "SD"
             else -> 
-                "N/A" to "N/A"
+                (if (item.quality.isNotBlank()) item.quality else "Unknown") to (if (item.qualityBadge.isNotBlank()) item.qualityBadge else "Unknown")
         }
-        val streamName = "⌁ NoxMedia ・ $badge"
+        val streamName = "⌁ NoxMedia • $badge"
 
-        // 2. Line 1: Title, Year, Season/Episode, Duration
-        val yearStr = if (!item.year.isNullOrBlank()) " (${item.year})" else {
+        // 2. Line 1: Title, Clean Year, Clean Season & Episode
+        val rawYear = if (!item.year.isNullOrBlank()) {
+            Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(item.year!!)?.groupValues?.get(1)
+                ?: item.year!!.trim().removeSuffix("-")
+        } else {
             val yMatch = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(fn)
-            if (yMatch != null) " (${yMatch.groupValues[1]})" else ""
+            yMatch?.groupValues?.get(1)
         }
+        val yearStr = if (!rawYear.isNullOrBlank()) " ($rawYear)" else ""
+
         val epStr = if (item.season != null && item.episode != null) {
-            val baseEp = "・S%02dE%02d".format(item.season, item.episode)
+            val baseEp = " • S%02d E%02d".format(item.season, item.episode)
             if (!item.episodeTitle.isNullOrBlank()) "$baseEp - ${item.episodeTitle}" else baseEp
         } else ""
-        val durStr = if (item.durationSeconds > 0) " ⌚️ ${item.formattedDuration}" else ""
+
         val titleDisplay = if (item.title.isNotBlank()) item.title else rawFileName.substringBeforeLast(".")
-        val line1 = "Ϟ $titleDisplay$yearStr$epStr$durStr"
+        val line1 = "Ϟ $titleDisplay$yearStr$epStr"
 
         // 3. Line 2: Languages
         val langMap = listOf(
@@ -613,6 +660,7 @@ class LocalHttpServer(
         else if (Regex("(?i)dts").containsMatchIn(fn)) audioTags.add("DTS")
         if (Regex("(?i)\\baac\\b").containsMatchIn(fn)) audioTags.add("AAC")
         if (Regex("(?i)\\bflac\\b").containsMatchIn(fn)) audioTags.add("FLAC")
+        if (Regex("(?i)\\bopus\\b").containsMatchIn(fn)) audioTags.add("Opus")
 
         val chMatch = Regex("(7\\.1|5\\.1|2\\.0)").find(fn)
         val channels = chMatch?.value ?: ""
@@ -628,28 +676,75 @@ class LocalHttpServer(
 
         val visualTags = mutableListOf<String>()
         if (Regex("(?i)\\bimax\\b").containsMatchIn(fn)) visualTags.add("IMAX")
-        if (Regex("(?i)(dolby\\s*vision|\\bdv\\b)").containsMatchIn(fn)) visualTags.add("DV")
+        if (Regex("(?i)(dolby\\s*vision|\\bdv\\b|\\bdovi\\b)").containsMatchIn(fn)) visualTags.add("DV")
         if (Regex("(?i)\\bhdr10\\+\\b").containsMatchIn(fn)) visualTags.add("HDR10+")
         else if (Regex("(?i)\\bhdr10\\b").containsMatchIn(fn)) visualTags.add("HDR10")
+        else if (Regex("(?i)\\bhlg\\b").containsMatchIn(fn)) visualTags.add("HLG")
         else if (Regex("(?i)\\bhdr\\b").containsMatchIn(fn)) visualTags.add("HDR")
         else if (Regex("(?i)\\bsdr\\b").containsMatchIn(fn)) visualTags.add("SDR")
 
-        if (Regex("(?i)\\b10bit\\b").containsMatchIn(fn)) visualTags.add("10bit")
+        if (Regex("(?i)\\b10-?bit\\b").containsMatchIn(fn)) visualTags.add("10bit")
         if (Regex("(?i)(hevc|x265|h\\.?265)").containsMatchIn(fn)) visualTags.add("H.265")
         else if (Regex("(?i)(avc|x264|h\\.?264)").containsMatchIn(fn)) visualTags.add("H.264")
         else if (Regex("(?i)\\bav1\\b").containsMatchIn(fn)) visualTags.add("AV1")
 
-        val visPart = if (visualTags.isNotEmpty()) " 🔮 ${visualTags.joinToString(" · ")}" else ""
-        val bitratePart = if (item.durationSeconds > 60 && item.sizeBytes > 0) {
-            val mbps = (item.sizeBytes.toDouble() * 8.0) / (item.durationSeconds * 1_000_000.0)
-            if (mbps >= 0.1) " 🎡 %.1f Mbps".format(mbps) else ""
-        } else ""
+        val visPart = if (visualTags.isNotEmpty()) "🔮 ${visualTags.joinToString(" · ")}" else ""
+
+        // Dynamic runtime resolution for Bitrate
+        var effectiveDurSec = item.durationSeconds
+        if (effectiveDurSec <= 0) {
+            effectiveDurSec = com.tgserver.streamer.metadata.MetadataEnricher.resolveRuntimeSeconds(item)
+        }
+        if (effectiveDurSec <= 0) {
+            // Check for explicit duration in filename/tags
+            val durMatch = Regex("(?i)(?:^|[^0-9])(\\d{1,2})h(?:our)?\\s*(\\d{1,2})m(?:in)?(?:[^a-zA-Z]|$)").find(fn)
+            if (durMatch != null) {
+                val h = durMatch.groupValues[1].toIntOrNull() ?: 0
+                val m = durMatch.groupValues[2].toIntOrNull() ?: 0
+                effectiveDurSec = (h * 3600) + (m * 60)
+            } else {
+                val minMatch = Regex("(?i)(?:^|[^0-9])(\\d{2,3})\\s*min(?:ute)?s?(?:[^a-zA-Z]|$)").find(fn)
+                if (minMatch != null) {
+                    val m = minMatch.groupValues[1].toIntOrNull() ?: 0
+                    effectiveDurSec = m * 60
+                }
+            }
+        }
+
+        var explicitMbps: Double? = null
+        val brMatch = Regex("(?i)(?:^|[^0-9])(\\d+(?:\\.\\d+)?)\\s*(?:mbps|mb/s)(?:[^a-zA-Z]|$)").find(fn)
+        if (brMatch != null) {
+            explicitMbps = brMatch.groupValues[1].toDoubleOrNull()
+        }
+
+        val bitratePart = when {
+            explicitMbps != null && explicitMbps >= 0.1 -> {
+                "🎡 %.1f Mbps".format(java.util.Locale.US, explicitMbps)
+            }
+            effectiveDurSec > 60 && item.sizeBytes > 0 -> {
+                val mbps = (item.sizeBytes.toDouble() * 8.0) / (effectiveDurSec * 1_000_000.0)
+                if (mbps >= 0.1) "🎡 %.1f Mbps".format(java.util.Locale.US, mbps) else ""
+            }
+            else -> ""
+        }
 
         val resDisplay = if (normRes != "N/A") normRes else item.quality
-        val line4 = "Ϟ 🍿 $resDisplay $sourceQuality$visPart$bitratePart".trim()
+        val resAndSource = listOf(resDisplay, sourceQuality).filter { it.isNotBlank() }.joinToString(" ")
+        val line4Elements = mutableListOf<String>()
+        if (resAndSource.isNotBlank()) line4Elements.add("🍿 $resAndSource")
+        if (visPart.isNotBlank()) line4Elements.add(visPart)
+        if (bitratePart.isNotBlank()) line4Elements.add(bitratePart)
+        val line4 = "Ϟ " + line4Elements.joinToString(" ")
 
-        // 6. Line 5: Size
-        val line5 = "Ϟ 🗃️ ${item.formattedSize}"
+        // 6. Line 5: Size in GiB
+        val gib = item.sizeBytes.toDouble() / (1024.0 * 1024.0 * 1024.0)
+        val sizeStr = if (gib >= 1.0) {
+            String.format(java.util.Locale.US, "%.1f GiB", gib)
+        } else {
+            val mib = item.sizeBytes.toDouble() / (1024.0 * 1024.0)
+            String.format(java.util.Locale.US, "%.1f MiB", mib)
+        }
+        val line5 = "Ϟ 🗄️ $sizeStr"
 
         // 7. Line 6: Release Group
         val rgMatch = Regex("[\\(\\[]([A-Za-z0-9_\\-\\s]+)[\\)\\]](?:\\.[a-zA-Z0-9]+)?$").find(fn)
@@ -692,13 +787,13 @@ class LocalHttpServer(
         val media = allMedia.find { it.id == targetParam }
             ?: allMedia.find { it.channelId == channelId && it.id == targetParam }
             // Prefer split items over standalone parts if multiple exist
-            ?: if (targetParamAsInt > 0) allMedia.find {
+            ?: (if (targetParamAsInt > 0) allMedia.find {
                 (it.channelId == channelId || channelId == 0L) && it.isSplit &&
                 (it.messageId == targetParamAsInt || it.parts.any { p -> p.messageId == targetParamAsInt })
-            } else null
-            ?: if (targetParamAsInt > 0) allMedia.find {
+            } else null)
+            ?: (if (targetParamAsInt > 0) allMedia.find {
                 ((it.channelId == channelId || channelId == 0L) && it.messageId == targetParamAsInt) || (it.messageId == targetParamAsInt)
-            } else null
+            } else null)
             ?: tgClient.getUnmatchedMedia().find {
                 it.id == targetParam || ((it.channelId == channelId || channelId == 0L) && it.messageId == targetParamAsInt)
             }?.parsedMediaItem

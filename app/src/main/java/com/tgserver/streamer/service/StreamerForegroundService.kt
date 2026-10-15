@@ -18,6 +18,8 @@ import com.tgserver.streamer.posters.SpatialPosterService
 import com.tgserver.streamer.server.LocalHttpServer
 import com.tgserver.streamer.telegram.TelegramClientManager
 
+import android.content.pm.ServiceInfo
+
 class StreamerForegroundService : Service() {
 
     companion object {
@@ -77,21 +79,40 @@ class StreamerForegroundService : Service() {
         return START_STICKY
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        // Maintain streaming server process running even when app task is swiped from recents
+    }
+
     private fun startServer() {
         createNotificationChannel()
 
         val notification = buildNotification("Server running on port ${activeConfig.port}")
-        startForeground(NOTIFICATION_ID, notification)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
 
-        // Acquire power locks to ensure low battery drain while keeping socket open
+        // Acquire partial wake lock to keep CPU alive during screen-off streaming
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "TGServer::HttpLock").apply {
             setReferenceCounted(false)
-            acquire(24 * 60 * 60 * 1000L) // 24 hours max safeguard
+            acquire(24 * 60 * 60 * 1000L) // 24 hours safeguard
         }
 
+        // Acquire Wi-Fi lock to prevent Wi-Fi chip power collapse when screen is off
         val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-        wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "TGServer::WifiLock").apply {
+        val wifiMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+        } else {
+            WifiManager.WIFI_MODE_FULL_HIGH_PERF
+        }
+        wifiLock = wifiManager.createWifiLock(wifiMode, "TGServer::WifiLock").apply {
             setReferenceCounted(false)
             acquire()
         }
@@ -149,13 +170,25 @@ class StreamerForegroundService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        val stopIntent = Intent(this, StreamerForegroundService::class.java).apply {
+            action = ACTION_STOP
+        }
+        val stopPendingIntent = PendingIntent.getService(
+            this,
+            1,
+            stopIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("NoxMedia Mobile Streamer")
             .setContentText(statusText)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setOngoing(true)
             .setContentIntent(pendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop Server", stopPendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .build()
     }

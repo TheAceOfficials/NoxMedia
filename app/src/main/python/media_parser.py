@@ -22,7 +22,7 @@ _RES_PATTERNS = [
 ]
 
 # HDR / Visual formats
-_VISUAL_RE = re.compile(r"(?i)\b(dolby\s*vision|dv|hdr10\+|hdr10|hdr|10bit|8bit)\b")
+_VISUAL_RE = re.compile(r"(?i)\b(dolby\s*vision|dv|dovi|hdr10\+|hdr10|hlg|hdr|10bit|8bit)\b")
 
 # Video codecs
 _CODEC_RE = re.compile(r"(?i)\b(hevc|x265|h\.?265|avc|x264|h\.?264|av1|vp9)\b")
@@ -304,9 +304,11 @@ def parse_media_filename(filename: str, caption: str = "", is_anime: bool = Fals
     
     # Build quality badge string for Stremio stream items
     badge_parts = [quality]
-    if "DV" in visuals:
+    if "DV" in visuals or "DOVI" in visuals or "DOLBY VISION" in visuals:
         badge_parts.append("DV")
-    if any(h in visuals for h in ("HDR", "HDR10", "HDR10+")):
+    if "HLG" in visuals:
+        badge_parts.append("HLG")
+    elif any(h in visuals for h in ("HDR", "HDR10", "HDR10+")):
         badge_parts.append("HDR")
     if "10BIT" in visuals:
         badge_parts.append("10bit")
