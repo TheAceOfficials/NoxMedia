@@ -35,7 +35,15 @@ import com.tgserver.streamer.R
 import com.tgserver.streamer.theme.*
 import com.tgserver.streamer.ui.AppTab
 import com.tgserver.streamer.ui.MainAppViewModel
+import android.graphics.BitmapFactory
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import java.io.File
 import java.util.Locale
 
 // Pixel Dot-Matrix Font (Exact match with Nothing / Canva design)
@@ -58,6 +66,13 @@ fun HomeScreen(viewModel: MainAppViewModel) {
         if (copiedRecently) {
             delay(2500)
             copiedRecently = false
+        }
+    }
+
+    // Refresh user profile & avatar when logged in
+    LaunchedEffect(session.isLoggedIn) {
+        if (session.isLoggedIn) {
+            viewModel.refreshUserProfile()
         }
     }
 
@@ -159,8 +174,9 @@ fun HomeScreen(viewModel: MainAppViewModel) {
                 )
             }
 
-            // Concentric Ring Lens Glyph
-            ConcentricRingEmblem(
+            // User Profile Photo or Fallback Concentric Ring Glyph
+            ProfileAvatar(
+                photoPath = session.avatarUrl,
                 modifier = Modifier.size(46.dp)
             )
         }
@@ -260,34 +276,82 @@ fun HomeScreen(viewModel: MainAppViewModel) {
 
                             Spacer(modifier = Modifier.height(18.dp))
 
-                            // 4 Metrics Columns: uptime, speed, session, all-time
+                            // 2 Large Prominent Metrics: Uptime & Speed
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 8.dp),
+                                    .padding(horizontal = 18.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                ServerMetricItem(
+                                ServerLargeMetricItem(
                                     value = telemetry.uptimeFormatted,
                                     label = "uptime",
                                     modifier = Modifier.weight(1f)
                                 )
-                                ServerMetricItem(
+                                ServerLargeMetricItem(
                                     value = telemetry.liveSpeedFormatted,
                                     label = "speed",
                                     modifier = Modifier.weight(1f)
                                 )
-                                ServerMetricItem(
-                                    value = telemetry.sessionDataFormatted,
-                                    label = "session",
-                                    modifier = Modifier.weight(1f)
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            // Secondary Traffic Details Shelf: Session & All-Time
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 18.dp)
+                                    .background(Color(0xFF131418), shape = RoundedCornerShape(10.dp))
+                                    .border(BorderStroke(0.8.dp, Color(0xFF26272E)), shape = RoundedCornerShape(10.dp))
+                                    .padding(horizontal = 16.dp, vertical = 9.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = "session",
+                                        color = Color(0xFF71747F),
+                                        fontFamily = NdotFont,
+                                        fontSize = 10.sp,
+                                        letterSpacing = 0.5.sp
+                                    )
+                                    Text(
+                                        text = telemetry.sessionDataFormatted,
+                                        color = Color(0xFFD4D4D8),
+                                        fontFamily = NdotFont,
+                                        fontSize = 11.5.sp
+                                    )
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .size(3.dp)
+                                        .background(Color(0xFF3F414D), shape = CircleShape)
                                 )
-                                ServerMetricItem(
-                                    value = telemetry.allTimeDataFormatted,
-                                    label = "all-time",
-                                    modifier = Modifier.weight(1f)
-                                )
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = "all-time",
+                                        color = Color(0xFF71747F),
+                                        fontFamily = NdotFont,
+                                        fontSize = 10.sp,
+                                        letterSpacing = 0.5.sp
+                                    )
+                                    Text(
+                                        text = telemetry.allTimeDataFormatted,
+                                        color = Color(0xFFD4D4D8),
+                                        fontFamily = NdotFont,
+                                        fontSize = 11.5.sp
+                                    )
+                                }
                             }
                         }
 
@@ -430,7 +494,7 @@ fun HomeScreen(viewModel: MainAppViewModel) {
 }
 
 @Composable
-private fun ServerMetricItem(
+private fun ServerLargeMetricItem(
     value: String,
     label: String,
     modifier: Modifier = Modifier
@@ -443,19 +507,90 @@ private fun ServerMetricItem(
             text = value,
             color = Color.White,
             fontFamily = NdotFont,
-            fontSize = 17.5.sp,
-            maxLines = 1
+            fontSize = 24.sp,
+            letterSpacing = 0.5.sp,
+            maxLines = 1,
+            textAlign = TextAlign.Center
         )
         Spacer(modifier = Modifier.height(6.dp))
         Text(
             text = label,
             color = Color(0xFF8E909A),
             fontFamily = NdotFont,
-            fontSize = 10.sp,
+            fontSize = 10.5.sp,
+            letterSpacing = 0.5.sp,
             maxLines = 1,
             softWrap = false,
             textAlign = TextAlign.Center
         )
+    }
+}
+
+@Composable
+private fun ProfileAvatar(
+    photoPath: String?,
+    modifier: Modifier = Modifier
+) {
+    var bitmap by remember(photoPath) { mutableStateOf<ImageBitmap?>(null) }
+
+    LaunchedEffect(photoPath) {
+        if (photoPath.isNullOrBlank()) {
+            bitmap = null
+            return@LaunchedEffect
+        }
+        withContext(Dispatchers.IO) {
+            try {
+                val clean = photoPath.removePrefix("file://")
+                val file = File(clean)
+                if (file.exists() && file.length() > 0) {
+                    val bmp = BitmapFactory.decodeFile(file.absolutePath)
+                    if (bmp != null) {
+                        withContext(Dispatchers.Main) {
+                            bitmap = bmp.asImageBitmap()
+                        }
+                        return@withContext
+                    }
+                }
+                if (photoPath.startsWith("http://") || photoPath.startsWith("https://")) {
+                    val req = okhttp3.Request.Builder()
+                        .url(photoPath)
+                        .header("User-Agent", "NoxMedia/1.0 (Android)")
+                        .build()
+                    val client = okhttp3.OkHttpClient()
+                    client.newCall(req).execute().use { resp ->
+                        if (resp.isSuccessful) {
+                            resp.body?.byteStream()?.use { stream ->
+                                val bmp = BitmapFactory.decodeStream(stream)
+                                if (bmp != null) {
+                                    withContext(Dispatchers.Main) {
+                                        bitmap = bmp.asImageBitmap()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    if (bitmap != null) {
+        Box(
+            modifier = modifier
+                .clip(CircleShape)
+                .border(1.5.dp, Color(0x66FFFFFF), CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Image(
+                bitmap = bitmap!!,
+                contentDescription = "Profile Photo",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        }
+    } else {
+        ConcentricRingEmblem(modifier = modifier)
     }
 }
 

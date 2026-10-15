@@ -42,8 +42,8 @@ data class TelemetryUiState(
     val manifestUrl: String = "http://127.0.0.1:7788/manifest.json",
     val uptimeFormatted: String = "0s",
     val liveSpeedFormatted: String = "0 B/s",
-    val sessionDataFormatted: String = "0 MB",
-    val allTimeDataFormatted: String = "0 MB",
+    val sessionDataFormatted: String = "0.0 MB",
+    val allTimeDataFormatted: String = "0.0 MB",
     val memoryUsedMb: Long = 20,
     val cpuPercent: Double = 0.0
 )
@@ -125,8 +125,17 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         StreamerForegroundService.activeConfig = loaded
         viewModelScope.launch(Dispatchers.IO) {
             tgClient.cleanupSplitDuplicates()
+            if (session.value.isLoggedIn) {
+                tgClient.refreshUserProfile()
+            }
         }
         startTelemetryLoop()
+    }
+
+    fun refreshUserProfile() {
+        viewModelScope.launch(Dispatchers.IO) {
+            tgClient.refreshUserProfile()
+        }
     }
 
     fun selectTab(tab: AppTab) {

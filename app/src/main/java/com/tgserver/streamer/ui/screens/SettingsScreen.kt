@@ -42,6 +42,11 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.graphics.BitmapFactory
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import java.io.File
 import com.tgserver.streamer.theme.*
 import com.tgserver.streamer.ui.MainAppViewModel
 import com.tgserver.streamer.ui.components.*
@@ -161,13 +166,36 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                                 .background(SurfaceCardElevated)
                                 .border(1.dp, BorderSilver, RoundedCornerShape(16.dp))
                         ) {
-                            Text(
-                                text = session.initials,
-                                color = TextPrimary,
-                                fontSize = 17.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace
-                            )
+                            val avatarBitmap = remember(session.avatarUrl) {
+                                val path = session.avatarUrl?.removePrefix("file://")
+                                if (!path.isNullOrBlank()) {
+                                    val f = File(path)
+                                    if (f.exists() && f.length() > 0) {
+                                        try {
+                                            BitmapFactory.decodeFile(f.absolutePath)?.asImageBitmap()
+                                        } catch (_: Exception) {
+                                            null
+                                        }
+                                    } else null
+                                } else null
+                            }
+
+                            if (avatarBitmap != null) {
+                                Image(
+                                    bitmap = avatarBitmap,
+                                    contentDescription = "Profile Photo",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Text(
+                                    text = session.initials,
+                                    color = TextPrimary,
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
                         }
 
                         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {

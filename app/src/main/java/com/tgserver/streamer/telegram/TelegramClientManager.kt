@@ -168,16 +168,19 @@ class TelegramClientManager(private val context: Context) {
             loadMediaIndex()
             loadUnmatchedIndex()
         }
-        // Pre-warm Python runtime and tg_bridge module asynchronously in background
-        CoroutineScope(Dispatchers.IO).launch {
+        // Pre-warm Python runtime and refresh user profile if logged in
+        managerScope.launch {
             try {
                 if (!Python.isStarted()) {
                     Python.start(AndroidPlatform(context))
                 }
                 Python.getInstance().getModule("tg_bridge")
                 Log.d(TAG, "Python runtime pre-warmed successfully in background")
+                if (sessionState.value.isLoggedIn) {
+                    refreshUserProfile()
+                }
             } catch (e: Exception) {
-                Log.w(TAG, "Background Python warm-up: ${e.message}")
+                Log.w(TAG, "Background Python warm-up / profile refresh: ${e.message}")
             }
         }
         startAutoScanLoop()
@@ -217,6 +220,13 @@ class TelegramClientManager(private val context: Context) {
     }
 
     private fun loadSession() {
+        var avatar = prefs.getString("avatar_url", null)
+        if (avatar.isNullOrBlank()) {
+            val localAvatar = File(context.filesDir, "profile_avatar.jpg")
+            if (localAvatar.exists() && localAvatar.length() > 0) {
+                avatar = localAvatar.absolutePath
+            }
+        }
         val session = AuthSession(
             isLoggedIn = prefs.getBoolean("is_logged_in", false),
             phoneNumber = prefs.getString("phone_number", "") ?: "",
@@ -224,7 +234,8 @@ class TelegramClientManager(private val context: Context) {
             username = prefs.getString("username", "") ?: "",
             userId = prefs.getLong("user_id", 0L),
             sessionString = prefs.getString("session_string", "") ?: "",
-            phoneCodeHash = prefs.getString("phone_code_hash", "") ?: ""
+            phoneCodeHash = prefs.getString("phone_code_hash", "") ?: "",
+            avatarUrl = avatar
         )
         _sessionState.value = session
     }
@@ -238,6 +249,7 @@ class TelegramClientManager(private val context: Context) {
             putLong("user_id", session.userId)
             putString("session_string", session.sessionString)
             putString("phone_code_hash", session.phoneCodeHash)
+            putString("avatar_url", session.avatarUrl)
             apply()
         }
         _sessionState.value = session
@@ -969,8 +981,62 @@ class TelegramClientManager(private val context: Context) {
                 )
 
             saveSession(session)
+            managerScope.launch { refreshUserProfile() }
             Result.success(session)
         } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun refreshUserProfile(): Result<AuthSession> = withContext(Dispatchers.IO) {
+        try {
+            val session = _sessionState.value
+            if (!session.isLoggedIn || session.sessionString.isBlank()) {
+                return@withContext Result.failure(IllegalStateException("Not logged in"))
+            }
+
+            val bridge = getPyBridge()
+                ?: return@withContext Result.failure(IllegalStateException("Python runtime could not be started"))
+
+            val avatarFile = File(context.filesDir, "profile_avatar.jpg")
+            val jsonStr = bridge.callAttr(
+                "fetch_user_profile",
+                getApiId(),
+                getApiHash(),
+                session.sessionString,
+                avatarFile.absolutePath
+            ).toString()
+
+            val json = JSONObject(jsonStr)
+            if (json.optString("status") == "success") {
+                val userId = json.optLong("user_id", session.userId)
+                val firstName = json.optString("first_name", session.firstName)
+                val username = json.optString("username", session.username)
+                val photoPath = json.optString("photo_path", "")
+
+                val effectiveAvatar = if (photoPath.isNotBlank()) {
+                    photoPath
+                } else if (avatarFile.exists() && avatarFile.length() > 0) {
+                    avatarFile.absolutePath
+                } else {
+                    session.avatarUrl
+                }
+
+                val updatedSession = session.copy(
+                    userId = userId,
+                    firstName = firstName,
+                    username = username,
+                    avatarUrl = effectiveAvatar
+                )
+                saveSession(updatedSession)
+                Log.d(TAG, "User profile refreshed: $firstName (@$username), avatar: $effectiveAvatar")
+                Result.success(updatedSession)
+            } else {
+                val err = json.optString("error", "Failed to fetch profile")
+                Result.failure(Exception(err))
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "refreshUserProfile error: ${e.message}")
             Result.failure(e)
         }
     }
@@ -1076,7 +1142,8 @@ class TelegramClientManager(private val context: Context) {
             val bridge = getPyBridge()
                 ?: return@withContext Result.failure(IllegalStateException("Python runtime could not be started"))
 
-            val jsonStr = bridge.callAttr("verify_code", trimmedCode).toString()
+            val avatarFile = File(context.filesDir, "profile_avatar.jpg")
+            val jsonStr = bridge.callAttr("verify_code", trimmedCode, avatarFile.absolutePath).toString()
             val json = JSONObject(jsonStr)
             val status = json.optString("status")
 
@@ -1085,6 +1152,7 @@ class TelegramClientManager(private val context: Context) {
                 val userId = json.optLong("user_id")
                 val firstName = json.optString("first_name", "Telegram User")
                 val username = json.optString("username", "user_$userId")
+                val photoPath = json.optString("photo_path", "")
 
                 val session = AuthSession(
                     isLoggedIn = true,
@@ -1092,9 +1160,11 @@ class TelegramClientManager(private val context: Context) {
                     username = username,
                     userId = userId,
                     sessionString = sessionStr,
-                    phoneNumber = _sessionState.value.phoneNumber
+                    phoneNumber = _sessionState.value.phoneNumber,
+                    avatarUrl = if (photoPath.isNotBlank()) photoPath else if (avatarFile.exists() && avatarFile.length() > 0) avatarFile.absolutePath else null
                 )
                 saveSession(session)
+                managerScope.launch { refreshUserProfile() }
                 Result.success(session)
             } else if (status == "2fa_required") {
                 Result.failure(Exception("2FA_REQUIRED"))
@@ -1112,7 +1182,8 @@ class TelegramClientManager(private val context: Context) {
             val bridge = getPyBridge()
                 ?: return@withContext Result.failure(IllegalStateException("Python runtime could not be started"))
 
-            val jsonStr = bridge.callAttr("check_password", password.trim()).toString()
+            val avatarFile = File(context.filesDir, "profile_avatar.jpg")
+            val jsonStr = bridge.callAttr("check_password", password.trim(), avatarFile.absolutePath).toString()
             val json = JSONObject(jsonStr)
 
             if (json.optString("status") == "success") {
@@ -1120,6 +1191,7 @@ class TelegramClientManager(private val context: Context) {
                 val userId = json.optLong("user_id")
                 val firstName = json.optString("first_name", "Telegram User")
                 val username = json.optString("username", "user_$userId")
+                val photoPath = json.optString("photo_path", "")
 
                 val session = AuthSession(
                     isLoggedIn = true,
@@ -1127,9 +1199,11 @@ class TelegramClientManager(private val context: Context) {
                     username = username,
                     userId = userId,
                     sessionString = sessionStr,
-                    phoneNumber = _sessionState.value.phoneNumber
+                    phoneNumber = _sessionState.value.phoneNumber,
+                    avatarUrl = if (photoPath.isNotBlank()) photoPath else if (avatarFile.exists() && avatarFile.length() > 0) avatarFile.absolutePath else null
                 )
                 saveSession(session)
+                managerScope.launch { refreshUserProfile() }
                 Result.success(session)
             } else {
                 val err = json.optString("error", "Incorrect 2FA password")
@@ -1155,6 +1229,10 @@ class TelegramClientManager(private val context: Context) {
     fun logout() {
         val emptySession = AuthSession()
         saveSession(emptySession)
+        try {
+            val f = File(context.filesDir, "profile_avatar.jpg")
+            if (f.exists()) f.delete()
+        } catch (_: Exception) {}
     }
 
     // --- Channel Management ---

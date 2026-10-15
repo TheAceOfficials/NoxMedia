@@ -280,7 +280,31 @@ def resend_code() -> str:
     except Exception as e:
         return json.dumps({"status": "error", "error": _format_auth_error(e)})
 
-def verify_code(code: str) -> str:
+async def _download_user_avatar(client: Client, user, target_path: str = "") -> str:
+    """Helper to download user profile photo using file_id or get_chat_photos."""
+    if not target_path:
+        target_path = "profile_avatar.jpg"
+    try:
+        if getattr(user, "photo", None):
+            file_id = getattr(user.photo, "big_file_id", None) or getattr(user.photo, "small_file_id", None)
+            if file_id:
+                downloaded = await client.download_media(file_id, file_name=target_path)
+                if downloaded and os.path.exists(downloaded):
+                    return str(downloaded)
+    except Exception as e:
+        print(f"Avatar download via user.photo notice: {e}", flush=True)
+
+    try:
+        async for photo in client.get_chat_photos("me", limit=1):
+            downloaded = await client.download_media(photo, file_name=target_path)
+            if downloaded and os.path.exists(downloaded):
+                return str(downloaded)
+    except Exception as e:
+        print(f"Avatar download via get_chat_photos notice: {e}", flush=True)
+
+    return ""
+
+def verify_code(code: str, target_avatar_path: str = "") -> str:
     global _auth_client, _auth_state
     
     async def _async_verify():
@@ -296,13 +320,15 @@ def verify_code(code: str) -> str:
         )
         
         session_str = await _auth_client.export_session_string()
+        photo_path = await _download_user_avatar(_auth_client, user, target_avatar_path)
         
         return {
             "status": "success",
             "user_id": user.id,
             "first_name": user.first_name or "Telegram User",
             "username": user.username or f"user_{user.id}",
-            "session_string": session_str
+            "session_string": session_str,
+            "photo_path": photo_path
         }
 
     try:
@@ -317,7 +343,7 @@ def verify_code(code: str) -> str:
     except Exception as e:
         return json.dumps({"status": "error", "error": _format_auth_error(e)})
 
-def check_password(password: str) -> str:
+def check_password(password: str, target_avatar_path: str = "") -> str:
     global _auth_client
     
     async def _async_check_pwd():
@@ -327,13 +353,15 @@ def check_password(password: str) -> str:
             
         user = await _auth_client.check_password(password.strip())
         session_str = await _auth_client.export_session_string()
+        photo_path = await _download_user_avatar(_auth_client, user, target_avatar_path)
         
         return {
             "status": "success",
             "user_id": user.id,
             "first_name": user.first_name or "Telegram User",
             "username": user.username or f"user_{user.id}",
-            "session_string": session_str
+            "session_string": session_str,
+            "photo_path": photo_path
         }
 
     try:
@@ -376,6 +404,31 @@ async def _get_connected_stream_client(api_id: int, api_hash: str, session_str: 
         print(f"Pre-caching dialogs notice: {e}", flush=True)
 
     return _stream_client
+
+def fetch_user_profile(api_id: int, api_hash: str, session_str: str, target_avatar_path: str = "") -> str:
+    """Fetches user info (name, username, id) and downloads profile avatar to target_avatar_path."""
+    async def _async_fetch():
+        client = await _get_connected_stream_client(int(api_id), str(api_hash), str(session_str))
+        me = await client.get_me()
+        if not me:
+            return {"status": "error", "error": "Could not retrieve user info"}
+
+        photo_path = await _download_user_avatar(client, me, target_avatar_path)
+
+        return {
+            "status": "success",
+            "user_id": me.id,
+            "first_name": me.first_name or "Telegram User",
+            "username": me.username or f"user_{me.id}",
+            "photo_path": photo_path
+        }
+
+    try:
+        res = run_async(_async_fetch(), timeout=30)
+        return json.dumps(res)
+    except Exception as e:
+        print(f"Error in fetch_user_profile: {e}", flush=True)
+        return json.dumps({"status": "error", "error": str(e)})
 
 def parse_media(filename: str, caption: str = "") -> str:
     """Parses a media filename and returns JSON metadata."""
