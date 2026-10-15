@@ -4,37 +4,31 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Toast
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.BasicAlertDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Text
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -42,15 +36,12 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import android.graphics.BitmapFactory
-import androidx.compose.foundation.Image
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
-import java.io.File
 import com.tgserver.streamer.theme.*
 import com.tgserver.streamer.ui.MainAppViewModel
 import com.tgserver.streamer.ui.components.*
 import kotlinx.coroutines.launch
+import java.io.File
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -89,6 +80,16 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
     var isScanningDeadFiles by remember { mutableStateOf(false) }
     var cacheSizeBytes by remember { mutableStateOf(viewModel.getAppCacheSizeBytes()) }
 
+    // Card Expansion states (clean minimal collapsed by default)
+    var expandedAccount by remember { mutableStateOf(false) }
+    var expandedPlayback by remember { mutableStateOf(false) }
+    var expandedMetadata by remember { mutableStateOf(false) }
+    var expandedArtworks by remember { mutableStateOf(false) }
+    var expandedServer by remember { mutableStateOf(false) }
+    var expandedStorage by remember { mutableStateOf(false) }
+    var expandedAutomation by remember { mutableStateOf(false) }
+    var expandedBackup by remember { mutableStateOf(false) }
+
     // Dialogs state
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showRestoreDialog by remember { mutableStateOf(false) }
@@ -100,9 +101,9 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // ==================== TOP BADGE & TITLE ====================
+            // ==================== HEADER ====================
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -111,144 +112,282 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 NothingDotBadge(
                     text = "NOXMEDIA",
                     dotColor = AccentApple,
-                    backgroundColor = Color(0x1FFFFFFF),
+                    backgroundColor = Color(0x1AFFFFFF),
                     textColor = TextPrimary
                 )
-
                 NothingDotBadge(
-                    text = "ENGINE CONFIG",
+                    text = "SETTINGS",
                     dotColor = AccentSilver,
-                    backgroundColor = Color(0x14FFFFFF),
+                    backgroundColor = Color(0x12FFFFFF),
                     textColor = TextSecondary
                 )
             }
 
-            Column(modifier = Modifier.padding(top = 4.dp)) {
+            Column(modifier = Modifier.padding(top = 2.dp, bottom = 4.dp)) {
                 Text(
                     text = "Settings",
                     color = TextPrimary,
-                    fontSize = 32.sp,
+                    fontSize = 28.sp,
                     fontWeight = FontWeight.Bold,
-                    letterSpacing = (-0.8).sp
+                    letterSpacing = (-0.5).sp
                 )
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = "Configure metadata pipelines, streaming quality, network access, and channel automation.",
+                    text = "Preferences & Engine",
                     color = TextSecondary,
-                    fontSize = 13.5.sp,
-                    lineHeight = 20.sp
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Normal
                 )
             }
 
-            // ==================== 1. PROFILE HEADER CARD ====================
-            NothingCard(
-                modifier = Modifier.fillMaxWidth(),
-                backgroundColor = SurfaceCard,
-                borderColor = BorderSubtle,
-                contentPadding = PaddingValues(16.dp)
+            // ==================== 1. ACCOUNT ====================
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .border(BorderStroke(1.dp, Color(0xFF22242D)), RoundedCornerShape(18.dp)),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF12141A))
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
                     Row(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { expandedAccount = !expandedAccount }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        // Avatar Squircle
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .size(50.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(SurfaceCardElevated)
-                                .border(1.dp, BorderSilver, RoundedCornerShape(16.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.weight(1f)
                         ) {
-                            val avatarBitmap = remember(session.avatarUrl) {
-                                val path = session.avatarUrl?.removePrefix("file://")
-                                if (!path.isNullOrBlank()) {
-                                    val f = File(path)
-                                    if (f.exists() && f.length() > 0) {
-                                        try {
-                                            BitmapFactory.decodeFile(f.absolutePath)?.asImageBitmap()
-                                        } catch (_: Exception) {
-                                            null
-                                        }
+                            // Avatar Squircle
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(Color(0xFF1B1D25))
+                                    .border(1.dp, Color(0xFF2D303B), RoundedCornerShape(14.dp))
+                            ) {
+                                val avatarBitmap = remember(session.avatarUrl) {
+                                    val path = session.avatarUrl?.removePrefix("file://")
+                                    if (!path.isNullOrBlank()) {
+                                        val f = File(path)
+                                        if (f.exists() && f.length() > 0) {
+                                            try {
+                                                BitmapFactory.decodeFile(f.absolutePath)?.asImageBitmap()
+                                            } catch (_: Exception) {
+                                                null
+                                            }
+                                        } else null
                                     } else null
-                                } else null
+                                }
+
+                                if (avatarBitmap != null) {
+                                    Image(
+                                        bitmap = avatarBitmap,
+                                        contentDescription = "Profile Photo",
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Text(
+                                        text = session.initials,
+                                        color = TextPrimary,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
 
-                            if (avatarBitmap != null) {
-                                Image(
-                                    bitmap = avatarBitmap,
-                                    contentDescription = "Profile Photo",
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop
-                                )
-                            } else {
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text(
-                                    text = session.initials,
+                                    text = session.firstName.ifBlank { "Telegram User" },
                                     color = TextPrimary,
-                                    fontSize = 17.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = if (session.username.isNotBlank()) "@${session.username}" else "Telegram Account",
+                                    color = TextSecondary,
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
 
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(
-                                text = session.firstName.ifBlank { "Telegram User" },
-                                color = TextPrimary,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            NothingPillButton(
+                                text = "Logout",
+                                onClick = { showLogoutDialog = true },
+                                variant = NothingButtonVariant.Ghost,
+                                height = 32.dp,
+                                modifier = Modifier.wrapContentWidth()
                             )
 
-                            Text(
-                                text = if (session.username.isNotBlank()) "@${session.username}" else "Telegram Account",
-                                color = TextSecondary,
-                                fontSize = 12.sp,
-                                fontFamily = FontFamily.Monospace,
-                                maxLines = 1
+                            val rotation by animateFloatAsState(
+                                targetValue = if (expandedAccount) 180f else 0f,
+                                label = "account_rot"
                             )
-
-                            if (session.userId > 0) {
-                                Text(
-                                    text = "USER ID: ${session.userId}",
-                                    color = TextTertiary,
-                                    fontSize = 10.5.sp,
-                                    fontFamily = FontFamily.Monospace
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF1B1D25))
+                                    .rotate(rotation)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.KeyboardArrowDown,
+                                    contentDescription = null,
+                                    tint = Color(0xFFA0A3B0),
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
                     }
 
-                    NothingPillButton(
-                        text = "Logout",
-                        onClick = { showLogoutDialog = true },
-                        variant = NothingButtonVariant.Ghost,
-                        height = 34.dp,
-                        modifier = Modifier.wrapContentWidth()
-                    )
+                    AnimatedVisibility(
+                        visible = expandedAccount,
+                        enter = fadeIn(tween(180)) + expandVertically(),
+                        exit = fadeOut(tween(140)) + shrinkVertically()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(0.5.dp)
+                                    .background(Color(0xFF22242D))
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text("USER ID", color = TextTertiary, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                                    Text(if (session.userId > 0) "${session.userId}" else "—", color = TextPrimary, fontSize = 13.sp)
+                                }
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp), horizontalAlignment = Alignment.End) {
+                                    Text("STATUS", color = TextTertiary, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        text = if (session.isLoggedIn) "Connected" else "Disconnected",
+                                        color = if (session.isLoggedIn) StatusGreen else StatusRed,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
-            // ==================== 2. METADATA PROVIDERS ====================
-            SettingsSectionCard(
-                icon = Icons.Default.Extension,
-                title = "METADATA PROVIDERS",
-                description = "Enrich movie & show catalogs with plot overviews, posters, and IMDb ratings."
+            // ==================== 2. PLAYBACK ====================
+            MinimalSettingsCard(
+                icon = Icons.Default.PlayCircle,
+                title = "Playback",
+                subtitle = "Priority: $selectedQuality • ${if (hideCamTs) "Clean" else "All"}",
+                isExpanded = expandedPlayback,
+                onToggleExpand = { expandedPlayback = !expandedPlayback }
             ) {
+                Text(
+                    text = "Preferred Quality Priority",
+                    color = TextPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Selected resolution is sorted to the top in Stremio stream results.",
+                    color = TextTertiary,
+                    fontSize = 11.sp
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Quality Chips Row
+                val qualities = listOf("Any", "4K", "2K", "1080p", "720p", "480p")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    qualities.forEach { q ->
+                        val isSelected = selectedQuality == q
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(36.dp)
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(if (isSelected) Color(0xFFFFFFFF) else Color(0xFF1B1D25))
+                                .border(1.dp, if (isSelected) Color.Transparent else Color(0xFF2C2F3A), RoundedCornerShape(9.dp))
+                                .clickable {
+                                    selectedQuality = q
+                                    viewModel.updateStreamingSettings(q, hideCamTs)
+                                }
+                        ) {
+                            Text(
+                                text = q,
+                                color = if (isSelected) Color(0xFF070709) else TextSecondary,
+                                fontSize = 11.5.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+                Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(Color(0xFF22242D)))
+                Spacer(modifier = Modifier.height(14.dp))
+
+                SettingToggleRow(
+                    title = "Filter CAM & TS",
+                    description = "Filters low-quality theatre recordings (CAM, TS) from Stremio stream listings.",
+                    checked = hideCamTs,
+                    onCheckedChange = {
+                        hideCamTs = it
+                        viewModel.updateStreamingSettings(selectedQuality, it)
+                    }
+                )
+            }
+
+            // ==================== 3. METADATA ====================
+            MinimalSettingsCard(
+                icon = Icons.Default.Extension,
+                title = "Metadata",
+                subtitle = "TMDB & TVDB enrichment",
+                isExpanded = expandedMetadata,
+                onToggleExpand = { expandedMetadata = !expandedMetadata }
+            ) {
+                Text(
+                    text = "Enriches movies, series, and anime catalogs with synopsis, posters, and IMDb ratings.",
+                    color = TextTertiary,
+                    fontSize = 11.5.sp,
+                    lineHeight = 16.sp
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
                 NothingTextField(
                     value = tmdbKeyInput,
                     onValueChange = {
                         tmdbKeyInput = it
                         tmdbKeyError = null
                     },
-                    label = "TMDB API KEY (V3)",
+                    label = "TMDB KEY (V3)",
                     badgeText = "MOVIES & SHOWS",
                     placeholder = "Paste your TMDB API Key...",
                     isMonospace = true,
@@ -257,7 +396,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     errorMessage = tmdbKeyError
                 )
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 NothingTextField(
                     value = tvdbKeyInput,
@@ -265,7 +404,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         tvdbKeyInput = it
                         tvdbKeyError = null
                     },
-                    label = "TVDB API KEY (V4)",
+                    label = "TVDB KEY (V4)",
                     badgeText = "SERIES & ANIME",
                     placeholder = "Paste your TVDB API Key...",
                     isMonospace = true,
@@ -274,54 +413,39 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     errorMessage = tvdbKeyError
                 )
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                // Compact Minimal Cascade Fallback Engine Card
+                // Cascade Fallback Engine Container
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(SurfaceCardElevated.copy(alpha = 0.5f))
-                        .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF161820))
+                        .border(1.dp, Color(0xFF242732), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
-                        text = "CASCADE FALLBACK ENGINE",
-                        color = TextPrimary,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
-                        letterSpacing = 0.8.sp
-                    )
-
-                    FallbackPipelineRow(
-                        category = "Movies",
-                        steps = listOf("TMDB", "Cinemeta")
-                    )
-
-                    FallbackPipelineRow(
-                        category = "Series",
-                        steps = listOf("TVDB", "TMDB", "Cinemeta")
-                    )
-
-                    FallbackPipelineRow(
-                        category = "Anime",
-                        steps = listOf("Kitsu", "TVDB", "TMDB", "Cinemeta")
-                    )
-
-                    Text(
-                        text = "• Missing provider keys seamlessly fallback to next provider.",
-                        color = TextTertiary,
+                        text = "FALLBACK CHAIN",
+                        color = Color(0xFFA0A3B0),
                         fontSize = 10.5.sp,
-                        lineHeight = 14.sp
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 0.5.sp
+                    )
+                    FallbackPipelineRow(category = "Movies", steps = listOf("TMDB", "Cinemeta"))
+                    FallbackPipelineRow(category = "Series", steps = listOf("TVDB", "TMDB", "Cinemeta"))
+                    FallbackPipelineRow(category = "Anime", steps = listOf("Kitsu", "TVDB", "TMDB", "Cinemeta"))
+                    Text(
+                        text = "• Missing keys fallback automatically to next provider.",
+                        color = TextTertiary,
+                        fontSize = 10.sp
                     )
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 NothingPillButton(
-                    text = if (isVerifyingKeys) "Verifying API Keys..." else "Save & Verify Provider Keys →",
+                    text = if (isVerifyingKeys) "Verifying..." else "Save & Verify Provider Keys →",
                     isLoading = isVerifyingKeys,
                     onClick = {
                         coroutineScope.launch {
@@ -345,20 +469,22 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     },
                     modifier = Modifier.fillMaxWidth(),
                     variant = NothingButtonVariant.Secondary,
-                    height = 46.dp
+                    height = 42.dp
                 )
             }
 
-            // ==================== 3. POSTERS & ARTWORKS ====================
-            SettingsSectionCard(
+            // ==================== 4. ARTWORKS ====================
+            MinimalSettingsCard(
                 icon = Icons.Default.Image,
-                title = "POSTERS & ARTWORKS",
-                description = "Customize poster templates used for rendering catalog cards in Stremio."
+                title = "Artworks",
+                subtitle = if (posterUrlInput.isNotBlank()) "Custom template active" else "Default TMDB / Cinemeta",
+                isExpanded = expandedArtworks,
+                onToggleExpand = { expandedArtworks = !expandedArtworks }
             ) {
                 NothingTextField(
                     value = posterUrlInput,
                     onValueChange = { posterUrlInput = it },
-                    label = "CUSTOM POSTER TEMPLATE URL",
+                    label = "POSTER TEMPLATE URL",
                     placeholder = "https://custom-posters.domain/template/{id}",
                     isMonospace = true,
                     singleLine = true,
@@ -376,122 +502,31 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     } else null
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
-
+                Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "Leave empty to use official high-res TMDB & Cinemeta posters.",
+                    text = "Leave empty to use official high-res TMDB & Cinemeta artwork.",
                     color = TextTertiary,
                     fontSize = 11.sp
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 NothingPillButton(
-                    text = "Save Poster Template →",
+                    text = "Save Template →",
                     onClick = { viewModel.updatePosterSettings(posterUrlInput) },
                     modifier = Modifier.fillMaxWidth(),
                     variant = NothingButtonVariant.Secondary,
-                    height = 46.dp
+                    height = 42.dp
                 )
             }
 
-            // ==================== 4. STREAMING PREFERENCES ====================
-            SettingsSectionCard(
-                icon = Icons.Default.PlayCircle,
-                title = "STREAMING PREFERENCES",
-                description = "Configure resolution prioritization and video stream filters."
-            ) {
-                Text(
-                    text = "PREFERRED QUALITY PRIORITY",
-                    color = TextPrimary,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    letterSpacing = 0.5.sp
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Quality Chips Row
-                val qualities = listOf("Any", "4K", "2K", "1080p", "720p", "480p")
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    qualities.forEach { q ->
-                        val isSelected = selectedQuality == q
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(38.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (isSelected) Color(0xFFFFFFFF) else SurfaceCardElevated)
-                                .border(1.dp, if (isSelected) Color.Transparent else BorderSubtle, RoundedCornerShape(10.dp))
-                                .clickable {
-                                    selectedQuality = q
-                                    viewModel.updateStreamingSettings(q, hideCamTs)
-                                }
-                        ) {
-                            Text(
-                                text = q,
-                                color = if (isSelected) Color(0xFF070709) else TextSecondary,
-                                fontSize = 11.5.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "Selected quality will be sorted to the very top in Stremio's stream selector.",
-                    color = TextTertiary,
-                    fontSize = 11.sp
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-                DotDivider(dotsCount = 20)
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Hide Cam/TS Toggle Row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                        Text(
-                            text = "Hide CAM & TeleSync Streams",
-                            color = TextPrimary,
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Filter low-quality theatre recordings (CAM, TS).",
-                            color = TextTertiary,
-                            fontSize = 11.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    NothingSwitch(
-                        checked = hideCamTs,
-                        onCheckedChange = {
-                            hideCamTs = it
-                            viewModel.updateStreamingSettings(selectedQuality, it)
-                        }
-                    )
-                }
-            }
-
-            // ==================== 5. SERVER & NETWORK ====================
-            SettingsSectionCard(
+            // ==================== 5. SERVER ====================
+            MinimalSettingsCard(
                 icon = Icons.Default.Dns,
-                title = "SERVER & NETWORK",
-                description = "Configure disk cache, pipeline streaming buffer, local port, and remote access."
+                title = "Server",
+                subtitle = "Port $portInput • Cache ${cacheMbInput}MB",
+                isExpanded = expandedServer,
+                onToggleExpand = { expandedServer = !expandedServer }
             ) {
                 // Aligned Cache MB, Buffer MB, and Local Port Row
                 Row(
@@ -545,77 +580,62 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 }
 
                 Spacer(modifier = Modifier.height(6.dp))
-
                 Text(
-                    text = "-1 = unlimited cache, 0 = none. Smaller values save storage on low-end devices.",
+                    text = "-1 = unlimited cache, 0 = disabled. Smaller values save local storage.",
                     color = TextTertiary,
-                    fontSize = 11.sp,
-                    lineHeight = 15.sp
+                    fontSize = 11.sp
                 )
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 // Action Buttons Row: Save & Restore Defaults
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Box(modifier = Modifier.weight(1.3f)) {
-                        NothingPillButton(
-                            text = "Save Settings →",
-                            onClick = {
-                                val parsedPort = portInput.toIntOrNull() ?: 7788
-                                val parsedCache = cacheMbInput.toIntOrNull() ?: 2048
-                                val parsedBuf = bufferMbInput.toIntOrNull() ?: 20
-                                viewModel.updateServerNetwork(parsedPort, parsedCache, parsedBuf, remoteUrlInput, startOnBoot)
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            variant = NothingButtonVariant.Primary,
-                            height = 44.dp
-                        )
-                    }
+                    NothingPillButton(
+                        text = "Save Settings →",
+                        onClick = {
+                            val parsedPort = portInput.toIntOrNull() ?: 7788
+                            val parsedCache = cacheMbInput.toIntOrNull() ?: 2048
+                            val parsedBuf = bufferMbInput.toIntOrNull() ?: 20
+                            viewModel.updateServerNetwork(parsedPort, parsedCache, parsedBuf, remoteUrlInput, startOnBoot)
+                        },
+                        modifier = Modifier.weight(1.3f),
+                        variant = NothingButtonVariant.Primary,
+                        height = 42.dp
+                    )
 
-                    Box(modifier = Modifier.weight(1f)) {
-                        NothingPillButton(
-                            text = "↺ Defaults",
-                            onClick = {
-                                val restored = viewModel.restoreServerDefaults()
-                                portInput = restored.port.toString()
-                                cacheMbInput = restored.diskCacheMb.toString()
-                                bufferMbInput = restored.bufferPipelineMb.toString()
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            variant = NothingButtonVariant.Secondary,
-                            height = 44.dp
-                        )
-                    }
+                    NothingPillButton(
+                        text = "↺ Defaults",
+                        onClick = {
+                            val restored = viewModel.restoreServerDefaults()
+                            portInput = restored.port.toString()
+                            cacheMbInput = restored.diskCacheMb.toString()
+                            bufferMbInput = restored.bufferPipelineMb.toString()
+                        },
+                        modifier = Modifier.weight(1f),
+                        variant = NothingButtonVariant.Secondary,
+                        height = 42.dp
+                    )
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
-                DotDivider(dotsCount = 20)
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
+                Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(Color(0xFF22242D)))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 // Remote Public IP / Tunnel URL
                 NothingTextField(
                     value = remoteUrlInput,
                     onValueChange = { remoteUrlInput = it },
-                    label = "REMOTE PUBLIC IP / TUNNEL URL",
+                    label = "REMOTE ACCESS URL",
                     badgeText = "OPTIONAL",
                     placeholder = "https://noxmedia.my-domain.ts.net",
                     isMonospace = true,
                     singleLine = true
                 )
 
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "Paste Tailscale, Cloudflare, or Ngrok public URL.",
-                    color = TextTertiary,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
                 // Tailscale Detection Row
                 if (tailscaleIp != null) {
@@ -631,12 +651,12 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     ) {
                         Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                             Text(
-                                text = "Tailscale Address Detected",
+                                text = "Tailscale Detected",
                                 color = StatusGreen,
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
-                            Spacer(modifier = Modifier.height(2.dp))
+                            Spacer(modifier = Modifier.height(1.dp))
                             Text(
                                 text = "IP: $tailscaleIp",
                                 color = TextSecondary,
@@ -652,7 +672,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                                 remoteUrlInput = "http://$tailscaleIp:$effectivePort"
                             },
                             variant = NothingButtonVariant.Ghost,
-                            height = 30.dp,
+                            height = 28.dp,
                             modifier = Modifier.wrapContentWidth()
                         )
                     }
@@ -660,13 +680,13 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 4.dp),
+                            .padding(vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(6.dp)
+                                .size(5.dp)
                                 .clip(CircleShape)
                                 .background(TextTertiary)
                         )
@@ -679,43 +699,22 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
-                DotDivider(dotsCount = 20)
+                Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(Color(0xFF22242D)))
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Start on Boot Switch Row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                        Text(
-                            text = "Start Server on Boot",
-                            color = TextPrimary,
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Auto-start streaming server when device boots.",
-                            color = TextTertiary,
-                            fontSize = 11.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    NothingSwitch(
-                        checked = startOnBoot,
-                        onCheckedChange = { startOnBoot = it }
-                    )
-                }
+                // Start on Boot
+                SettingToggleRow(
+                    title = "Start on Boot",
+                    description = "Automatically launches the streaming server in the background when your device reboots.",
+                    checked = startOnBoot,
+                    onCheckedChange = { startOnBoot = it }
+                )
 
                 Spacer(modifier = Modifier.height(14.dp))
-                DotDivider(dotsCount = 20)
+                Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(Color(0xFF22242D)))
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Background Streaming / Battery Optimization Row
+                // Screen-Off Streaming Mode Row
                 val powerManager = remember { context.getSystemService(Context.POWER_SERVICE) as? PowerManager }
                 var isIgnoringBattery by remember {
                     mutableStateOf(powerManager?.isIgnoringBatteryOptimizations(context.packageName) == true)
@@ -726,16 +725,16 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(
-                                text = "Screen-Off Streaming Mode",
+                                text = "Screen-Off Mode",
                                 color = TextPrimary,
-                                fontSize = 13.5.sp,
-                                fontWeight = FontWeight.SemiBold
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium
                             )
                             NothingDotBadge(
-                                text = if (isIgnoringBattery) "UNRESTRICTED" else "OPTIMIZED",
+                                text = if (isIgnoringBattery) "ACTIVE" else "OPTIMIZED",
                                 dotColor = if (isIgnoringBattery) StatusGreen else AccentYellow,
                                 textColor = if (isIgnoringBattery) StatusGreen else AccentYellow
                             )
@@ -743,7 +742,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = if (isIgnoringBattery) "Battery optimization ignored. Background streaming will not disconnect."
-                            else "Android Doze may cut Wi-Fi when screen is off. Tap to allow unrestricted background execution.",
+                            else "Android Doze can cut Wi-Fi when screen is off.",
                             color = TextTertiary,
                             fontSize = 11.sp,
                             lineHeight = 15.sp
@@ -767,32 +766,31 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                                 }
                             },
                             variant = NothingButtonVariant.Primary,
-                            height = 34.dp,
+                            height = 32.dp,
                             modifier = Modifier.wrapContentWidth()
                         )
                     }
                 }
             }
 
-            // ==================== 6. DATABASE & STORAGE MAINTENANCE ====================
-            SettingsSectionCard(
-                icon = Icons.Default.Build,
-                title = "DATABASE & STORAGE MAINTENANCE",
-                description = "Manage duplicate files, purge broken catalog entries, and clear cache memory & logs."
+            // ==================== 6. STORAGE ====================
+            MinimalSettingsCard(
+                icon = Icons.Default.FolderOpen,
+                title = "Storage",
+                subtitle = "Cache: ${formatBytes(cacheSizeBytes)}",
+                isExpanded = expandedStorage,
+                onToggleExpand = { expandedStorage = !expandedStorage }
             ) {
-                // 1. Duplicate Media Management
+                // 1. Duplicate Media Files
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(
-                                text = "Duplicate Media Files",
+                                text = "Duplicate Media",
                                 color = TextPrimary,
                                 fontSize = 13.5.sp,
                                 fontWeight = FontWeight.SemiBold
@@ -807,13 +805,11 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         }
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = if (duplicateScanCount == null) "Scan catalog for duplicates & unmerged split slices."
-                            else if (duplicateScanCount == 0) "All media entries and multi-part slices are clean and unique."
-                            else "$duplicateScanCount duplicate media entries detected in catalog.",
+                            text = if (duplicateScanCount == null) "Scan catalog for duplicate entries."
+                            else if (duplicateScanCount == 0) "Catalog is clean. No duplicates found."
+                            else "$duplicateScanCount duplicates detected.",
                             color = TextSecondary,
-                            fontSize = 11.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            fontSize = 11.sp
                         )
                     }
 
@@ -826,7 +822,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                                 Toast.makeText(context, if (res == 0) "✓ Catalog clean: 0 duplicates" else "⚠ Found $res duplicate entries", Toast.LENGTH_SHORT).show()
                             },
                             variant = NothingButtonVariant.Ghost,
-                            height = 34.dp,
+                            height = 32.dp,
                             modifier = Modifier.wrapContentWidth()
                         )
 
@@ -838,29 +834,26 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                                 Toast.makeText(context, if (res > 0) "✓ Deleted $res duplicate items" else "✓ Catalog clean: 0 duplicates", Toast.LENGTH_SHORT).show()
                             },
                             variant = if (duplicateScanCount != null && duplicateScanCount!! > 0) NothingButtonVariant.Primary else NothingButtonVariant.Secondary,
-                            height = 34.dp,
+                            height = 32.dp,
                             modifier = Modifier.wrapContentWidth()
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
-                DotDivider(dotsCount = 20)
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+                Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(Color(0xFF22242D)))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                // 2. Dead Files Management
+                // 2. Dead Entries
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(
-                                text = "Dead & Broken Entries",
+                                text = "Dead Entries",
                                 color = TextPrimary,
                                 fontSize = 13.5.sp,
                                 fontWeight = FontWeight.SemiBold
@@ -875,13 +868,11 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         }
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = if (deadFilesScanCount == null) "Scan library for 0-byte or deleted message entries."
-                            else if (deadFilesScanCount == 0) "All indexed media files are online and valid."
-                            else "$deadFilesScanCount inaccessible files detected.",
+                            text = if (deadFilesScanCount == null) "Scan library for broken or deleted messages."
+                            else if (deadFilesScanCount == 0) "All indexed files are online and valid."
+                            else "$deadFilesScanCount broken files detected.",
                             color = TextSecondary,
-                            fontSize = 11.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            fontSize = 11.sp
                         )
                     }
 
@@ -903,7 +894,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                                 }
                             },
                             variant = NothingButtonVariant.Ghost,
-                            height = 34.dp,
+                            height = 32.dp,
                             modifier = Modifier.wrapContentWidth()
                         )
 
@@ -915,15 +906,15 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                                 Toast.makeText(context, if (res > 0) "✓ Purged $res dead entries" else "✓ Catalog clean: 0 dead files", Toast.LENGTH_SHORT).show()
                             },
                             variant = if (deadFilesScanCount != null && deadFilesScanCount!! > 0) NothingButtonVariant.Primary else NothingButtonVariant.Secondary,
-                            height = 34.dp,
+                            height = 32.dp,
                             modifier = Modifier.wrapContentWidth()
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
-                DotDivider(dotsCount = 20)
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+                Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(Color(0xFF22242D)))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 // 3. Clear Cache
                 Row(
@@ -932,30 +923,17 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text(
-                                text = "Clear Application Cache",
-                                color = TextPrimary,
-                                fontSize = 13.5.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            NothingDotBadge(
-                                text = formatBytes(cacheSizeBytes),
-                                dotColor = AccentYellow,
-                                backgroundColor = Color(0x14FFD600),
-                                textColor = AccentYellow
-                            )
-                        }
+                        Text(
+                            text = "App Cache",
+                            color = TextPrimary,
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Free poster images, HTTP metadata cache, and temp files.",
+                            text = "Freed image & temporary stream data (${formatBytes(cacheSizeBytes)}).",
                             color = TextSecondary,
-                            fontSize = 11.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            fontSize = 11.sp
                         )
                     }
 
@@ -967,14 +945,14 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                             Toast.makeText(context, "✓ Cache cleared (${formatBytes(freed)} freed)", Toast.LENGTH_SHORT).show()
                         },
                         variant = NothingButtonVariant.Secondary,
-                        height = 34.dp,
+                        height = 32.dp,
                         modifier = Modifier.wrapContentWidth()
                     )
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
-                DotDivider(dotsCount = 20)
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+                Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(Color(0xFF22242D)))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 // 4. Clear Logs
                 Row(
@@ -984,18 +962,16 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 ) {
                     Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
                         Text(
-                            text = "Clear Diagnostic Logs",
+                            text = "Diagnostic Logs",
                             color = TextPrimary,
                             fontSize = 13.5.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Flush runtime streaming logs, error reports, and logcat buffer.",
+                            text = "Flush streaming runtime logs and diagnostics.",
                             color = TextSecondary,
-                            fontSize = 11.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            fontSize = 11.sp
                         )
                     }
 
@@ -1003,180 +979,93 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         text = "Clear Logs",
                         onClick = {
                             val ok = viewModel.clearAppLogs()
-                            Toast.makeText(context, if (ok) "✓ Runtime and diagnostic logs cleared" else "Failed to clear logs", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, if (ok) "✓ Runtime logs cleared" else "Failed to clear logs", Toast.LENGTH_SHORT).show()
                         },
                         variant = NothingButtonVariant.Ghost,
-                        height = 34.dp,
+                        height = 32.dp,
                         modifier = Modifier.wrapContentWidth()
                     )
                 }
             }
 
-            // ==================== 7. CHANNEL AUTOMATION ====================
-            SettingsSectionCard(
+            // ==================== 7. AUTOMATION ====================
+            MinimalSettingsCard(
                 icon = Icons.Default.Sync,
-                title = "CHANNEL AUTOMATION",
-                description = "Define rules for monitoring and importing newly posted content from channels."
+                title = "Automation",
+                subtitle = "Channel monitoring & duplicate rules",
+                isExpanded = expandedAutomation,
+                onToggleExpand = { expandedAutomation = !expandedAutomation }
             ) {
-                // Rule 1: Auto Scan
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                        Text(
-                            text = "Scan New Content Automatically",
-                            color = TextPrimary,
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Auto-index new video messages in monitored channels.",
-                            color = TextTertiary,
-                            fontSize = 11.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                SettingToggleRow(
+                    title = "Auto-Scan Channels",
+                    description = "Automatically indexes newly posted media files in monitored channels every 30 seconds.",
+                    checked = autoScanNewContent,
+                    onCheckedChange = {
+                        autoScanNewContent = it
+                        viewModel.updateChannelAutomation(it, replaceSameQuality, skipExactDuplicates)
                     }
+                )
 
-                    NothingSwitch(
-                        checked = autoScanNewContent,
-                        onCheckedChange = {
-                            autoScanNewContent = it
-                            viewModel.updateChannelAutomation(it, replaceSameQuality, skipExactDuplicates)
-                        }
-                    )
-                }
+                Spacer(modifier = Modifier.height(12.dp))
+                Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(Color(0xFF22242D)))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                Spacer(modifier = Modifier.height(14.dp))
-                DotDivider(dotsCount = 20)
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Rule 2: Replace Same Quality
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                        Text(
-                            text = "Replace Same Quality Content",
-                            color = TextPrimary,
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Replace older copies when identical resolution arrives.",
-                            color = TextTertiary,
-                            fontSize = 11.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                SettingToggleRow(
+                    title = "Replace Same Quality",
+                    description = "Upgrades or replaces older copies in your library when an identical or better resolution arrives.",
+                    checked = replaceSameQuality,
+                    onCheckedChange = {
+                        replaceSameQuality = it
+                        viewModel.updateChannelAutomation(autoScanNewContent, it, skipExactDuplicates)
                     }
+                )
 
-                    NothingSwitch(
-                        checked = replaceSameQuality,
-                        onCheckedChange = {
-                            replaceSameQuality = it
-                            viewModel.updateChannelAutomation(autoScanNewContent, it, skipExactDuplicates)
-                        }
-                    )
-                }
+                Spacer(modifier = Modifier.height(12.dp))
+                Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(Color(0xFF22242D)))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                Spacer(modifier = Modifier.height(14.dp))
-                DotDivider(dotsCount = 20)
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Rule 3: Skip Exact Duplicates
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                        Text(
-                            text = "Skip Exact Duplicate Files",
-                            color = TextPrimary,
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Skip re-indexing if exact file hash and size exist.",
-                            color = TextTertiary,
-                            fontSize = 11.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                SettingToggleRow(
+                    title = "Skip Exact Duplicates",
+                    description = "Skips re-indexing if the exact same file size and hash already exist in the catalog.",
+                    checked = skipExactDuplicates,
+                    onCheckedChange = {
+                        skipExactDuplicates = it
+                        viewModel.updateChannelAutomation(autoScanNewContent, replaceSameQuality, it)
                     }
-
-                    NothingSwitch(
-                        checked = skipExactDuplicates,
-                        onCheckedChange = {
-                            skipExactDuplicates = it
-                            viewModel.updateChannelAutomation(autoScanNewContent, replaceSameQuality, it)
-                        }
-                    )
-                }
+                )
             }
 
-            // ==================== 8. SERVER BACKUP & SYNC ====================
-            SettingsSectionCard(
+            // ==================== 8. BACKUP ====================
+            MinimalSettingsCard(
                 icon = Icons.Default.Backup,
-                title = "SERVER BACKUP & SYNC",
-                description = "Snapshot server configurations and channel libraries to local storage."
+                title = "Backup",
+                subtitle = if (autoBackupEnabled) "Scheduled: ${autoBackupHours}h" else "Manual snapshots",
+                isExpanded = expandedBackup,
+                onToggleExpand = { expandedBackup = !expandedBackup }
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                        Text(
-                            text = "Automatic Scheduled Backup",
-                            color = TextPrimary,
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Periodically save backup snapshots of server settings.",
-                            color = TextTertiary,
-                            fontSize = 11.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                SettingToggleRow(
+                    title = "Scheduled Backup",
+                    description = "Periodically saves local backup snapshots of all server settings and channels.",
+                    checked = autoBackupEnabled,
+                    onCheckedChange = {
+                        autoBackupEnabled = it
+                        viewModel.updateBackupSettings(it, autoBackupHours)
                     }
-
-                    NothingSwitch(
-                        checked = autoBackupEnabled,
-                        onCheckedChange = {
-                            autoBackupEnabled = it
-                            viewModel.updateBackupSettings(it, autoBackupHours)
-                        }
-                    )
-                }
+                )
 
                 AnimatedVisibility(
                     visible = autoBackupEnabled,
                     enter = fadeIn() + expandVertically(),
                     exit = fadeOut() + shrinkVertically()
                 ) {
-                    Column(modifier = Modifier.padding(top = 14.dp)) {
+                    Column(modifier = Modifier.padding(top = 12.dp)) {
                         Text(
-                            text = "BACKUP FREQUENCY INTERVAL",
+                            text = "Backup Frequency",
                             color = TextSecondary,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            letterSpacing = 0.5.sp
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
                         )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
+                        Spacer(modifier = Modifier.height(6.dp))
                         val intervals = listOf(1, 2, 6, 12, 24)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -1188,10 +1077,10 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                                     contentAlignment = Alignment.Center,
                                     modifier = Modifier
                                         .weight(1f)
-                                        .height(36.dp)
+                                        .height(34.dp)
                                         .clip(RoundedCornerShape(8.dp))
-                                        .background(if (isSelected) Color(0xFFFFFFFF) else SurfaceCardElevated)
-                                        .border(1.dp, if (isSelected) Color.Transparent else BorderSubtle, RoundedCornerShape(8.dp))
+                                        .background(if (isSelected) Color(0xFFFFFFFF) else Color(0xFF1B1D25))
+                                        .border(1.dp, if (isSelected) Color.Transparent else Color(0xFF2C2F3A), RoundedCornerShape(8.dp))
                                         .clickable {
                                             autoBackupHours = h
                                             viewModel.updateBackupSettings(autoBackupEnabled, h)
@@ -1209,9 +1098,9 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
-                DotDivider(dotsCount = 20)
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
+                Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(Color(0xFF22242D)))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1226,7 +1115,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                             Toast.makeText(context, "✓ Backup snapshot copied to clipboard!", Toast.LENGTH_SHORT).show()
                         },
                         variant = NothingButtonVariant.Secondary,
-                        height = 44.dp,
+                        height = 42.dp,
                         modifier = Modifier.weight(1f),
                         leadingIcon = {
                             Icon(Icons.Default.Download, null, tint = TextPrimary, modifier = Modifier.size(16.dp))
@@ -1240,7 +1129,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                             showRestoreDialog = true
                         },
                         variant = NothingButtonVariant.Ghost,
-                        height = 44.dp,
+                        height = 42.dp,
                         modifier = Modifier.weight(1f),
                         leadingIcon = {
                             Icon(Icons.Default.Upload, null, tint = TextPrimary, modifier = Modifier.size(16.dp))
@@ -1249,7 +1138,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 }
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(36.dp))
         }
     }
 
@@ -1388,7 +1277,9 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     placeholder = "{\n  \"serverConfig\": { ... }\n}",
                     singleLine = false,
                     isMonospace = true,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 200.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 120.dp, max = 200.dp)
                 )
 
                 Spacer(modifier = Modifier.height(18.dp))
@@ -1427,61 +1318,199 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
     }
 }
 
+/**
+ * Reusable Minimal Settings Card with expandable chevron arrow & detail container.
+ */
 @Composable
-private fun SettingsSectionCard(
+private fun MinimalSettingsCard(
     icon: ImageVector,
     title: String,
-    description: String,
-    content: @Composable ColumnScope.() -> Unit
+    subtitle: String? = null,
+    isExpanded: Boolean,
+    onToggleExpand: () -> Unit,
+    actionContent: (@Composable () -> Unit)? = null,
+    expandedContent: @Composable ColumnScope.() -> Unit
 ) {
-    NothingCard(
-        modifier = Modifier.fillMaxWidth(),
-        backgroundColor = SurfaceCard,
-        borderColor = BorderSubtle,
-        contentPadding = PaddingValues(18.dp)
+    val rotation by animateFloatAsState(
+        targetValue = if (isExpanded) 180f else 0f,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "chevron_rot"
+    )
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .border(BorderStroke(1.dp, Color(0xFF22242D)), RoundedCornerShape(18.dp)),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF12141A))
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Box(
-                contentAlignment = Alignment.Center,
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
                 modifier = Modifier
-                    .size(32.dp)
-                    .clip(RoundedCornerShape(9.dp))
-                    .background(SurfaceCardElevated)
-                    .border(1.dp, BorderSilver.copy(alpha = 0.45f), RoundedCornerShape(9.dp))
+                    .fillMaxWidth()
+                    .clickable { onToggleExpand() }
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(11.dp))
+                            .background(Color(0xFF1B1D25))
+                            .border(1.dp, Color(0xFF2A2D38), RoundedCornerShape(11.dp))
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = title,
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = (-0.2).sp
+                        )
+                        if (!subtitle.isNullOrBlank()) {
+                            Text(
+                                text = subtitle,
+                                color = Color(0xFF8E909B),
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (actionContent != null) {
+                        actionContent()
+                    }
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF1B1D25))
+                            .rotate(rotation)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.KeyboardArrowDown,
+                            contentDescription = if (isExpanded) "Collapse" else "Expand",
+                            tint = Color(0xFFA0A3B0),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+
+            AnimatedVisibility(
+                visible = isExpanded,
+                enter = fadeIn(tween(180)) + expandVertically(spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow)),
+                exit = fadeOut(tween(140)) + shrinkVertically(spring(stiffness = Spring.StiffnessMediumLow))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(0.5.dp)
+                            .background(Color(0xFF22242D))
+                    )
+                    Spacer(modifier = Modifier.height(14.dp))
+                    expandedContent()
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Clean setting toggle row with expandable information capsule on tap.
+ */
+@Composable
+private fun SettingToggleRow(
+    title: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    var showInfo by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { showInfo = !showInfo }
+            ) {
+                Text(
+                    text = title,
+                    color = TextPrimary,
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Medium
+                )
                 Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = TextPrimary,
-                    modifier = Modifier.size(17.dp)
+                    imageVector = Icons.Default.Info,
+                    contentDescription = "Details",
+                    tint = if (showInfo) Color.White else TextTertiary,
+                    modifier = Modifier.size(15.dp)
                 )
             }
 
-            Text(
-                text = title,
-                color = TextPrimary,
-                fontSize = 12.5.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                letterSpacing = 0.8.sp
+            NothingSwitch(
+                checked = checked,
+                onCheckedChange = onCheckedChange
             )
         }
 
-        Spacer(modifier = Modifier.height(6.dp))
-
-        Text(
-            text = description,
-            color = TextSecondary,
-            fontSize = 11.5.sp,
-            lineHeight = 16.5.sp
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        content()
+        AnimatedVisibility(
+            visible = showInfo,
+            enter = fadeIn(tween(150)) + expandVertically(),
+            exit = fadeOut(tween(120)) + shrinkVertically()
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF161820))
+                    .border(1.dp, Color(0xFF242732), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 10.dp, vertical = 8.dp)
+            ) {
+                Text(
+                    text = description,
+                    color = Color(0xFFA0A3B0),
+                    fontSize = 11.5.sp,
+                    lineHeight = 16.sp
+                )
+            }
+        }
     }
 }
 
@@ -1493,7 +1522,7 @@ private fun FallbackPipelineRow(
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text(
             text = category,
@@ -1512,8 +1541,7 @@ private fun FallbackPipelineRow(
                     text = step,
                     color = if (index == 0) TextPrimary else TextTertiary,
                     fontSize = 11.sp,
-                    fontWeight = if (index == 0) FontWeight.SemiBold else FontWeight.Normal,
-                    fontFamily = FontFamily.Monospace
+                    fontWeight = if (index == 0) FontWeight.SemiBold else FontWeight.Normal
                 )
                 if (index < steps.size - 1) {
                     Text(
