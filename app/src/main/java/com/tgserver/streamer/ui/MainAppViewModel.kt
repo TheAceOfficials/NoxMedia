@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.util.Log
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -821,7 +822,33 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         return freed
     }
 
-    fun clearAppLogs(): Boolean = tgClient.clearAppLogs()
+    private val _appLogs = MutableStateFlow<List<String>>(emptyList())
+    val appLogs: StateFlow<List<String>> = _appLogs.asStateFlow()
+
+    private val _isRefreshingLogs = MutableStateFlow(false)
+    val isRefreshingLogs: StateFlow<Boolean> = _isRefreshingLogs.asStateFlow()
+
+    fun refreshAppLogs() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isRefreshingLogs.value = true
+            try {
+                val logs = tgClient.getAppLogs()
+                _appLogs.value = logs
+            } catch (e: Exception) {
+                Log.e("MainAppViewModel", "Failed to refresh logs: ${e.message}")
+            } finally {
+                _isRefreshingLogs.value = false
+            }
+        }
+    }
+
+    fun clearAppLogs(): Boolean {
+        val ok = tgClient.clearAppLogs()
+        if (ok) {
+            _appLogs.value = emptyList()
+        }
+        return ok
+    }
 
     fun exportBackupJson(): String {
         val cfg = _config.value

@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -94,8 +95,32 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showRestoreDialog by remember { mutableStateOf(false) }
     var restoreJsonInput by remember { mutableStateOf("") }
+    var showLogsScreen by remember { mutableStateOf(false) }
 
-    AdaptiveScreenContainer(applyInsets = false) {
+    BackHandler(enabled = showLogsScreen) {
+        showLogsScreen = false
+    }
+
+    AnimatedContent(
+        targetState = showLogsScreen,
+        transitionSpec = {
+            if (targetState) {
+                slideInHorizontally(tween(220)) { it } + fadeIn(tween(180)) togetherWith
+                slideOutHorizontally(tween(200)) { -it / 3 } + fadeOut(tween(150))
+            } else {
+                slideInHorizontally(tween(220)) { -it / 3 } + fadeIn(tween(180)) togetherWith
+                slideOutHorizontally(tween(200)) { it } + fadeOut(tween(150))
+            }
+        },
+        label = "settings_logs_transition"
+    ) { isLogs ->
+        if (isLogs) {
+            LogsScreen(
+                viewModel = viewModel,
+                onBack = { showLogsScreen = false }
+            )
+        } else {
+            AdaptiveScreenContainer(applyInsets = false) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -788,32 +813,32 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(
-                                text = "Duplicate Media",
-                                color = TextPrimary,
-                                fontSize = 13.5.sp,
-                                fontWeight = FontWeight.SemiBold
+                        Text(
+                            text = "Duplicate Media",
+                            color = TextPrimary,
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        if (duplicateScanCount != null) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            NothingDotBadge(
+                                text = if (duplicateScanCount == 0) "0 CLEAN" else "$duplicateScanCount DUPES",
+                                dotColor = if (duplicateScanCount == 0) StatusGreen else StatusAmber,
+                                textColor = if (duplicateScanCount == 0) StatusGreen else StatusAmber
                             )
-                            if (duplicateScanCount != null) {
-                                NothingDotBadge(
-                                    text = if (duplicateScanCount == 0) "0 CLEAN" else "$duplicateScanCount DUPES",
-                                    dotColor = if (duplicateScanCount == 0) StatusGreen else StatusAmber,
-                                    textColor = if (duplicateScanCount == 0) StatusGreen else StatusAmber
-                                )
-                            }
                         }
-                        Spacer(modifier = Modifier.height(2.dp))
+                        Spacer(modifier = Modifier.height(3.dp))
                         Text(
                             text = if (duplicateScanCount == null) "Scan catalog for duplicate entries."
                             else if (duplicateScanCount == 0) "Catalog is clean. No duplicates found."
                             else "$duplicateScanCount duplicates detected.",
                             color = TextSecondary,
-                            fontSize = 11.sp
+                            fontSize = 11.sp,
+                            lineHeight = 14.sp
                         )
                     }
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         NothingPillButton(
                             text = "Scan",
                             onClick = {
@@ -851,32 +876,32 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(
-                                text = "Dead Entries",
-                                color = TextPrimary,
-                                fontSize = 13.5.sp,
-                                fontWeight = FontWeight.SemiBold
+                        Text(
+                            text = "Dead Entries",
+                            color = TextPrimary,
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        if (deadFilesScanCount != null) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            NothingDotBadge(
+                                text = if (deadFilesScanCount == 0) "0 DEAD" else "$deadFilesScanCount DEAD",
+                                dotColor = if (deadFilesScanCount == 0) StatusGreen else StatusRed,
+                                textColor = if (deadFilesScanCount == 0) StatusGreen else StatusRed
                             )
-                            if (deadFilesScanCount != null) {
-                                NothingDotBadge(
-                                    text = if (deadFilesScanCount == 0) "0 DEAD" else "$deadFilesScanCount DEAD",
-                                    dotColor = if (deadFilesScanCount == 0) StatusGreen else StatusRed,
-                                    textColor = if (deadFilesScanCount == 0) StatusGreen else StatusRed
-                                )
-                            }
                         }
-                        Spacer(modifier = Modifier.height(2.dp))
+                        Spacer(modifier = Modifier.height(3.dp))
                         Text(
                             text = if (deadFilesScanCount == null) "Scan library for broken or deleted messages."
                             else if (deadFilesScanCount == 0) "All indexed files are online and valid."
                             else "$deadFilesScanCount broken files detected.",
                             color = TextSecondary,
-                            fontSize = 11.sp
+                            fontSize = 11.sp,
+                            lineHeight = 14.sp
                         )
                     }
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         NothingPillButton(
                             text = if (isScanningDeadFiles) "Scanning..." else "Scan",
                             onClick = {
@@ -954,34 +979,42 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(Color(0xFF22242D)))
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // 4. Clear Logs
+                // 4. Diagnostic Logs Screen
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { showLogsScreen = true }
+                        .padding(vertical = 4.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
-                        Text(
-                            text = "Diagnostic Logs",
-                            color = TextPrimary,
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "Diagnostic Logs",
+                                color = TextPrimary,
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            NothingDotBadge(
+                                text = "LOGCAT",
+                                dotColor = AccentApple,
+                                textColor = TextSecondary
+                            )
+                        }
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Flush streaming runtime logs and diagnostics.",
+                            text = "Inspect, search, copy, share, and clear real-time system logs.",
                             color = TextSecondary,
                             fontSize = 11.sp
                         )
                     }
 
                     NothingPillButton(
-                        text = "Clear Logs",
-                        onClick = {
-                            val ok = viewModel.clearAppLogs()
-                            Toast.makeText(context, if (ok) "✓ Runtime logs cleared" else "Failed to clear logs", Toast.LENGTH_SHORT).show()
-                        },
-                        variant = NothingButtonVariant.Ghost,
+                        text = "View Logs →",
+                        onClick = { showLogsScreen = true },
+                        variant = NothingButtonVariant.Secondary,
                         height = 32.dp,
                         modifier = Modifier.wrapContentWidth()
                     )
@@ -1141,6 +1174,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
             Spacer(modifier = Modifier.height(36.dp))
         }
     }
+}
 
     // ==================== LOGOUT CONFIRMATION DIALOG ====================
     if (showLogoutDialog) {

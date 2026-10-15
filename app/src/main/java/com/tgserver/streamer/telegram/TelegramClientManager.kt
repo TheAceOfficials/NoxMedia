@@ -26,9 +26,11 @@ import org.json.JSONObject
 import com.tgserver.streamer.metadata.EnrichedMetadata
 import com.tgserver.streamer.metadata.MetadataEnricher
 import com.tgserver.streamer.service.StreamerForegroundService
+import java.io.BufferedReader
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.InputStream
+import java.io.InputStreamReader
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.util.concurrent.ConcurrentHashMap
@@ -759,6 +761,46 @@ class TelegramClientManager(private val context: Context) {
             Log.e(TAG, "Error clearing cache: ${e.message}")
         }
         return initialSize
+    }
+
+    fun getAppLogs(maxLines: Int = 3000): List<String> {
+        val lines = mutableListOf<String>()
+        try {
+            val process = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-v", "time"))
+            val reader = BufferedReader(InputStreamReader(process.inputStream))
+            var line: String?
+            while (reader.readLine().also { line = it } != null) {
+                line?.let {
+                    val trimmed = it.trimEnd()
+                    if (trimmed.isNotBlank()) {
+                        lines.add(trimmed)
+                    }
+                }
+            }
+            reader.close()
+            process.waitFor()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error reading logcat: ${e.message}")
+        }
+
+        // Also check if any log files exist in context.filesDir / "logs"
+        try {
+            val logDir = File(context.filesDir, "logs")
+            if (logDir.exists()) {
+                logDir.listFiles { _, name -> name.endsWith(".log") || name.endsWith(".txt") }?.forEach { f ->
+                    try {
+                        f.useLines { fileLines ->
+                            fileLines.forEach {
+                                val trimmed = it.trimEnd()
+                                if (trimmed.isNotBlank()) lines.add(trimmed)
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+        } catch (_: Exception) {}
+
+        return if (lines.size > maxLines) lines.takeLast(maxLines) else lines
     }
 
     fun clearAppLogs(): Boolean {
