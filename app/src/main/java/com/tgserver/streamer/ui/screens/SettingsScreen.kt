@@ -1175,6 +1175,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
         }
     }
 }
+}
 
     // ==================== LOGOUT CONFIRMATION DIALOG ====================
     if (showLogoutDialog) {
