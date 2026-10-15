@@ -71,6 +71,7 @@ class TgMediaInputStream(
         System.arraycopy(buf, bufferPos, b, off, toCopy)
         bufferPos += toCopy
         totalBytesRead += toCopy
+        com.tgserver.streamer.server.StreamTrafficStats.recordBytes(toCopy.toLong())
 
         return toCopy
     }

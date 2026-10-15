@@ -744,7 +744,7 @@ class LocalHttpServer(
             val mib = item.sizeBytes.toDouble() / (1024.0 * 1024.0)
             String.format(java.util.Locale.US, "%.1f MiB", mib)
         }
-        val line5 = "Ϟ 🗄️ $sizeStr"
+        val line5 = "Ϟ 🗃️ $sizeStr"
 
         // 7. Line 6: Release Group
         val rgMatch = Regex("[\\(\\[]([A-Za-z0-9_\\-\\s]+)[\\)\\]](?:\\.[a-zA-Z0-9]+)?$").find(fn)
@@ -1103,7 +1103,7 @@ class LocalHttpServer(
         }
 
         val info = JsonObject().apply {
-            addProperty("name", "NoxMedia Mobile Streamer")
+            addProperty("name", "NoxMedia Server")
             addProperty("version", "1.0.0")
             addProperty("status", if (config.isRunning) "online" else "paused")
             addProperty("port", config.port)

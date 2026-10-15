@@ -260,27 +260,32 @@ fun HomeScreen(viewModel: MainAppViewModel) {
 
                             Spacer(modifier = Modifier.height(18.dp))
 
-                            // 3 Metrics Columns
+                            // 4 Metrics Columns: uptime, speed, session, all-time
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 14.dp),
+                                    .padding(horizontal = 8.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 ServerMetricItem(
-                                    value = telemetry.uptimeFormatted.ifBlank { "1hr" },
+                                    value = telemetry.uptimeFormatted,
                                     label = "uptime",
                                     modifier = Modifier.weight(1f)
                                 )
                                 ServerMetricItem(
-                                    value = "${telemetry.memoryUsedMb}mb",
-                                    label = "ram usage",
+                                    value = telemetry.liveSpeedFormatted,
+                                    label = "speed",
                                     modifier = Modifier.weight(1f)
                                 )
                                 ServerMetricItem(
-                                    value = "${String.format(Locale.US, "%.1f", telemetry.cpuPercent)}%",
-                                    label = "cpu usage",
+                                    value = telemetry.sessionDataFormatted,
+                                    label = "session",
+                                    modifier = Modifier.weight(1f)
+                                )
+                                ServerMetricItem(
+                                    value = telemetry.allTimeDataFormatted,
+                                    label = "all-time",
                                     modifier = Modifier.weight(1f)
                                 )
                             }
@@ -438,7 +443,7 @@ private fun ServerMetricItem(
             text = value,
             color = Color.White,
             fontFamily = NdotFont,
-            fontSize = 20.sp,
+            fontSize = 17.5.sp,
             maxLines = 1
         )
         Spacer(modifier = Modifier.height(6.dp))
@@ -446,7 +451,7 @@ private fun ServerMetricItem(
             text = label,
             color = Color(0xFF8E909A),
             fontFamily = NdotFont,
-            fontSize = 10.5.sp,
+            fontSize = 10.sp,
             maxLines = 1,
             softWrap = false,
             textAlign = TextAlign.Center

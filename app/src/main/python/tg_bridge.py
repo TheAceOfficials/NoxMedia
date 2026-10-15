@@ -664,16 +664,7 @@ def scan_channel_batch(api_id: int, api_hash: str, session_str: str, channel_id:
     async def _async_scan():
         client = await _get_connected_stream_client(api_id, api_hash, session_str)
         chat_id = int(channel_id)
-
-        try:
-            await client.get_chat(chat_id)
-        except Exception:
-            try:
-                async for dialog in client.get_dialogs():
-                    if dialog.chat and (dialog.chat.id == chat_id or str(abs(dialog.chat.id)).endswith(str(abs(chat_id)))):
-                        break
-            except Exception:
-                pass
+        peer = await _ensure_channel_peer(client, chat_id)
 
         items = []
         split_parts = []
@@ -687,7 +678,7 @@ def scan_channel_batch(api_id: int, api_hash: str, session_str: str, channel_id:
         video_exts = (".mkv", ".mp4", ".avi", ".ts", ".m4v", ".mov", ".webm", ".flv", ".wmv", ".m2ts")
 
         try:
-            async for msg in client.get_chat_history(chat_id, limit=int(limit), offset_id=int(offset_id)):
+            async for msg in client.get_chat_history(peer, limit=int(limit), offset_id=int(offset_id)):
                 if first_msg_id == 0:
                     first_msg_id = msg.id
                 if min_msg_cutoff > 0 and msg.id <= min_msg_cutoff:

@@ -40,6 +40,9 @@ class StreamerForegroundService : Service() {
 
         var activeTgClient: TelegramClientManager? = null
             private set
+
+        var serverStartTime: Long = 0L
+            private set
     }
 
     private var server: LocalHttpServer? = null
@@ -124,6 +127,9 @@ class StreamerForegroundService : Service() {
             server?.start()
             activeServer = server
             isServiceRunning = true
+            serverStartTime = System.currentTimeMillis()
+            com.tgserver.streamer.server.StreamTrafficStats.init(applicationContext)
+            com.tgserver.streamer.server.StreamTrafficStats.resetSession()
             ServerQuickSettingsTileService.updateTileState(applicationContext)
 
             val ip = server?.getLocalIpAddress() ?: "127.0.0.1"
@@ -139,6 +145,8 @@ class StreamerForegroundService : Service() {
             server = null
             activeServer = null
             isServiceRunning = false
+            serverStartTime = 0L
+            com.tgserver.streamer.server.StreamTrafficStats.resetSession()
             ServerQuickSettingsTileService.updateTileState(applicationContext)
 
             if (wakeLock?.isHeld == true) wakeLock?.release()
@@ -181,7 +189,7 @@ class StreamerForegroundService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("NoxMedia Mobile Streamer")
+            .setContentTitle("NoxMedia Server")
             .setContentText(statusText)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setOngoing(true)

@@ -79,6 +79,8 @@ class TelegramClientManager(private val context: Context) {
     private val unmatchedIndex = ConcurrentHashMap<String, UnmatchedItem>()
     private val activeScanJobs = ConcurrentHashMap<Long, Job>()
     private val detectedDeadIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val managerScope = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
+    private var autoScanJob: Job? = null
 
     private val _apiCredentials = MutableStateFlow(
         Pair(
@@ -178,6 +180,40 @@ class TelegramClientManager(private val context: Context) {
                 Log.w(TAG, "Background Python warm-up: ${e.message}")
             }
         }
+        startAutoScanLoop()
+    }
+
+    fun startAutoScanLoop() {
+        autoScanJob?.cancel()
+        autoScanJob = managerScope.launch {
+            delay(15_000L) // Initial delay after boot
+            while (isActive) {
+                val isEnabled = prefs.getBoolean("auto_scan_new_content", true)
+                if (isEnabled && sessionState.value.isLoggedIn) {
+                    val channelList = channels.values.toList()
+                    for (ch in channelList) {
+                        if (!isActive) break
+                        if (activeScanJobs.containsKey(ch.id)) continue
+
+                        val maxKnown = getMaxKnownMessageId(ch.id)
+                        if (maxKnown > 0) {
+                            try {
+                                scanChannelLive(ch.id, incremental = true)
+                            } catch (e: Exception) {
+                                Log.d(TAG, "Auto scan error for ${ch.title}: ${e.message}")
+                            }
+                        }
+                        delay(2000L)
+                    }
+                }
+                delay(30_000L)
+            }
+        }
+    }
+
+    fun stopAutoScanLoop() {
+        autoScanJob?.cancel()
+        autoScanJob = null
     }
 
     private fun loadSession() {
@@ -1572,6 +1608,7 @@ class TelegramClientManager(private val context: Context) {
                 val lastMsgId = obj.optInt("last_msg_id", 0)
                 val messagesScanned = obj.optInt("messages_scanned", 0)
                 val hasMore = obj.optBoolean("has_more", false)
+                val reachedMin = obj.optBoolean("reached_min", false)
                 val firstMsgId = obj.optInt("first_msg_id", 0)
                 val maxMsgId = obj.optInt("max_msg_id", 0)
                 if (firstMsgId > newestEncounteredMsgId) newestEncounteredMsgId = firstMsgId
@@ -1641,7 +1678,6 @@ class TelegramClientManager(private val context: Context) {
                             )
                             unmatchedIndex[un.id] = un
                         }
-                        delay(20)
                     }
                 }
 
@@ -1813,7 +1849,7 @@ class TelegramClientManager(private val context: Context) {
                 onProgress(batchDoneProgress)
 
                 // Check termination conditions
-                if (!hasMore || lastMsgId <= 0 || messagesScanned == 0) {
+                if (!hasMore || lastMsgId <= 0 || messagesScanned == 0 || (incremental && reachedMin)) {
                     Log.i(TAG, "Completed scan of channel $channelId. Total scanned: $totalMessagesScanned messages")
                     break
                 }

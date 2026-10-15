@@ -40,7 +40,10 @@ data class TelemetryUiState(
     val port: Int = 7788,
     val localIp: String = "127.0.0.1",
     val manifestUrl: String = "http://127.0.0.1:7788/manifest.json",
-    val uptimeFormatted: String = "0m",
+    val uptimeFormatted: String = "0s",
+    val liveSpeedFormatted: String = "0 B/s",
+    val sessionDataFormatted: String = "0 MB",
+    val allTimeDataFormatted: String = "0 MB",
     val memoryUsedMb: Long = 20,
     val cpuPercent: Double = 0.0
 )
@@ -139,16 +142,30 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private fun startTelemetryLoop() {
+        com.tgserver.streamer.server.StreamTrafficStats.init(getApplication())
         viewModelScope.launch {
             while (true) {
                 val server = StreamerForegroundService.activeServer
                 val ip = server?.getLocalIpAddress() ?: LocalHttpServer.getLocalIpAddress()
                 val port = _config.value.port
                 val isRunning = StreamerForegroundService.isServiceRunning
-                val uptimeSec = (System.currentTimeMillis() - startTime) / 1000
+                val sTime = StreamerForegroundService.serverStartTime
+                val uptimeSec = if (isRunning && sTime > 0L) {
+                    maxOf(0L, (System.currentTimeMillis() - sTime) / 1000)
+                } else 0L
+
                 val h = uptimeSec / 3600
                 val m = (uptimeSec % 3600) / 60
-                val uptimeStr = if (h > 0) "${h}h ${m}m" else "${m}m"
+                val s = uptimeSec % 60
+                val uptimeStr = when {
+                    h > 0 -> "${h}h ${m}m"
+                    m > 0 -> "${m}m ${s}s"
+                    else -> "${s}s"
+                }
+
+                val speedBps = if (isRunning) com.tgserver.streamer.server.StreamTrafficStats.calculateLiveSpeed() else 0L
+                val sessionBytes = if (isRunning) com.tgserver.streamer.server.StreamTrafficStats.getSessionBytes() else 0L
+                val allTimeBytes = com.tgserver.streamer.server.StreamTrafficStats.getLifetimeBytes()
 
                 val runtime = Runtime.getRuntime()
                 val usedMem = (runtime.totalMemory() - runtime.freeMemory()) / (1024 * 1024)
@@ -159,10 +176,13 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                     localIp = ip,
                     manifestUrl = "http://$ip:$port/manifest.json",
                     uptimeFormatted = uptimeStr,
+                    liveSpeedFormatted = com.tgserver.streamer.server.StreamTrafficStats.formatSpeed(speedBps),
+                    sessionDataFormatted = com.tgserver.streamer.server.StreamTrafficStats.formatBytes(sessionBytes),
+                    allTimeDataFormatted = com.tgserver.streamer.server.StreamTrafficStats.formatBytes(allTimeBytes),
                     memoryUsedMb = usedMem,
                     cpuPercent = if (isRunning) 1.2 else 0.0
                 )
-                delay(3000)
+                delay(1000)
             }
         }
     }
@@ -741,6 +761,11 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             skipExactDuplicates = skipExact
         )
         saveStoredConfig(updated)
+        if (autoScan) {
+            tgClient.startAutoScanLoop()
+        } else {
+            tgClient.stopAutoScanLoop()
+        }
         Toast.makeText(getApplication(), "✓ Channel automation rules updated", Toast.LENGTH_SHORT).show()
     }
 
