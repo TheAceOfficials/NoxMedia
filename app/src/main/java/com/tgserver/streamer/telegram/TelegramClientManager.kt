@@ -41,6 +41,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
+import com.tgserver.streamer.server.StreamLog
 import okhttp3.FormBody
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -166,6 +167,7 @@ class TelegramClientManager(private val context: Context) {
     }
 
     init {
+        StreamLog.init(context)
         loadSession()
         loadChannels()
         CoroutineScope(Dispatchers.IO).launch {
@@ -178,7 +180,13 @@ class TelegramClientManager(private val context: Context) {
                 if (!Python.isStarted()) {
                     Python.start(AndroidPlatform(context))
                 }
-                Python.getInstance().getModule("tg_bridge")
+                val bridge = Python.getInstance().getModule("tg_bridge")
+                try {
+                    val logFile = StreamLog.getLogFilePath()
+                    if (logFile.isNotBlank()) {
+                        bridge.callAttr("configure_stream_logger", logFile)
+                    }
+                } catch (_: Exception) {}
                 Log.d(TAG, "Python runtime pre-warmed successfully in background")
                 if (sessionState.value.isLoggedIn) {
                     refreshUserProfile()
@@ -776,16 +784,37 @@ class TelegramClientManager(private val context: Context) {
     }
 
     fun getAppLogs(maxLines: Int = 3000): List<String> {
-        val lines = mutableListOf<String>()
+        val fileLines = mutableListOf<String>()
+        val logcatLines = mutableListOf<String>()
+
+        // 1. Read persistent stream logs and app log files FIRST
+        try {
+            val logDir = File(context.filesDir, "logs")
+            if (logDir.exists()) {
+                val files = logDir.listFiles { _, name -> name.endsWith(".log") || name.endsWith(".txt") }
+                files?.sortedBy { it.name }?.forEach { f ->
+                    try {
+                        f.useLines { lines ->
+                            lines.forEach {
+                                val trimmed = it.trimEnd()
+                                if (trimmed.isNotBlank()) fileLines.add(trimmed)
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+        } catch (_: Exception) {}
+
+        // 2. Read logcat, filtering out aggressive OEM system display/window spam
         try {
             val process = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-v", "time"))
             val reader = BufferedReader(InputStreamReader(process.inputStream))
             var line: String?
             while (reader.readLine().also { line = it } != null) {
-                line?.let {
-                    val trimmed = it.trimEnd()
-                    if (trimmed.isNotBlank()) {
-                        lines.add(trimmed)
+                line?.let { rawLine ->
+                    val trimmed = rawLine.trimEnd()
+                    if (trimmed.isNotBlank() && !isUselessLogcatNoise(trimmed)) {
+                        logcatLines.add(trimmed)
                     }
                 }
             }
@@ -795,28 +824,45 @@ class TelegramClientManager(private val context: Context) {
             Log.e(TAG, "Error reading logcat: ${e.message}")
         }
 
-        // Also check if any log files exist in context.filesDir / "logs"
-        try {
-            val logDir = File(context.filesDir, "logs")
-            if (logDir.exists()) {
-                logDir.listFiles { _, name -> name.endsWith(".log") || name.endsWith(".txt") }?.forEach { f ->
-                    try {
-                        f.useLines { fileLines ->
-                            fileLines.forEach {
-                                val trimmed = it.trimEnd()
-                                if (trimmed.isNotBlank()) lines.add(trimmed)
-                            }
-                        }
-                    } catch (_: Exception) {}
-                }
-            }
-        } catch (_: Exception) {}
+        // Keep all fileLogs (guarantees streaming logs are never pushed out by logcat)
+        val availableForLogcat = maxOf(0, maxLines - fileLines.size)
+        val selectedLogcat = if (logcatLines.size > availableForLogcat) logcatLines.takeLast(availableForLogcat) else logcatLines
 
-        return if (lines.size > maxLines) lines.takeLast(maxLines) else lines
+        val combined = ArrayList<String>(selectedLogcat.size + fileLines.size)
+        combined.addAll(selectedLogcat)
+        combined.addAll(fileLines)
+
+        return if (combined.size > maxLines) combined.takeLast(maxLines) else combined
+    }
+
+    private fun isUselessLogcatNoise(line: String): Boolean {
+        // Never filter out our app packages or explicit errors/warnings
+        if (line.contains("com.tgserver.streamer") || line.contains("LocalHttpServer") ||
+            line.contains("TelegramClientManager") || line.contains("TgMediaInputStream") ||
+            line.contains("StreamLog") || line.contains("tg_bridge") || line.contains("StreamerService") ||
+            line.contains(" E/") || line.contains(" W/") || line.contains("Exception") || line.contains("FATAL")
+        ) {
+            return false
+        }
+        // Filter out aggressive OEM window / rendering system spam
+        return line.contains("VRI[") ||
+                line.contains("ResourcesManagerExtImpl") ||
+                line.contains("OplusPredictiveBackController") ||
+                line.contains("Choreographer") ||
+                line.contains("DisplayManager") ||
+                line.contains("ViewRootImpl") ||
+                line.contains("InputMethodManager") ||
+                line.contains("InsetsController") ||
+                line.contains("SurfaceView") ||
+                line.contains("BufferQueueProducer") ||
+                line.contains("BLASTBufferQueue") ||
+                line.contains("OplusSystemUiNaviHelper") ||
+                line.contains("PhoneWindow")
     }
 
     fun clearAppLogs(): Boolean {
         return try {
+            StreamLog.clear()
             val logDir = File(context.filesDir, "logs")
             if (logDir.exists()) deleteDirRecursive(logDir)
             val files = context.filesDir.listFiles { _, name -> name.endsWith(".log") || name.endsWith(".txt") }
@@ -2196,15 +2242,19 @@ class TelegramClientManager(private val context: Context) {
                 // Small metadata probes (Cues, header probes <= 5MB) run independently without killing playback!
                 if (contentLength > 5_000_000L) {
                     activePlaybackStreamId?.let { prevId ->
-                        Log.i(TAG, "Seek detected: terminating previous playback stream $prevId immediately to free bandwidth")
+                        StreamLog.w(TAG, "Seek detected: terminating previous playback stream $prevId immediately to free bandwidth for range $startByte-$effectiveEnd")
                         try {
                             bridge.callAttr("close_stream", prevId)
+                            StreamLog.i(TAG, "Previous playback stream $prevId closed successfully")
                         } catch (ce: Exception) {
-                            Log.w(TAG, "Notice closing superseded stream $prevId: ${ce.message}")
+                            StreamLog.w(TAG, "Notice closing superseded stream $prevId: ${ce.message}")
                         }
                     }
+                } else {
+                    StreamLog.i(TAG, "Small metadata probe (length=$contentLength bytes <= 5MB) - running without killing active playback stream ($activePlaybackStreamId)")
                 }
 
+                val t0 = System.currentTimeMillis()
                 val streamId = bridge.callAttr(
                     "create_stream",
                     apiId,
@@ -2215,8 +2265,9 @@ class TelegramClientManager(private val context: Context) {
                     startByte,
                     effectiveEnd
                 )?.toString() ?: ""
+                val pyElapsed = System.currentTimeMillis() - t0
 
-                Log.i(TAG, "create_stream result: streamId=$streamId, partsCount=${partsList.size}, channelId=$effectiveChannelId, range=$startByte-$effectiveEnd/$totalSize")
+                StreamLog.i(TAG, "create_stream result in ${pyElapsed}ms: streamId=$streamId, partsCount=${partsList.size}, channelId=$effectiveChannelId, range=$startByte-$effectiveEnd/$totalSize (contentLength=$contentLength)")
 
                 if (streamId.isNotBlank()) {
                     if (contentLength > 5_000_000L) {
@@ -2232,10 +2283,10 @@ class TelegramClientManager(private val context: Context) {
                         mimeType = mimeType
                     )
                 } else {
-                    Log.e(TAG, "create_stream returned blank streamId for mediaId=$mediaId, channel=$effectiveChannelId")
+                    StreamLog.e(TAG, "create_stream returned blank streamId for mediaId=$mediaId, channel=$effectiveChannelId")
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error creating live MTProto stream: ${e.message}", e)
+                StreamLog.e(TAG, "Error creating live MTProto stream: ${e.message}", e)
                 throw java.io.IOException("Failed to create MTProto stream: ${e.message}", e)
             }
         }
@@ -2248,6 +2299,12 @@ class TelegramClientManager(private val context: Context) {
             val bridge = getPyBridge() ?: return
             val cacheFolder = File(context.cacheDir, "stream_cache").apply { mkdirs() }.absolutePath
             bridge.callAttr("configure_cache", cacheFolder, diskCacheMb, bufferPipelineMb)
+            try {
+                val logFile = StreamLog.getLogFilePath()
+                if (logFile.isNotBlank()) {
+                    bridge.callAttr("configure_stream_logger", logFile)
+                }
+            } catch (_: Exception) {}
             Log.d(TAG, "Stream cache configured: dir=$cacheFolder, diskCacheMb=$diskCacheMb, bufferMb=$bufferPipelineMb")
         } catch (e: Exception) {
             Log.e(TAG, "Error updating stream cache config: ${e.message}", e)

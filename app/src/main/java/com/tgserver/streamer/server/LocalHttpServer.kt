@@ -810,8 +810,13 @@ class LocalHttpServer(
         }
 
         val rangeHeader = headers["range"] ?: headers["Range"]
+        val userAgent = headers["user-agent"] ?: headers["User-Agent"] ?: "unknown"
+        val clientIp = session.remoteIpAddress ?: "unknown"
         var startByte = 0L
         var endByte = totalSize - 1L
+
+        StreamLog.i(TAG, "Incoming Video Stream [${session.method}] $uri | Range: ${rangeHeader ?: "none"} | UA: $userAgent | Client: $clientIp")
+        StreamLog.i(TAG, "Resolved target: file='$fileName', size=$totalSize bytes (${StreamTrafficStats.formatBytes(totalSize)}), isSplit=${media?.isSplit}, parts=${media?.parts?.size ?: 1}, target=$targetParam, msgId=$resolvedMessageId, ch=$effectiveChannelId")
 
         if (!rangeHeader.isNullOrBlank() && rangeHeader.startsWith("bytes=")) {
             val rangeVal = rangeHeader.removePrefix("bytes=").substringBefore(',').trim()
@@ -840,10 +845,12 @@ class LocalHttpServer(
 
         // Handle HEAD requests immediately without starting Pyrogram stream
         if (session.method == Method.HEAD) {
+            val reqLen = endByte - startByte + 1
+            StreamLog.i(TAG, "Serving HEAD response: status=${if (rangeHeader != null) "206 Partial Content" else "200 OK"}, length=${if (rangeHeader != null) reqLen else totalSize}")
             val response = if (rangeHeader != null) {
                 newFixedLengthResponse(Response.Status.PARTIAL_CONTENT, mime, "").apply {
                     addHeader("Content-Range", "bytes $startByte-$endByte/$totalSize")
-                    addHeader("Content-Length", "${endByte - startByte + 1}")
+                    addHeader("Content-Length", "$reqLen")
                 }
             } else {
                 newFixedLengthResponse(Response.Status.OK, mime, "").apply {
@@ -857,19 +864,22 @@ class LocalHttpServer(
         }
 
         // Pass resolvedMessageId (from actual media item) and targetParam (item.id) for lookup
-        Log.i(TAG, "Incoming Video Stream: target=$targetParam, resolvedMsg=$resolvedMessageId, ch=$effectiveChannelId, range=$rangeHeader (parsed: $startByte-$endByte/$totalSize), method=${session.method}")
+        val requestedLength = endByte - startByte + 1
+        StreamLog.i(TAG, "Requesting stream source from Telegram: range=$startByte-$endByte/$totalSize (len=$requestedLength bytes / ${StreamTrafficStats.formatBytes(requestedLength)})")
+        val t0 = System.currentTimeMillis()
         val chunk = try {
             tgClient.getStreamSource(effectiveChannelId, resolvedMessageId, startByte, endByte, mediaId = targetParam)
         } catch (e: Exception) {
-            Log.e(TAG, "Stream error: ${e.message}", e)
+            StreamLog.e(TAG, "Stream error for $uri: ${e.message}", e)
             return newFixedLengthResponse(
                 Response.Status.INTERNAL_ERROR,
                 "text/plain",
                 "Stream error: ${e.message}"
             )
         }
+        val elapsed = System.currentTimeMillis() - t0
 
-        Log.i(TAG, "Serving Video Stream: start=${chunk.startByte}, end=${chunk.endByte}, len=${chunk.contentLength}, total=${chunk.totalSize}, mime=$mime")
+        StreamLog.i(TAG, "Serving Video Stream [${if (rangeHeader != null) "206 Partial Content" else "200 OK"}]: range=${chunk.startByte}-${chunk.endByte}/${chunk.totalSize}, len=${chunk.contentLength} (${StreamTrafficStats.formatBytes(chunk.contentLength)}), mime=$mime (prep: ${elapsed}ms)")
 
         val response = if (rangeHeader != null) {
             newFixedLengthResponse(

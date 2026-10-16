@@ -131,12 +131,14 @@ class StreamerForegroundService : Service() {
             activeServer = server
             isServiceRunning = true
             serverStartTime = System.currentTimeMillis()
+            com.tgserver.streamer.server.StreamLog.init(applicationContext)
             com.tgserver.streamer.server.StreamTrafficStats.init(applicationContext)
             com.tgserver.streamer.server.StreamTrafficStats.resetSession()
             com.tgserver.streamer.server.StreamTrafficStats.notifyActivity()
             ServerQuickSettingsTileService.updateTileState(applicationContext)
 
             val ip = server?.getLocalIpAddress() ?: "127.0.0.1"
+            com.tgserver.streamer.server.StreamLog.i("StreamerService", "Server started at http://$ip:${activeConfig.port}/manifest.json")
             updateNotification("Online at http://$ip:${activeConfig.port}/manifest.json")
             startAutoSleepMonitor()
         } catch (e: Exception) {

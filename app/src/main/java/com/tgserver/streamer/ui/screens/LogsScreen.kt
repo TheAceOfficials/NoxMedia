@@ -112,6 +112,13 @@ fun LogsScreen(
         parsedLogs.filter { item ->
             val matchesLevel = when (selectedLevelFilter) {
                 "ALL" -> true
+                "STREAM" -> item.tag.contains("Stream", ignoreCase = true) ||
+                            item.tag.contains("HTTP", ignoreCase = true) ||
+                            item.tag.contains("tg_bridge", ignoreCase = true) ||
+                            item.raw.contains("Stream", ignoreCase = true) ||
+                            item.raw.contains("HTTP", ignoreCase = true) ||
+                            item.raw.contains("Range", ignoreCase = true) ||
+                            item.raw.contains("chunk", ignoreCase = true)
                 else -> item.level.equals(selectedLevelFilter, ignoreCase = true)
             }
             val matchesSearch = if (searchQuery.isBlank()) {
@@ -385,6 +392,7 @@ fun LogsScreen(
         // ==================== LEVEL FILTER CHIPS ====================
         val filterOptions = listOf(
             Triple("ALL", "All", TextSecondary),
+            Triple("STREAM", "Stream", Color(0xFF00E5FF)),
             Triple("E", "Error", StatusRed),
             Triple("W", "Warn", StatusAmber),
             Triple("I", "Info", Color(0xFF64B5F6)),

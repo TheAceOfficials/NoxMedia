@@ -7,6 +7,7 @@ import time
 import uuid
 import traceback
 import re
+from datetime import datetime
 from collections import OrderedDict
 from typing import List, Dict, Any, Optional, Tuple
 from pyrogram import Client, errors, raw
@@ -85,6 +86,24 @@ _disk_cache_dir: Optional[str] = None
 _disk_cache_max_mb: int = 2048
 _buffer_pipeline_mb: int = 20
 _last_prune_time: float = 0.0
+_stream_log_path: Optional[str] = None
+
+def configure_stream_logger(log_file_path: str):
+    global _stream_log_path
+    _stream_log_path = str(log_file_path).strip() if log_file_path else None
+    if _stream_log_path:
+        _log_stream(f"Python streaming logger connected to {_stream_log_path}")
+
+def _log_stream(msg: str, level: str = "I"):
+    print(f"[{level}/tg_bridge] {msg}", flush=True)
+    if _stream_log_path:
+        try:
+            now_str = datetime.now().strftime("%m-%d %H:%M:%S.%f")[:-3]
+            line = f"{now_str} {level}/tg_bridge: {msg}\n"
+            with open(_stream_log_path, "a", encoding="utf-8") as f:
+                f.write(line)
+        except Exception:
+            pass
 
 def configure_cache(cache_dir: str, max_disk_mb: int, buffer_mb: int):
     global _disk_cache_dir, _disk_cache_max_mb, _buffer_pipeline_mb
@@ -1295,7 +1314,8 @@ async def _do_fetch_chunk_network(client: Client, chat_id: int, msg_id: int, fet
         return None
 
 class VirtualStreamSession:
-    def __init__(self, client: Client, chat_id: int, parts: List[Dict[str, Any]], start_byte: int, end_byte: int):
+    def __init__(self, client: Client, chat_id: int, parts: List[Dict[str, Any]], start_byte: int, end_byte: int, stream_id: str = ""):
+        self.stream_id = stream_id or str(uuid.uuid4())
         self.client = client
         self.chat_id = chat_id
         # Dynamically sort parts by partNumber and compute cumStart from sizeBytes reliably
@@ -1326,7 +1346,9 @@ class VirtualStreamSession:
         self.tasks = self._plan_tasks()
         self.prefetch_task: Optional[asyncio.Task] = None
         self.active_tasks: Set[asyncio.Task] = set()
-        print(f"[VirtualStreamSession] Init stream chat={chat_id}, parts_count={len(self.parts)}, range={start_byte}-{end_byte}, total_tasks={len(self.tasks)}, buffer_mb={_buffer_pipeline_mb}")
+        _log_stream(f"Stream[{self.stream_id[:8]}]: Init chat={chat_id}, parts_count={len(self.parts)}, range={start_byte}-{end_byte} ({(self.total_to_read)/(1024*1024):.2f}MB), total_tasks={len(self.tasks)}, buffer_mb={_buffer_pipeline_mb}")
+        if self.tasks:
+            _log_stream(f"Stream[{self.stream_id[:8]}]: Task[0] msg_id={self.tasks[0]['msg_id']}, off={self.tasks[0]['fetch_off']}, slice={self.tasks[0]['s_start']}-{self.tasks[0]['s_end']}")
 
     def _plan_tasks(self) -> List[Dict[str, Any]]:
         CHUNK_SIZE = 1024 * 1024 # 1 MB MTProto chunk
@@ -1446,6 +1468,10 @@ class VirtualStreamSession:
 
                 if slice_bytes is not None:
                     if len(slice_bytes) > 0:
+                        if t_idx == 0:
+                            _log_stream(f"Stream[{self.stream_id[:8]}]: First chunk fetched from TG ({len(slice_bytes)} bytes)")
+                        elif (t_idx + 1) % 10 == 0 or (t_idx + 1) == total_tasks:
+                            _log_stream(f"Stream[{self.stream_id[:8]}]: Prefetched task {t_idx+1}/{total_tasks} (queue size={self.queue.qsize()})")
                         await self.queue.put(slice_bytes)
                 else:
                     # Retry task with backoff before giving up!
@@ -1491,6 +1517,10 @@ class VirtualStreamSession:
 
     async def read_bytes(self, max_bytes: int) -> bytes:
         self._last_active = time.time()
+        if self.bytes_read == 0 and not getattr(self, "_has_logged_first_read", False):
+            self._has_logged_first_read = True
+            _log_stream(f"Stream[{self.stream_id[:8]}]: First read_bytes from player (max_bytes={max_bytes})")
+
         # Drain all items already queued into buffer
         while not self.queue.empty():
             item = self.queue.get_nowait()
@@ -1515,7 +1545,7 @@ class VirtualStreamSession:
                             break
                         self.buffer.extend(extra)
             except asyncio.TimeoutError:
-                print(f"[VirtualStreamSession] Timeout waiting for stream queue", flush=True)
+                _log_stream(f"Stream[{self.stream_id[:8]}]: Timeout waiting for stream queue from Telegram", level="W")
                 self._eof = True
 
         if not self.buffer:
@@ -1530,6 +1560,8 @@ class VirtualStreamSession:
         if not self._closed:
             self._closed = True
             self._eof = True
+            pct = (self.bytes_read * 100 / max(1, self.total_to_read))
+            _log_stream(f"Stream[{self.stream_id[:8]}]: Closed. Delivered {self.bytes_read / (1024*1024):.2f} MB of {self.total_to_read / (1024*1024):.2f} MB ({pct:.1f}%)")
             if self.prefetch_task and not self.prefetch_task.done():
                 self.prefetch_task.cancel()
             for t in list(self.active_tasks):
@@ -1557,6 +1589,7 @@ def create_stream(api_id: int, api_hash: str, session_str: str, chat_id: int, pa
         for sid in expired:
             s = _active_streams.pop(sid, None)
             if s:
+                _log_stream(f"Stream[{sid[:8]}]: Evicted due to 30s idle timeout")
                 s.close()
 
         parts = json.loads(parts_json)
@@ -1565,7 +1598,8 @@ def create_stream(api_id: int, api_hash: str, session_str: str, chat_id: int, pa
         await _ensure_channel_peer(client, int(chat_id))
 
         stream_id = str(uuid.uuid4())
-        session = VirtualStreamSession(client, int(chat_id), parts, int(start_byte), int(end_byte))
+        _log_stream(f"create_stream: id={stream_id[:8]}, chat={chat_id}, range={start_byte}-{end_byte} ({(end_byte - start_byte + 1)/(1024*1024):.2f}MB), parts={len(parts)}")
+        session = VirtualStreamSession(client, int(chat_id), parts, int(start_byte), int(end_byte), stream_id=stream_id)
         session.start_prefetch()
         _active_streams[stream_id] = session
         return stream_id
@@ -1573,7 +1607,7 @@ def create_stream(api_id: int, api_hash: str, session_str: str, chat_id: int, pa
     try:
         return run_async(_async_create(), timeout=25)
     except Exception as e:
-        print(f"Error creating stream: {e}", flush=True)
+        _log_stream(f"Error creating stream: {e}", level="E")
         traceback.print_exc()
         return ""
 
@@ -1590,7 +1624,7 @@ def read_stream_chunk(stream_id: str, max_bytes: int = 1048576) -> bytes:
     try:
         return run_async(session.read_bytes(int(max_bytes)), timeout=40)
     except Exception as e:
-        print(f"Error reading chunk for stream {stream_id}: {e}")
+        _log_stream(f"Error reading chunk for stream {stream_id[:8]}: {e}", level="E")
         traceback.print_exc()
         return b""
 
@@ -1601,6 +1635,7 @@ def close_stream(stream_id: str):
     global _active_streams
     session = _active_streams.pop(stream_id, None)
     if session:
+        _log_stream(f"close_stream: called for {stream_id[:8]}")
         session.close()
 
 def check_dead_messages(api_id: int, api_hash: str, session_str: str, chat_id: int, message_ids_json: str) -> str:
