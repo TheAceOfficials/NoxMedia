@@ -59,7 +59,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tgserver.streamer.R
-import com.tgserver.streamer.data.model.MediaItem
+import com.tgserver.streamer.data.model.*
 import com.tgserver.streamer.metadata.EnrichedMetadata
 import com.tgserver.streamer.theme.*
 import com.tgserver.streamer.ui.MainAppViewModel
@@ -179,144 +179,36 @@ fun RemoteImage(
     }
 }
 
-/**
- * Shorten full language names to clean 3-letter codes for minimal, sleek UI display.
- */
-private fun formatShortBadge(badge: String): String {
-    if (badge.isBlank()) return badge
-    return badge
-        .replace("English", "Eng", ignoreCase = true)
-        .replace("Hindi", "Hin", ignoreCase = true)
-        .replace("Kannada", "Kan", ignoreCase = true)
-        .replace("Malayalam", "Mal", ignoreCase = true)
-        .replace("Tamil", "Tam", ignoreCase = true)
-        .replace("Telugu", "Tel", ignoreCase = true)
-        .replace("Japanese", "Jap", ignoreCase = true)
-        .replace("Korean", "Kor", ignoreCase = true)
-        .replace("Spanish", "Spa", ignoreCase = true)
-        .replace("French", "Fre", ignoreCase = true)
-        .replace("German", "Ger", ignoreCase = true)
-        .replace("Italian", "Ita", ignoreCase = true)
-        .replace("Russian", "Rus", ignoreCase = true)
-        .replace("Chinese", "Chi", ignoreCase = true)
-        .replace("Multi Audio", "Multi", ignoreCase = true)
-        .replace("Dual Audio", "Dual", ignoreCase = true)
-}
-
-/**
- * Grouped media entity representing a single Movie or TV Show title
- */
-data class MediaGroup(
-    val key: String,
-    val title: String,
-    val type: String, // "movie", "series", "anime"
-    val year: String?,
-    val posterUrl: String?,
-    val backdropUrl: String?,
-    val overview: String?,
-    val imdbId: String?,
-    val tmdbId: Int?,
-    val qualityBadge: String,
-    val items: List<MediaItem>
-) {
-    val distinctEpisodeCount: Int
-        get() = items.map { Pair(it.season ?: 1, it.episode ?: 1) }.distinct().size
-}
-
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(viewModel: MainAppViewModel) {
     val allMedia by viewModel.media.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val selectedCategory by viewModel.selectedCategory.collectAsState()
     val telemetry by viewModel.telemetry.collectAsState()
+    val navGroupKey by viewModel.selectedMediaGroupKey.collectAsState()
     val haptic = LocalHapticFeedback.current
 
     // Group raw files into distinct titles (Movies and Series entities)
     val mediaGroups = remember(allMedia) {
-        val splitItems = allMedia.filter { it.isSplit }
-        val effectiveMedia = if (splitItems.isEmpty()) {
-            allMedia
-        } else {
-            val splitPartMsgIds = splitItems.flatMap { it.parts.map { p -> p.messageId } }.toSet()
-            val splitCleanBases = splitItems.map {
-                it.fileName.lowercase()
-                    .replace(Regex("""[\s._-]*(?:part|pt)[\s._-]*\d+.*""", RegexOption.IGNORE_CASE), "")
-                    .replace(Regex("""\.(mkv|mp4|avi|webm|ts|m4v)(\.\d{2,4})?$""", RegexOption.IGNORE_CASE), "")
-                    .trim()
-            }.toSet()
-
-            allMedia.filter { item ->
-                if (item.isSplit) return@filter true
-                if (splitPartMsgIds.contains(item.messageId)) return@filter false
-                val itemClean = item.fileName.lowercase()
-                    .replace(Regex("""[\s._-]*(?:part|pt)[\s._-]*\d+.*""", RegexOption.IGNORE_CASE), "")
-                    .replace(Regex("""\.(mkv|mp4|avi|webm|ts|m4v)(\.\d{2,4})?$""", RegexOption.IGNORE_CASE), "")
-                    .trim()
-                if (splitCleanBases.contains(itemClean)) {
-                    if (item.fileName.contains(Regex("""(?i)(?:part|pt|\.\d{2,4})"""))) {
-                        return@filter false
-                    }
-                    val splitMatch = splitItems.find {
-                        (it.channelId == item.channelId || it.channelId == 0L || item.channelId == 0L) &&
-                        it.season == item.season && it.episode == item.episode
-                    }
-                    if (splitMatch != null && item.sizeBytes < splitMatch.sizeBytes) {
-                        return@filter false
-                    }
-                }
-                true
-            }
-        }
-
-        effectiveMedia.groupBy { item ->
-            val cleanTitle = item.title.trim().lowercase()
-            when {
-                item.tmdbId != null && item.tmdbId!! > 0 -> "tmdb_${item.type}_${item.tmdbId}"
-                !item.imdbId.isNullOrBlank() -> "imdb_${item.imdbId}"
-                else -> "title_${item.type}_$cleanTitle"
-            }
-        }.map { (key, items) ->
-            val primary = items.first()
-            val bestPoster = items.firstOrNull { !it.posterUrl.isNullOrBlank() }?.posterUrl ?: primary.posterUrl
-            val bestBackdrop = items.firstOrNull { !it.backdropUrl.isNullOrBlank() }?.backdropUrl ?: primary.backdropUrl
-            val bestOverview = items.firstOrNull { !it.overview.isNullOrBlank() }?.overview ?: primary.overview
-            val bestYear = items.firstOrNull { !it.year.isNullOrBlank() }?.year ?: primary.year
-            val bestQuality = items.maxByOrNull {
-                when {
-                    it.quality.contains("4K", ignoreCase = true) || it.quality.contains("2160", ignoreCase = true) -> 4
-                    it.quality.contains("1080", ignoreCase = true) -> 3
-                    it.quality.contains("720", ignoreCase = true) -> 2
-                    else -> 1
-                }
-            }?.qualityBadge ?: primary.qualityBadge
-
-            MediaGroup(
-                key = key,
-                title = primary.title,
-                type = primary.type,
-                year = bestYear,
-                posterUrl = bestPoster,
-                backdropUrl = bestBackdrop,
-                overview = bestOverview,
-                imdbId = primary.imdbId,
-                tmdbId = primary.tmdbId,
-                qualityBadge = formatShortBadge(bestQuality),
-                items = items.sortedWith(compareBy({ it.season ?: 1 }, { it.episode ?: 1 }))
-            )
-        }.sortedBy { it.title.lowercase() }
+        allMedia.toMediaGroups()
     }
 
-    var selectedGroupKey by remember { mutableStateOf<String?>(null) }
+    var selectedGroupKey by remember(navGroupKey) { mutableStateOf(navGroupKey) }
     val selectedGroup = mediaGroups.find { it.key == selectedGroupKey }
+
+    var sortOrder by remember { mutableStateOf(LibrarySortOrder.RECENT) }
+    var showSortSheet by remember { mutableStateOf(false) }
 
     // Intercept hardware / gesture back navigation when inside details view
     BackHandler(enabled = selectedGroup != null) {
         selectedGroupKey = null
+        viewModel.clearSelectedMediaGroup()
     }
 
-    // Filter media groups by category & search
-    val filteredGroups = remember(mediaGroups, searchQuery, selectedCategory) {
-        mediaGroups.filter { group ->
+    // Filter media groups by category & search, then sort by selected criteria
+    val filteredGroups = remember(mediaGroups, searchQuery, selectedCategory, sortOrder) {
+        val filtered = mediaGroups.filter { group ->
             val matchesCategory = when (selectedCategory) {
                 "all" -> true
                 "movies" -> group.type == "movie"
@@ -332,6 +224,29 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                     group.items.any { it.fileName.contains(searchQuery, ignoreCase = true) || it.episodeTitle?.contains(searchQuery, ignoreCase = true) == true }
 
             matchesCategory && matchesQuery
+        }
+
+        when (sortOrder) {
+            LibrarySortOrder.RECENT -> filtered.sortedByDescending { group ->
+                val date = group.dateAdded.takeIf { it > 0L }
+                date ?: (group.items.maxOfOrNull { it.messageId }?.toLong() ?: 0L)
+            }
+            LibrarySortOrder.NAME_ASC -> filtered.sortedBy { it.title.lowercase().trim() }
+            LibrarySortOrder.NAME_DESC -> filtered.sortedByDescending { it.title.lowercase().trim() }
+            LibrarySortOrder.YEAR_DESC -> filtered.sortedWith(
+                compareByDescending<MediaGroup> { it.year?.toIntOrNull() ?: 0 }
+                    .thenBy { it.title.lowercase() }
+            )
+            LibrarySortOrder.YEAR_ASC -> filtered.sortedWith(
+                compareBy<MediaGroup> { it.year?.toIntOrNull() ?: 9999 }
+                    .thenBy { it.title.lowercase() }
+            )
+            LibrarySortOrder.SIZE_DESC -> filtered.sortedByDescending { it.items.sumOf { item -> item.sizeBytes } }
+            LibrarySortOrder.SIZE_ASC -> filtered.sortedBy { it.items.sumOf { item -> item.sizeBytes } }
+            LibrarySortOrder.RATING_DESC -> filtered.sortedWith(
+                compareByDescending<MediaGroup> { it.rating }
+                    .thenBy { it.title.lowercase() }
+            )
         }
     }
 
@@ -364,6 +279,7 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                     onBack = {
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         selectedGroupKey = null
+                        viewModel.clearSelectedMediaGroup()
                     },
                     onCopyStream = { url ->
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -520,6 +436,51 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                         }
                     }
 
+                    // SORT & SUMMARY TOOLBAR
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 2.dp, vertical = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${filteredGroups.size} ${if (filteredGroups.size == 1) "title" else "titles"}",
+                            color = Color(0xFF7E8088),
+                            fontFamily = NdotFont,
+                            fontSize = 11.5.sp,
+                            letterSpacing = 0.5.sp
+                        )
+
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF1B1D25))
+                                .border(1.dp, Color(0xFF2C2F3A), RoundedCornerShape(8.dp))
+                                .clickable {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    showSortSheet = true
+                                }
+                                .padding(horizontal = 9.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "Sort: ${sortOrder.label}",
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontFamily = NdotFont,
+                                letterSpacing = 0.5.sp
+                            )
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowDown,
+                                contentDescription = "Select sort order",
+                                tint = Color(0xFFA855F7),
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+
                     // POSTER GRID
                     if (filteredGroups.isEmpty()) {
                         Box(
@@ -564,6 +525,77 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                         selectedGroupKey = group.key
                                     }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (showSortSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showSortSheet = false },
+                containerColor = Color(0xFF14151B),
+                contentColor = Color.White,
+                dragHandle = {
+                    Box(
+                        modifier = Modifier
+                            .padding(vertical = 10.dp)
+                            .width(36.dp)
+                            .height(4.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF3F414D))
+                    )
+                },
+                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 36.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "Sort Library",
+                        color = Color.White,
+                        fontFamily = NdotFont,
+                        fontSize = 15.sp,
+                        letterSpacing = 0.8.sp,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+
+                    LibrarySortOrder.values().forEach { option ->
+                        val isSelected = sortOrder == option
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isSelected) Color(0xFF28103F) else Color.Transparent)
+                                .clickable {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    sortOrder = option
+                                    showSortSheet = false
+                                }
+                                .padding(horizontal = 14.dp, vertical = 11.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = option.label,
+                                color = if (isSelected) Color(0xFFC084FC) else Color(0xFFD4D4D8),
+                                fontSize = 13.5.sp,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                fontFamily = FontFamily.Default
+                            )
+
+                            if (isSelected) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(7.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFFA855F7))
                                 )
                             }
                         }
@@ -635,10 +667,15 @@ private fun PosterCard(
             overflow = TextOverflow.Ellipsis
         )
 
-        // Year · Type
+        // Year · Type · Total Aggregated Size
         val yearText = group.year?.takeIf { it.isNotBlank() } ?: "2026"
+        val subtitle = if (group.formattedTotalSize.isNotBlank()) {
+            "$yearText · ${group.type.uppercase()} · ${group.formattedTotalSize}"
+        } else {
+            "$yearText · ${group.type.uppercase()}"
+        }
         Text(
-            text = "$yearText · ${group.type.uppercase()}",
+            text = subtitle,
             color = Color(0xFFA855F7),
             fontFamily = FontFamily.Default,
             fontWeight = FontWeight.Medium,
@@ -828,10 +865,16 @@ private fun ContentDetailsScreen(
                     overflow = TextOverflow.Ellipsis
                 )
 
-                // Meta row: Year · Quality · Rating
+                // Meta row: Year · Quality · Rating · Size
                 val year = group.year?.takeIf { it.isNotBlank() } ?: "2026"
+                val ratingStr = if (group.rating > 0.0) String.format(java.util.Locale.US, "%.1f", group.rating) else "8.2"
+                val metaText = if (group.formattedTotalSize.isNotBlank()) {
+                    "$year · ${formatShortBadge(group.qualityBadge)} · ★ $ratingStr · ${group.formattedTotalSize}"
+                } else {
+                    "$year · ${formatShortBadge(group.qualityBadge)} · ★ $ratingStr"
+                }
                 Text(
-                    text = "$year · ${formatShortBadge(group.qualityBadge)} · ★ 8.2",
+                    text = metaText,
                     color = Color(0xFFA1A1AA),
                     fontFamily = NdotFont,
                     fontSize = 11.5.sp

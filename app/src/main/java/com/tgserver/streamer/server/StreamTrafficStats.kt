@@ -12,7 +12,12 @@ object StreamTrafficStats {
     private var lastSpeedCalcTime = System.currentTimeMillis()
     @Volatile
     private var currentSpeedBps = 0L
+    @Volatile
+    var lastActivityTime = System.currentTimeMillis()
+        private set
     private var prefs: SharedPreferences? = null
+
+    private val pendingLifetimeBytes = AtomicLong(0L)
 
     fun init(context: Context) {
         if (prefs == null) {
@@ -20,31 +25,42 @@ object StreamTrafficStats {
         }
     }
 
+    fun notifyActivity() {
+        lastActivityTime = System.currentTimeMillis()
+    }
+
     fun recordBytes(bytes: Long) {
         if (bytes <= 0) return
         sessionBytes.addAndGet(bytes)
         windowBytes.addAndGet(bytes)
-
-        // Increment lifetime traffic
-        prefs?.let { p ->
-            synchronized(this) {
-                val current = p.getLong("lifetime_traffic_bytes", 0L)
-                p.edit().putLong("lifetime_traffic_bytes", current + bytes).apply()
-            }
-        }
+        pendingLifetimeBytes.addAndGet(bytes)
+        lastActivityTime = System.currentTimeMillis()
     }
 
     fun getSessionBytes(): Long = sessionBytes.get()
 
     fun getLifetimeBytes(): Long {
-        return prefs?.getLong("lifetime_traffic_bytes", 0L) ?: 0L
+        val base = prefs?.getLong("lifetime_traffic_bytes", 0L) ?: 0L
+        return base + pendingLifetimeBytes.get()
+    }
+
+    fun flushLifetimeBytes() {
+        val toPersist = pendingLifetimeBytes.getAndSet(0L)
+        if (toPersist > 0L) {
+            prefs?.let { p ->
+                val current = p.getLong("lifetime_traffic_bytes", 0L)
+                p.edit().putLong("lifetime_traffic_bytes", current + toPersist).apply()
+            }
+        }
     }
 
     fun resetSession() {
+        flushLifetimeBytes()
         sessionBytes.set(0L)
         windowBytes.set(0L)
         currentSpeedBps = 0L
         lastSpeedCalcTime = System.currentTimeMillis()
+        lastActivityTime = System.currentTimeMillis()
     }
 
     fun calculateLiveSpeed(): Long {
@@ -54,6 +70,9 @@ object StreamTrafficStats {
             val bytesInWindow = windowBytes.getAndSet(0L)
             currentSpeedBps = if (elapsed > 0) (bytesInWindow * 1000L) / elapsed else 0L
             lastSpeedCalcTime = now
+
+            // Batch-flush lifetime traffic to SharedPreferences once per second (1000x less disk I/O)
+            flushLifetimeBytes()
         }
         return currentSpeedBps
     }

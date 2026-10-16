@@ -66,8 +66,12 @@ _auth_state = {
 
 # Active streaming sessions and cache
 _active_streams: Dict[str, Any] = {}
+_media_to_stream_id: Dict[str, str] = {}
 _file_id_cache: Dict[Tuple[int, int], FileId] = {}
 _media_session_lock = asyncio.Lock()
+_DC_MEDIA_SESSIONS_COUNT = 3
+_media_session_pools: Dict[int, List[Any]] = {}
+_session_round_robin: Dict[int, int] = {}
 _channel_peer_lock = asyncio.Lock()
 _resolved_channels: Dict[int, int] = {}
 _file_id_lock = asyncio.Lock()
@@ -304,6 +308,32 @@ async def _download_user_avatar(client: Client, user, target_path: str = "") -> 
 
     return ""
 
+async def _download_chat_photo(client: Client, chat, target_path: str = "") -> str:
+    """Helper to download channel/chat photo using small_file_id/big_file_id or get_chat_photos."""
+    if not target_path:
+        return ""
+    try:
+        if getattr(chat, "photo", None):
+            file_id = getattr(chat.photo, "small_file_id", None) or getattr(chat.photo, "big_file_id", None)
+            if file_id:
+                downloaded = await client.download_media(file_id, file_name=target_path)
+                if downloaded and os.path.exists(downloaded):
+                    return str(downloaded)
+    except Exception as e:
+        print(f"Chat photo download notice via chat.photo: {e}", flush=True)
+
+    try:
+        chat_id = getattr(chat, "id", None)
+        if chat_id:
+            async for photo in client.get_chat_photos(chat_id, limit=1):
+                downloaded = await client.download_media(photo, file_name=target_path)
+                if downloaded and os.path.exists(downloaded):
+                    return str(downloaded)
+    except Exception as e:
+        print(f"Chat photo download notice via get_chat_photos: {e}", flush=True)
+
+    return ""
+
 def verify_code(code: str, target_avatar_path: str = "") -> str:
     global _auth_client, _auth_state
     
@@ -435,11 +465,11 @@ def parse_media(filename: str, caption: str = "") -> str:
     res = media_parser.parse_media_filename(filename, caption)
     return json.dumps(res)
 
-def resolve_channel(api_id: int, api_hash: str, session_str: str, identifier: str) -> str:
+def resolve_channel(api_id: int, api_hash: str, session_str: str, identifier: str, target_avatar_path: str = "") -> str:
     """
     Connects to Telegram via Pyrogram and verifies/resolves the channel.
     Accepts @username, t.me link, private link (t.me/c/...), -100... ID, or bare numeric ID.
-    Returns JSON with channel title, real ID, username, or error.
+    Returns JSON with channel title, real ID, username, photo_path, or error.
     """
     async def _async_resolve():
         client = await _get_connected_stream_client(api_id, api_hash, session_str)
@@ -539,12 +569,19 @@ def resolve_channel(api_id: int, api_hash: str, session_str: str, identifier: st
         if chat is not None:
             title = chat.title or getattr(chat, "first_name", None) or "Telegram Channel"
             uname = getattr(chat, "username", None) or str(chat.id)
+            photo_path = ""
+            if target_avatar_path:
+                try:
+                    photo_path = await _download_chat_photo(client, chat, target_avatar_path)
+                except Exception as ex:
+                    print(f"Chat photo download notice: {ex}", flush=True)
             return {
                 "status": "success",
                 "id": chat.id,
                 "title": title,
                 "username": uname,
-                "type": str(getattr(chat, "type", "channel"))
+                "type": str(getattr(chat, "type", "channel")),
+                "photo_path": photo_path
             }
         else:
             if isinstance(chat_target, int):
@@ -567,6 +604,49 @@ def resolve_channel(api_id: int, api_hash: str, session_str: str, identifier: st
         return json.dumps({"status": "error", "error": "Invalid Telegram channel ID."})
     except errors.ChannelPrivate:
         return json.dumps({"status": "error", "error": "Channel is private and your account is not a member."})
+    except Exception as e:
+        print(f"Error in resolve_channel: {e}", flush=True)
+        return json.dumps({"status": "error", "error": str(e)})
+
+def fetch_channel_avatar(api_id: int, api_hash: str, session_str: str, channel_id: int, target_avatar_path: str = "") -> str:
+    """Downloads the avatar of a specific channel to target_avatar_path."""
+    async def _async_fetch():
+        client = await _get_connected_stream_client(int(api_id), str(api_hash), str(session_str))
+        chat = None
+        target_id = int(channel_id)
+        try:
+            chat = await client.get_chat(target_id)
+        except Exception:
+            pass
+
+        if chat is None:
+            target_id_variants = {target_id}
+            bare = str(abs(target_id)).removeprefix("100")
+            if bare.isdigit():
+                b_int = int(bare)
+                target_id_variants.add(b_int)
+                target_id_variants.add(-b_int)
+                target_id_variants.add(int(f"-100{b_int}"))
+            try:
+                async for dialog in client.get_dialogs():
+                    if dialog.chat and (dialog.chat.id in target_id_variants):
+                        chat = dialog.chat
+                        break
+            except Exception:
+                pass
+
+        if not chat:
+            return {"status": "error", "error": f"Channel {target_id} not found"}
+
+        photo_path = await _download_chat_photo(client, chat, target_avatar_path)
+        return {"status": "success", "photo_path": photo_path}
+
+    try:
+        res = run_async(_async_fetch(), timeout=30)
+        return json.dumps(res)
+    except Exception as e:
+        print(f"Error in fetch_channel_avatar: {e}", flush=True)
+        return json.dumps({"status": "error", "error": str(e)})
     except Exception as e:
         return json.dumps({"status": "error", "error": str(e)})
 
@@ -627,6 +707,7 @@ def sync_channel_media(api_id: int, api_hash: str, session_str: str, channel_id:
             clean_base = parsed["clean_base_name"]
             is_split = parsed["is_split"]
             part_num = parsed["part_number"]
+            msg_date = int(msg.date.timestamp() * 1000) if hasattr(msg, "date") and msg.date else int(time.time() * 1000)
 
             if is_split:
                 if clean_base not in split_groups:
@@ -634,6 +715,7 @@ def sync_channel_media(api_id: int, api_hash: str, session_str: str, channel_id:
                         "parsed": parsed,
                         "mimeType": mime_type,
                         "duration": duration,
+                        "dateAdded": msg_date,
                         "parts": []
                     }
                 split_groups[clean_base]["parts"].append({
@@ -659,7 +741,8 @@ def sync_channel_media(api_id: int, api_hash: str, session_str: str, channel_id:
                     "mimeType": mime_type,
                     "fileName": parsed["clean_base_name"],
                     "isSplit": False,
-                    "parts": []
+                    "parts": [],
+                    "dateAdded": msg_date
                 }
 
         # Process grouped split files
@@ -695,7 +778,8 @@ def sync_channel_media(api_id: int, api_hash: str, session_str: str, channel_id:
                 "mimeType": group["mimeType"],
                 "fileName": clean_base,
                 "isSplit": True,
-                "parts": computed_parts
+                "parts": computed_parts,
+                "dateAdded": group.get("dateAdded", int(time.time() * 1000))
             }
 
         return list(items_map.values())
@@ -921,60 +1005,96 @@ async def _ensure_channel_peer(client: Client, chat_id: int) -> int:
         _resolved_channels[chat_id] = chat_id
         return chat_id
 
+async def _init_single_media_session(client: Client, dc_id: int) -> Session:
+    test_mode = await client.storage.test_mode()
+    current_dc = await client.storage.dc_id()
+
+    if dc_id != current_dc:
+        auth_key = await Auth(client, dc_id, test_mode).create()
+    else:
+        auth_key = await client.storage.auth_key()
+
+    session = Session(client, dc_id, auth_key, test_mode, is_media=True)
+    session.no_updates = True
+    session.timeout = 30
+    session.sleep_threshold = 60
+
+    await session.start()
+
+    if dc_id != current_dc:
+        exported_ok = False
+        for _ in range(6):
+            try:
+                exported = await client.invoke(raw.functions.auth.ExportAuthorization(dc_id=dc_id))
+                await session.invoke(raw.functions.auth.ImportAuthorization(id=exported.id, bytes=exported.bytes), timeout=15.0)
+                exported_ok = True
+                break
+            except errors.AuthBytesInvalid:
+                await asyncio.sleep(0.5)
+            except OSError:
+                await asyncio.sleep(1)
+            except Exception:
+                await asyncio.sleep(0.5)
+
+        if not exported_ok:
+            try:
+                await session.stop()
+            except Exception:
+                pass
+            raise RuntimeError(f"Failed to export/import authorization for DC {dc_id}")
+
+    return session
+
 async def _get_media_session(client: Client, dc_id: int) -> Session:
     """
-    Obtains or initializes an authenticated media Session for the given datacenter ID.
+    Obtains an authenticated media Session from a multi-connection pool for datacenter dc_id.
+    Distributes MTProto chunk requests across parallel TCP sockets to eliminate head-of-line blocking
+    and unlock maximum download bandwidth on both 32-bit and 64-bit devices.
     """
-    if not hasattr(client, "media_sessions"):
-        client.media_sessions = {}
+    global _media_session_pools, _session_round_robin
 
-    session = client.media_sessions.get(dc_id)
-    if session and getattr(session, "is_started", None) and session.is_started.is_set():
+    pool = _media_session_pools.get(dc_id, [])
+    active_pool = [s for s in pool if getattr(s, "is_started", None) and s.is_started.is_set()]
+
+    # If at least 1 session is ready, return it immediately (0ms delay for current chunk)
+    if active_pool:
+        idx = _session_round_robin.get(dc_id, 0)
+        session = active_pool[idx % len(active_pool)]
+        _session_round_robin[dc_id] = idx + 1
+
+        # Background warmup of extra sessions up to _DC_MEDIA_SESSIONS_COUNT
+        if len(active_pool) < _DC_MEDIA_SESSIONS_COUNT and not getattr(client, f"_warming_dc_{dc_id}", False):
+            setattr(client, f"_warming_dc_{dc_id}", True)
+            async def _warmup():
+                try:
+                    async with _media_session_lock:
+                        cur_pool = [s for s in _media_session_pools.get(dc_id, []) if getattr(s, "is_started", None) and s.is_started.is_set()]
+                        if len(cur_pool) < _DC_MEDIA_SESSIONS_COUNT:
+                            new_s = await _init_single_media_session(client, dc_id)
+                            cur_pool.append(new_s)
+                            _media_session_pools[dc_id] = cur_pool
+                            print(f"[MediaSessionPool] Added parallel session to DC {dc_id} pool (active: {len(cur_pool)})", flush=True)
+                except Exception as ex:
+                    print(f"[MediaSessionPool] Warmup notice for DC {dc_id}: {ex}", flush=True)
+                finally:
+                    setattr(client, f"_warming_dc_{dc_id}", False)
+            asyncio.create_task(_warmup())
+
         return session
 
+    # Otherwise initialize the primary session synchronously under lock
     async with _media_session_lock:
-        session = client.media_sessions.get(dc_id)
-        if session and getattr(session, "is_started", None) and session.is_started.is_set():
+        pool = _media_session_pools.get(dc_id, [])
+        active_pool = [s for s in pool if getattr(s, "is_started", None) and s.is_started.is_set()]
+        if active_pool:
+            idx = _session_round_robin.get(dc_id, 0)
+            session = active_pool[idx % len(active_pool)]
+            _session_round_robin[dc_id] = idx + 1
             return session
 
-        test_mode = await client.storage.test_mode()
-        current_dc = await client.storage.dc_id()
-
-        if dc_id != current_dc:
-            auth_key = await Auth(client, dc_id, test_mode).create()
-        else:
-            auth_key = await client.storage.auth_key()
-
-        session = Session(client, dc_id, auth_key, test_mode, is_media=True)
-        session.no_updates = True
-        session.timeout = 30
-        session.sleep_threshold = 60
-
-        await session.start()
-
-        if dc_id != current_dc:
-            exported_ok = False
-            for _ in range(6):
-                try:
-                    exported = await client.invoke(raw.functions.auth.ExportAuthorization(dc_id=dc_id))
-                    await session.invoke(raw.functions.auth.ImportAuthorization(id=exported.id, bytes=exported.bytes), timeout=15.0)
-                    exported_ok = True
-                    break
-                except errors.AuthBytesInvalid:
-                    await asyncio.sleep(0.5)
-                except OSError:
-                    await asyncio.sleep(1)
-                except Exception:
-                    await asyncio.sleep(0.5)
-
-            if not exported_ok:
-                try:
-                    await session.stop()
-                except Exception:
-                    pass
-                raise RuntimeError(f"Failed to export/import authorization for DC {dc_id}")
-
-        client.media_sessions[dc_id] = session
+        session = await _init_single_media_session(client, dc_id)
+        _media_session_pools[dc_id] = [session]
+        _session_round_robin[dc_id] = 1
         return session
 
 def _get_location_from_file_id(file_id_obj: FileId):
@@ -1141,13 +1261,13 @@ async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_
                 w = int(m.group(1)) if m else 3
                 await asyncio.sleep(w + 0.5)
             elif any(x in err_str for x in ["AuthKey", "SessionRevoked", "ConnectionReset", "BrokenPipe"]):
-                if hasattr(client, "media_sessions"):
-                    old_sess = client.media_sessions.pop(dc_id, None)
-                    if old_sess:
-                        try:
-                            await old_sess.stop()
-                        except Exception:
-                            pass
+                pool = _media_session_pools.get(dc_id, [])
+                if session in pool:
+                    pool.remove(session)
+                try:
+                    await session.stop()
+                except Exception:
+                    pass
             tries += 1
             await asyncio.sleep(0.3)
     return None
@@ -1181,7 +1301,12 @@ async def _get_or_fetch_chunk(client: Client, chat_id: int, msg_id: int, fetch_o
             _pending_fetches[key] = task
 
     try:
-        return await asyncio.shield(task)
+        return await task
+    except asyncio.CancelledError:
+        async with _fetch_dedup_lock:
+            if _pending_fetches.get(key) is task:
+                _pending_fetches.pop(key, None)
+        raise
     except Exception:
         return None
     finally:
@@ -1235,6 +1360,7 @@ class VirtualStreamSession:
         self._last_active = time.time()
         self.tasks = self._plan_tasks()
         self.prefetch_task: Optional[asyncio.Task] = None
+        self.active_tasks: Set[asyncio.Task] = set()
         print(f"[VirtualStreamSession] Init stream chat={chat_id}, parts_count={len(self.parts)}, range={start_byte}-{end_byte}, total_tasks={len(self.tasks)}, buffer_mb={_buffer_pipeline_mb}")
 
     def _plan_tasks(self) -> List[Dict[str, Any]]:
@@ -1332,7 +1458,9 @@ class VirtualStreamSession:
                     t_info = self.tasks[task_idx]
                     t_idx = task_idx
                     task_idx += 1
-                    in_flight.append((t_idx, asyncio.create_task(self._fetch_task_slice(t_info))))
+                    t = asyncio.create_task(self._fetch_task_slice(t_info))
+                    self.active_tasks.add(t)
+                    in_flight.append((t_idx, t))
 
                 if not in_flight:
                     break
@@ -1340,9 +1468,13 @@ class VirtualStreamSession:
                 t_idx, next_task = in_flight.pop(0)
                 try:
                     slice_bytes = await next_task
+                except asyncio.CancelledError:
+                    break
                 except Exception as e:
                     print(f"[VirtualStreamSession] Slice error on task {t_idx}: {e}", flush=True)
                     slice_bytes = None
+                finally:
+                    self.active_tasks.discard(next_task)
 
                 if self._closed:
                     break
@@ -1355,16 +1487,23 @@ class VirtualStreamSession:
                     retried_ok = False
                     for retry_attempt in range(1, 4):
                         print(f"[VirtualStreamSession] Task {t_idx} returned None, retry {retry_attempt}/3...", flush=True)
-                        await asyncio.sleep(0.5 * retry_attempt)
+                        await asyncio.sleep(0.3 * retry_attempt)
                         if self._closed:
                             break
                         try:
-                            slice_bytes = await self._fetch_task_slice(self.tasks[t_idx])
+                            t_retry = asyncio.create_task(self._fetch_task_slice(self.tasks[t_idx]))
+                            self.active_tasks.add(t_retry)
+                            try:
+                                slice_bytes = await t_retry
+                            finally:
+                                self.active_tasks.discard(t_retry)
                             if slice_bytes is not None:
                                 if len(slice_bytes) > 0:
                                     await self.queue.put(slice_bytes)
                                 retried_ok = True
                                 break
+                        except asyncio.CancelledError:
+                            break
                         except Exception as e:
                             print(f"[VirtualStreamSession] Retry {retry_attempt} error on task {t_idx}: {e}", flush=True)
 
@@ -1379,6 +1518,10 @@ class VirtualStreamSession:
         finally:
             for _, fut in in_flight:
                 fut.cancel()
+            for t in list(self.active_tasks):
+                if not t.done():
+                    t.cancel()
+            self.active_tasks.clear()
             await self.queue.put(None)
 
     async def read_bytes(self, max_bytes: int) -> bytes:
@@ -1402,8 +1545,11 @@ class VirtualStreamSession:
                     self._eof = True
                     break
 
-        result = bytes(self.buffer[:max_bytes])
-        self.buffer = self.buffer[max_bytes:]
+        if not self.buffer:
+            return b""
+        to_take = min(max_bytes, len(self.buffer))
+        result = bytes(self.buffer[:to_take])
+        del self.buffer[:to_take]
         self.bytes_read += len(result)
         return result
 
@@ -1413,6 +1559,10 @@ class VirtualStreamSession:
             self._eof = True
             if self.prefetch_task and not self.prefetch_task.done():
                 self.prefetch_task.cancel()
+            for t in list(self.active_tasks):
+                if not t.done():
+                    t.cancel()
+            self.active_tasks.clear()
             self.buffer.clear()
             while not self.queue.empty():
                 try:
@@ -1423,26 +1573,40 @@ class VirtualStreamSession:
 def create_stream(api_id: int, api_hash: str, session_str: str, chat_id: int, parts_json: str, start_byte: int, end_byte: int) -> str:
     """
     Initializes a virtual byte stream with concurrent pre-buffering and returns a unique stream_id.
+    Immediately terminates any previous active stream for the same media/channel to ensure instant seeks.
     """
-    global _active_streams
+    global _active_streams, _media_to_stream_id
 
     async def _async_create():
         now = time.time()
-        expired = [sid for sid, s in list(_active_streams.items()) if now - s._last_active > 60]
+        # Clean up any streams that have been idle for > 10 seconds
+        expired = [sid for sid, s in list(_active_streams.items()) if now - s._last_active > 10]
         for sid in expired:
             s = _active_streams.pop(sid, None)
             if s:
                 s.close()
 
+        parts = json.loads(parts_json)
+        first_msg = parts[0].get("messageId") or parts[0].get("message_id") if parts else 0
+        media_key = f"{chat_id}_{first_msg}"
+
+        # Proactive Seek Cancellation: Close any prior stream for this media in 0ms!
+        old_sid = _media_to_stream_id.get(media_key)
+        if old_sid:
+            old_s = _active_streams.pop(old_sid, None)
+            if old_s:
+                print(f"[create_stream] Cancelling prior stream {old_sid} for media {media_key} (Seek detected)", flush=True)
+                old_s.close()
+
         client = await _get_connected_stream_client(api_id, api_hash, session_str)
         # Ensure channel peer access hash is resolved in Pyrogram's memory cache before tasks start
         await _ensure_channel_peer(client, int(chat_id))
 
-        parts = json.loads(parts_json)
         stream_id = str(uuid.uuid4())
         session = VirtualStreamSession(client, int(chat_id), parts, int(start_byte), int(end_byte))
         session.start_prefetch()
         _active_streams[stream_id] = session
+        _media_to_stream_id[media_key] = stream_id
         return stream_id
 
     try:
@@ -1452,10 +1616,10 @@ def create_stream(api_id: int, api_hash: str, session_str: str, chat_id: int, pa
         traceback.print_exc()
         return ""
 
-def read_stream_chunk(stream_id: str, max_bytes: int = 524288) -> bytes:
+def read_stream_chunk(stream_id: str, max_bytes: int = 1048576) -> bytes:
     """
     Reads the next slice of bytes from pre-buffered queue for the given stream_id synchronously.
-    Returns bytes or empty bytes(0) when finished.
+    Returns bytes or empty bytes(0) when finished. Matches 1MB MTProto chunking.
     """
     global _active_streams
     session = _active_streams.get(stream_id)
@@ -1463,7 +1627,7 @@ def read_stream_chunk(stream_id: str, max_bytes: int = 524288) -> bytes:
         return b""
 
     try:
-        return run_async(session.read_bytes(int(max_bytes)), timeout=40)
+        return run_async(session.read_bytes(int(max_bytes)), timeout=30)
     except Exception as e:
         print(f"Error reading chunk for stream {stream_id}: {e}")
         traceback.print_exc()
@@ -1473,10 +1637,13 @@ def close_stream(stream_id: str):
     """
     Closes and cancels an active stream session and cleans up its prefetch buffer.
     """
-    global _active_streams
+    global _active_streams, _media_to_stream_id
     session = _active_streams.pop(stream_id, None)
     if session:
         session.close()
+    for k, v in list(_media_to_stream_id.items()):
+        if v == stream_id:
+            _media_to_stream_id.pop(k, None)
 
 def check_dead_messages(api_id: int, api_hash: str, session_str: str, chat_id: int, message_ids_json: str) -> str:
     """

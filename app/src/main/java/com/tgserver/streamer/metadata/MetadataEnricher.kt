@@ -22,7 +22,8 @@ data class EnrichedMetadata(
     val imdbId: String? = null,
     val tmdbId: Int? = null,
     val kitsuId: Int? = null,
-    val runtimeMinutes: Int? = null
+    val runtimeMinutes: Int? = null,
+    val rating: Double? = null
 )
 
 class MetadataEnricher {
@@ -121,6 +122,7 @@ class MetadataEnricher {
                                 val poster = metaObj.get("poster")?.asString
                                 val bg = metaObj.get("background")?.asString
                                 val desc = metaObj.get("description")?.asString
+                                val mRating = metaObj.get("imdbRating")?.asString?.toDoubleOrNull() ?: metaObj.get("rating")?.asString?.toDoubleOrNull()
 
                                 if (metaObj.has("videos")) {
                                     val vids = metaObj.getAsJsonArray("videos")
@@ -141,7 +143,8 @@ class MetadataEnricher {
                                     overview = desc ?: resultMeta.overview,
                                     posterUrl = poster ?: resultMeta.posterUrl,
                                     backdropUrl = bg ?: resultMeta.backdropUrl,
-                                    imdbId = imdbId
+                                    imdbId = imdbId,
+                                    rating = mRating ?: resultMeta.rating
                                 )
                             }
                         }
@@ -342,6 +345,9 @@ class MetadataEnricher {
         if (meta.kitsuId != null && meta.kitsuId > 0) item.kitsuId = meta.kitsuId
         if (item.durationSeconds <= 0 && meta.runtimeMinutes != null && meta.runtimeMinutes > 0) {
             item.durationSeconds = meta.runtimeMinutes * 60
+        }
+        if (meta.rating != null && meta.rating > 0.0) {
+            item.rating = meta.rating
         }
     }
 
@@ -559,6 +565,8 @@ class MetadataEnricher {
                             }
                         } catch (_: Exception) {}
 
+                        val candRating = try { cand.get("vote_average")?.asDouble } catch (_: Exception) { null }
+
                         bestCandidate = EnrichedMetadata(
                             title = officialTitle,
                             year = year,
@@ -568,7 +576,8 @@ class MetadataEnricher {
                             episodeTitle = epTitle,
                             tmdbId = tmdbId,
                             imdbId = tmdbImdbId,
-                            runtimeMinutes = epRuntime
+                            runtimeMinutes = epRuntime,
+                            rating = candRating
                         )
                     }
                 }
@@ -642,6 +651,7 @@ class MetadataEnricher {
                         val background = obj.get("background")?.asString
                         val desc = obj.get("description")?.asString
                         val imdbId = obj.get("imdb_id")?.asString ?: obj.get("id")?.asString
+                        val candRating = obj.get("imdbRating")?.asString?.toDoubleOrNull() ?: obj.get("rating")?.asString?.toDoubleOrNull()
 
                         bestCandidate = EnrichedMetadata(
                             title = name,
@@ -649,7 +659,8 @@ class MetadataEnricher {
                             overview = desc,
                             posterUrl = poster,
                             backdropUrl = background,
-                            imdbId = imdbId
+                            imdbId = imdbId,
+                            rating = candRating
                         )
                     }
                 }
@@ -674,6 +685,10 @@ class MetadataEnricher {
                                                 runtimeCache[candImdb] = mins * 60
                                                 bestCandidate = bestCandidate.copy(runtimeMinutes = mins)
                                             }
+                                        }
+                                        val detailRating = mObj?.get("imdbRating")?.asString?.toDoubleOrNull() ?: mObj?.get("rating")?.asString?.toDoubleOrNull()
+                                        if (detailRating != null && detailRating > 0.0) {
+                                            bestCandidate = bestCandidate.copy(rating = detailRating)
                                         }
                                     }
                                 }

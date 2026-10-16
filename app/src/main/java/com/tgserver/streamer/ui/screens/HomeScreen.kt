@@ -11,6 +11,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,11 +29,14 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tgserver.streamer.R
+import com.tgserver.streamer.data.model.MediaGroup
+import com.tgserver.streamer.data.model.toMediaGroups
 import com.tgserver.streamer.theme.*
 import com.tgserver.streamer.ui.AppTab
 import com.tgserver.streamer.ui.MainAppViewModel
@@ -125,6 +130,16 @@ fun HomeScreen(viewModel: MainAppViewModel) {
                 String.format(Locale.US, "%.1fGB", gb)
             }
         }
+    }
+
+    // Recently Added media groups (newest 15)
+    val recentlyAdded = remember(media) {
+        media.toMediaGroups()
+            .sortedByDescending { group ->
+                val date = group.dateAdded.takeIf { it > 0L }
+                date ?: (group.items.maxOfOrNull { it.messageId }?.toLong() ?: 0L)
+            }
+            .take(15)
     }
 
     // Stream URL
@@ -488,8 +503,151 @@ fun HomeScreen(viewModel: MainAppViewModel) {
             }
         }
 
+        // RECENTLY ADDED SECTION (Horizontal Row of Newest Media)
+        if (recentlyAdded.isNotEmpty()) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Recently Added",
+                        color = Color.White,
+                        fontFamily = NdotFont,
+                        fontSize = 14.sp,
+                        letterSpacing = 0.8.sp
+                    )
+
+                    Text(
+                        text = "view all →",
+                        color = Color(0xFFA855F7),
+                        fontFamily = NdotFont,
+                        fontSize = 11.sp,
+                        modifier = Modifier
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                viewModel.selectTab(AppTab.LIBRARY)
+                            }
+                            .padding(4.dp)
+                    )
+                }
+
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(horizontal = 2.dp)
+                ) {
+                    items(recentlyAdded, key = { it.key }) { group ->
+                        RecentMediaCard(
+                            group = group,
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                viewModel.openMediaDetails(group.key)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
         // Bottom clearance for floating liquid navbar
         Spacer(modifier = Modifier.height(72.dp))
+    }
+}
+
+@Composable
+private fun RecentMediaCard(
+    group: MediaGroup,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .width(114.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .clickable { onClick() },
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .width(114.dp)
+                .height(171.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .border(BorderStroke(1.dp, Color(0xFF282A31)), RoundedCornerShape(14.dp))
+        ) {
+            RemoteImage(
+                url = group.posterUrl,
+                contentDescription = group.title,
+                isSeries = group.type == "series" || group.type == "anime",
+                modifier = Modifier.fillMaxSize()
+            )
+
+            // Episode count badge if series/anime
+            if (group.type == "series" || group.type == "anime") {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(5.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(Color(0xFF6B21A8).copy(alpha = 0.85f))
+                        .padding(horizontal = 5.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "${group.distinctEpisodeCount} EPS",
+                        color = Color.White,
+                        fontFamily = NdotFont,
+                        fontSize = 8.5.sp
+                    )
+                }
+            }
+
+            // Quality Badge Top Right
+            if (group.qualityBadge.isNotBlank()) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(5.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(Color(0xCC111218))
+                        .border(0.5.dp, Color(0x33FFFFFF), RoundedCornerShape(5.dp))
+                        .padding(horizontal = 4.dp, vertical = 1.5.dp)
+                ) {
+                    Text(
+                        text = group.qualityBadge,
+                        color = Color(0xFFE4E4E7),
+                        fontFamily = NdotFont,
+                        fontSize = 8.5.sp
+                    )
+                }
+            }
+        }
+
+        // Title
+        Text(
+            text = group.title,
+            color = Color.White,
+            fontFamily = FontFamily.Default,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 12.5.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+
+        // Year · Size
+        val yearText = group.year?.takeIf { it.isNotBlank() } ?: "2026"
+        Text(
+            text = "$yearText · ${group.formattedTotalSize}",
+            color = Color(0xFFA855F7),
+            fontFamily = FontFamily.Default,
+            fontWeight = FontWeight.Medium,
+            fontSize = 10.5.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 

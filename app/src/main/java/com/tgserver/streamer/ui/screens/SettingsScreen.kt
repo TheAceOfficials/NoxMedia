@@ -69,6 +69,8 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
     var skipExactDuplicates by remember(config.skipExactDuplicates) { mutableStateOf(config.skipExactDuplicates) }
     var autoBackupEnabled by remember(config.autoBackupEnabled) { mutableStateOf(config.autoBackupEnabled) }
     var autoBackupHours by remember(config.autoBackupIntervalHours) { mutableIntStateOf(config.autoBackupIntervalHours) }
+    var autoSleepEnabled by remember(config.autoSleepEnabled) { mutableStateOf(config.autoSleepEnabled) }
+    var autoSleepMinutes by remember(config.autoSleepTimeoutMinutes) { mutableIntStateOf(config.autoSleepTimeoutMinutes) }
 
     // Key verification state
     var isVerifyingKeys by remember { mutableStateOf(false) }
@@ -549,7 +551,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
             MinimalSettingsCard(
                 icon = Icons.Default.Dns,
                 title = "Server",
-                subtitle = "Port $portInput • Cache ${cacheMbInput}MB",
+                subtitle = "Port $portInput • Cache ${cacheMbInput}MB" + (if (autoSleepEnabled) " • Sleep ${if (autoSleepMinutes >= 60) "${autoSleepMinutes / 60}h" else "${autoSleepMinutes}m"}" else ""),
                 isExpanded = expandedServer,
                 onToggleExpand = { expandedServer = !expandedServer }
             ) {
@@ -638,6 +640,8 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                             portInput = restored.port.toString()
                             cacheMbInput = restored.diskCacheMb.toString()
                             bufferMbInput = restored.bufferPipelineMb.toString()
+                            autoSleepEnabled = restored.autoSleepEnabled
+                            autoSleepMinutes = restored.autoSleepTimeoutMinutes
                         },
                         modifier = Modifier.weight(1f),
                         variant = NothingButtonVariant.Secondary,
@@ -793,6 +797,129 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                             variant = NothingButtonVariant.Primary,
                             height = 32.dp,
                             modifier = Modifier.wrapContentWidth()
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+                Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(Color(0xFF22242D)))
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Auto Sleep Server
+                SettingToggleRow(
+                    title = "Auto Sleep",
+                    description = "Automatically stops the server when idle with no active video streaming to conserve battery and resources.",
+                    checked = autoSleepEnabled,
+                    onCheckedChange = {
+                        autoSleepEnabled = it
+                        viewModel.updateAutoSleep(it, autoSleepMinutes)
+                    }
+                )
+
+                AnimatedVisibility(
+                    visible = autoSleepEnabled,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 10.dp)
+                    ) {
+                        val autoSleepOptions = listOf(15, 30, 60, 120, 360)
+                        val autoSleepLabels = listOf("15m", "30m", "1h", "2h", "6h")
+                        val currentIdx = autoSleepOptions.indexOf(autoSleepMinutes).let { if (it >= 0) it else 1 }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Idle Timeout",
+                                color = TextSecondary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            val badgeLabel = when (autoSleepMinutes) {
+                                15 -> "15 MIN"
+                                30 -> "30 MIN"
+                                60 -> "1 HOUR"
+                                120 -> "2 HOURS"
+                                360 -> "6 HOURS"
+                                else -> "${autoSleepMinutes} MIN"
+                            }
+                            NothingDotBadge(
+                                text = badgeLabel,
+                                dotColor = StatusAmber,
+                                textColor = TextPrimary
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Slider(
+                            value = currentIdx.toFloat(),
+                            onValueChange = { newIdx ->
+                                val rounded = (newIdx + 0.5f).toInt().coerceIn(0, autoSleepOptions.lastIndex)
+                                val selectedTimeout = autoSleepOptions[rounded]
+                                if (selectedTimeout != autoSleepMinutes) {
+                                    autoSleepMinutes = selectedTimeout
+                                    viewModel.updateAutoSleep(autoSleepEnabled, selectedTimeout)
+                                }
+                            },
+                            valueRange = 0f..4f,
+                            steps = 3,
+                            colors = SliderDefaults.colors(
+                                thumbColor = AccentApple,
+                                activeTrackColor = AccentApple,
+                                inactiveTrackColor = Color(0xFF2C2F3A),
+                                activeTickColor = Color.Transparent,
+                                inactiveTickColor = Color.Transparent
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        // Labels row for the 5 slider positions
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            autoSleepOptions.forEachIndexed { index, minutes ->
+                                val isSelected = autoSleepMinutes == minutes
+                                Text(
+                                    text = autoSleepLabels[index],
+                                    color = if (isSelected) TextPrimary else TextTertiary,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    fontFamily = FontFamily.Monospace,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .clickable {
+                                            autoSleepMinutes = minutes
+                                            viewModel.updateAutoSleep(autoSleepEnabled, minutes)
+                                        }
+                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+                        val durationText = when (autoSleepMinutes) {
+                            15 -> "15 minutes"
+                            30 -> "30 minutes"
+                            60 -> "1 hour"
+                            120 -> "2 hours"
+                            360 -> "6 hours"
+                            else -> "$autoSleepMinutes minutes"
+                        }
+                        Text(
+                            text = "Server will sleep after $durationText of inactivity. Live countdown is displayed in the notification.",
+                            color = TextTertiary,
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp
                         )
                     }
                 }

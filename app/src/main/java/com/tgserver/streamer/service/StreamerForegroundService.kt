@@ -18,6 +18,8 @@ import com.tgserver.streamer.posters.SpatialPosterService
 import com.tgserver.streamer.server.LocalHttpServer
 import com.tgserver.streamer.telegram.TelegramClientManager
 
+import android.util.Log
+import kotlinx.coroutines.*
 import android.content.pm.ServiceInfo
 
 class StreamerForegroundService : Service() {
@@ -48,6 +50,7 @@ class StreamerForegroundService : Service() {
     private var server: LocalHttpServer? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
+    private var monitorJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -130,10 +133,12 @@ class StreamerForegroundService : Service() {
             serverStartTime = System.currentTimeMillis()
             com.tgserver.streamer.server.StreamTrafficStats.init(applicationContext)
             com.tgserver.streamer.server.StreamTrafficStats.resetSession()
+            com.tgserver.streamer.server.StreamTrafficStats.notifyActivity()
             ServerQuickSettingsTileService.updateTileState(applicationContext)
 
             val ip = server?.getLocalIpAddress() ?: "127.0.0.1"
             updateNotification("Online at http://$ip:${activeConfig.port}/manifest.json")
+            startAutoSleepMonitor()
         } catch (e: Exception) {
             updateNotification("Error starting server: ${e.message}")
         }
@@ -141,6 +146,8 @@ class StreamerForegroundService : Service() {
 
     private fun stopServer() {
         try {
+            monitorJob?.cancel()
+            monitorJob = null
             server?.stop()
             server = null
             activeServer = null
@@ -152,6 +159,61 @@ class StreamerForegroundService : Service() {
             if (wakeLock?.isHeld == true) wakeLock?.release()
             if (wifiLock?.isHeld == true) wifiLock?.release()
         } catch (_: Exception) {
+        }
+    }
+
+    private fun startAutoSleepMonitor() {
+        monitorJob?.cancel()
+        monitorJob = CoroutineScope(Dispatchers.Main).launch {
+            while (isActive && isServiceRunning) {
+                val config = activeConfig
+                val ip = server?.getLocalIpAddress() ?: "127.0.0.1"
+                val liveSpeed = com.tgserver.streamer.server.StreamTrafficStats.calculateLiveSpeed()
+                val isStreaming = liveSpeed > 1024L // Active stream (> 1 KB/s)
+
+                if (isStreaming) {
+                    com.tgserver.streamer.server.StreamTrafficStats.notifyActivity()
+                }
+
+                if (config.autoSleepEnabled) {
+                    val timeoutMillis = config.autoSleepTimeoutMinutes * 60 * 1000L
+                    val idleMillis = System.currentTimeMillis() - com.tgserver.streamer.server.StreamTrafficStats.lastActivityTime
+                    val remainingMillis = timeoutMillis - idleMillis
+
+                    if (remainingMillis <= 0L) {
+                        Log.i("StreamerService", "Auto-sleep timeout reached (${config.autoSleepTimeoutMinutes}m idle). Stopping server.")
+                        stopServer()
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        stopSelf()
+                        break
+                    } else {
+                        if (isStreaming) {
+                            val speedStr = com.tgserver.streamer.server.StreamTrafficStats.formatSpeed(liveSpeed)
+                            updateNotification("Streaming: $speedStr • http://$ip:${config.port}")
+                        } else {
+                            val remainingSec = (remainingMillis + 999) / 1000
+                            val h = remainingSec / 3600
+                            val m = (remainingSec % 3600) / 60
+                            val s = remainingSec % 60
+                            val countdownStr = when {
+                                h > 0 -> "${h}h ${m}m ${s}s"
+                                m > 0 -> "${m}m ${s}s"
+                                else -> "${s}s"
+                            }
+                            updateNotification("Idle • Auto-sleep in $countdownStr • http://$ip:${config.port}")
+                        }
+                    }
+                } else {
+                    if (isStreaming) {
+                        val speedStr = com.tgserver.streamer.server.StreamTrafficStats.formatSpeed(liveSpeed)
+                        updateNotification("Streaming: $speedStr • http://$ip:${config.port}")
+                    } else {
+                        updateNotification("Online at http://$ip:${config.port}/manifest.json")
+                    }
+                }
+
+                delay(1000)
+            }
         }
     }
 
@@ -193,6 +255,7 @@ class StreamerForegroundService : Service() {
             .setContentText(statusText)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
             .setContentIntent(pendingIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop Server", stopPendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)

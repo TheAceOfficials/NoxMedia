@@ -83,6 +83,8 @@ class TelegramClientManager(private val context: Context) {
     private val detectedDeadIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val managerScope = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
     private var autoScanJob: Job? = null
+    @Volatile
+    private var activeVideoStreamId: String? = null
 
     private val _apiCredentials = MutableStateFlow(
         Pair(
@@ -263,7 +265,17 @@ class TelegramClientManager(private val context: Context) {
         if (!json.isNullOrBlank()) {
             val type = object : TypeToken<List<ChannelInfo>>() {}.type
             val list: List<ChannelInfo> = gson.fromJson(json, type) ?: emptyList()
-            list.forEach { channels[it.id] = it }
+            list.forEach { ch ->
+                val localAvatar = File(context.filesDir, "channel_${ch.id}.jpg")
+                val effectiveAvatar = if (!ch.avatarUrl.isNullOrBlank() && File(ch.avatarUrl).exists()) {
+                    ch.avatarUrl
+                } else if (localAvatar.exists() && localAvatar.length() > 0) {
+                    localAvatar.absolutePath
+                } else {
+                    ch.avatarUrl
+                }
+                channels[ch.id] = ch.copy(avatarUrl = effectiveAvatar)
+            }
         }
         _channelsState.value = channels.values.toList()
     }
@@ -1296,15 +1308,23 @@ class TelegramClientManager(private val context: Context) {
         var realId: Long? = null
         var realTitle: String? = null
         var realUsername: String? = null
+        var downloadedAvatarPath: String? = null
+        val tempAvatarFile = File(context.filesDir, "channel_temp_${System.currentTimeMillis()}.jpg")
 
         if (bridge != null && sessionStr.isNotBlank() && apiId > 0) {
             try {
-                val resStr = bridge.callAttr("resolve_channel", apiId, apiHash, sessionStr, clean).toString()
+                val resStr = bridge.callAttr("resolve_channel", apiId, apiHash, sessionStr, clean, tempAvatarFile.absolutePath).toString()
                 val json = JSONObject(resStr)
                 if (json.optString("status") == "success") {
                     realId = json.getLong("id")
                     realTitle = json.getString("title")
                     realUsername = json.optString("username", clean)
+                    val photoPath = json.optString("photo_path")
+                    if (photoPath.isNotBlank() && File(photoPath).exists()) {
+                        downloadedAvatarPath = photoPath
+                    } else if (tempAvatarFile.exists() && tempAvatarFile.length() > 0) {
+                        downloadedAvatarPath = tempAvatarFile.absolutePath
+                    }
                 } else {
                     val err = json.optString("error")
                     if (err.isNotBlank()) {
@@ -1328,6 +1348,22 @@ class TelegramClientManager(private val context: Context) {
             .joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }
         val finalUsername = realUsername ?: clean.removePrefix("@")
 
+        val standardAvatar = File(context.filesDir, "channel_${finalId}.jpg")
+        val finalAvatarPath = if (downloadedAvatarPath != null) {
+            try {
+                val src = File(downloadedAvatarPath)
+                if (src.exists() && src.absolutePath != standardAvatar.absolutePath) {
+                    src.copyTo(standardAvatar, overwrite = true)
+                    src.delete()
+                }
+                standardAvatar.absolutePath
+            } catch (_: Exception) {
+                downloadedAvatarPath
+            }
+        } else if (standardAvatar.exists() && standardAvatar.length() > 0) {
+            standardAvatar.absolutePath
+        } else null
+
         val newChannel = ChannelInfo(
             id = finalId,
             title = finalTitle,
@@ -1336,12 +1372,46 @@ class TelegramClientManager(private val context: Context) {
             videoCount = 0,
             isActive = true,
             isAnime = isAnime,
-            lastSyncTime = 0L
+            lastSyncTime = 0L,
+            avatarUrl = finalAvatarPath
         )
 
         channels[finalId] = newChannel
         saveChannels()
         Result.success(newChannel)
+    }
+
+    suspend fun refreshChannelAvatar(channelId: Long): String? = withContext(Dispatchers.IO) {
+        val bridge = getPyBridge() ?: return@withContext null
+        val apiId = getApiId()
+        val apiHash = getApiHash()
+        val sessionStr = sessionState.value.sessionString
+        if (sessionStr.isBlank() || apiId <= 0) return@withContext null
+
+        try {
+            val avatarFile = File(context.filesDir, "channel_${channelId}.jpg")
+            val resStr = bridge.callAttr("fetch_channel_avatar", apiId, apiHash, sessionStr, channelId, avatarFile.absolutePath).toString()
+            val json = JSONObject(resStr)
+            if (json.optString("status") == "success") {
+                val photoPath = json.optString("photo_path")
+                val effective = if (photoPath.isNotBlank() && File(photoPath).exists()) {
+                    photoPath
+                } else if (avatarFile.exists() && avatarFile.length() > 0) {
+                    avatarFile.absolutePath
+                } else null
+
+                if (effective != null) {
+                    channels[channelId]?.let { ch ->
+                        channels[channelId] = ch.copy(avatarUrl = effective)
+                        saveChannels()
+                    }
+                    return@withContext effective
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to refresh avatar for channel $channelId: ${e.message}")
+        }
+        null
     }
 
     fun addChannel(identifier: String, isAnime: Boolean = false): Result<ChannelInfo> {
@@ -1758,7 +1828,9 @@ class TelegramClientManager(private val context: Context) {
                             mimeType = mObj.optString("mimeType", "video/mp4"),
                             fileName = mObj.getString("fileName"),
                             isSplit = false,
-                            parts = emptyList()
+                            parts = emptyList(),
+                            dateAdded = mObj.optLong("dateAdded", System.currentTimeMillis()),
+                            rating = mObj.optDouble("rating", 0.0)
                         )
 
                         // Enrich metadata
@@ -1860,7 +1932,9 @@ class TelegramClientManager(private val context: Context) {
                             mimeType = spObj.optString("mimeType", "video/mp4"),
                             fileName = cleanBase,
                             isSplit = true,
-                            parts = computedParts
+                            parts = computedParts,
+                            dateAdded = spObj.optLong("dateAdded", System.currentTimeMillis()),
+                            rating = spObj.optDouble("rating", 0.0)
                         )).copy(
                             id = splitItemId,
                             messageId = firstMsgId,
@@ -2116,6 +2190,17 @@ class TelegramClientManager(private val context: Context) {
 
                 val partsJson = gson.toJson(partsList)
                 Log.d(TAG, "create_stream request: partsCount=${partsList.size}, channelId=$effectiveChannelId, range=$startByte-$effectiveEnd/$totalSize")
+
+                // Seek / Range jump optimization: Proactively terminate previous active stream immediately
+                activeVideoStreamId?.let { prevId ->
+                    try {
+                        Log.d(TAG, "Seek detected: terminating previous stream $prevId immediately")
+                        bridge.callAttr("close_stream", prevId)
+                    } catch (ce: Exception) {
+                        Log.w(TAG, "Notice closing previous stream $prevId: ${ce.message}")
+                    }
+                }
+
                 val streamId = bridge.callAttr(
                     "create_stream",
                     apiId,
@@ -2128,6 +2213,7 @@ class TelegramClientManager(private val context: Context) {
                 )?.toString() ?: ""
 
                 if (streamId.isNotBlank()) {
+                    activeVideoStreamId = streamId
                     val stream = TgMediaInputStream(bridge, streamId, contentLength)
                     return StreamChunkResult(
                         inputStream = stream,

@@ -1062,6 +1062,8 @@ class LocalHttpServer(
             if (it.has("customPosterUrl")) config.customPosterUrl = it.get("customPosterUrl").asString
             if (it.has("customPosterApiKey")) config.customPosterApiKey = it.get("customPosterApiKey").asString
             if (it.has("bufferChunkSizeKb")) config.bufferChunkSizeKb = it.get("bufferChunkSizeKb").asInt
+            if (it.has("autoSleepEnabled")) config.autoSleepEnabled = it.get("autoSleepEnabled").asBoolean
+            if (it.has("autoSleepTimeoutMinutes")) config.autoSleepTimeoutMinutes = it.get("autoSleepTimeoutMinutes").asInt
         }
         return handleGetSettings()
     }

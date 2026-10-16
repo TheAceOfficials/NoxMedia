@@ -139,6 +139,18 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    private val _selectedMediaGroupKey = MutableStateFlow<String?>(null)
+    val selectedMediaGroupKey: StateFlow<String?> = _selectedMediaGroupKey.asStateFlow()
+
+    fun openMediaDetails(groupKey: String) {
+        _selectedMediaGroupKey.value = groupKey
+        _selectedTab.value = AppTab.LIBRARY
+    }
+
+    fun clearSelectedMediaGroup() {
+        _selectedMediaGroupKey.value = null
+    }
+
     fun selectTab(tab: AppTab) {
         _selectedTab.value = tab
     }
@@ -352,6 +364,12 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             } else {
                 Toast.makeText(getApplication(), "Rescan failed: ${res.exceptionOrNull()?.message}", Toast.LENGTH_SHORT).show()
             }
+        }
+    }
+
+    fun refreshChannelAvatar(channelId: Long) {
+        viewModelScope.launch {
+            tgClient.refreshChannelAvatar(channelId)
         }
     }
 
@@ -624,7 +642,9 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             replaceSameQuality = prefs.getBoolean("replace_same_quality", false),
             skipExactDuplicates = prefs.getBoolean("skip_exact_duplicates", true),
             autoBackupEnabled = prefs.getBoolean("auto_backup_enabled", false),
-            autoBackupIntervalHours = prefs.getInt("auto_backup_interval_hours", 12)
+            autoBackupIntervalHours = prefs.getInt("auto_backup_interval_hours", 12),
+            autoSleepEnabled = prefs.getBoolean("auto_sleep_enabled", false),
+            autoSleepTimeoutMinutes = prefs.getInt("auto_sleep_timeout_minutes", 30)
         )
     }
 
@@ -647,6 +667,8 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             putBoolean("skip_exact_duplicates", cfg.skipExactDuplicates)
             putBoolean("auto_backup_enabled", cfg.autoBackupEnabled)
             putInt("auto_backup_interval_hours", cfg.autoBackupIntervalHours)
+            putBoolean("auto_sleep_enabled", cfg.autoSleepEnabled)
+            putInt("auto_sleep_timeout_minutes", cfg.autoSleepTimeoutMinutes)
             apply()
         }
         _config.value = cfg
@@ -753,11 +775,38 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         val updated = current.copy(
             port = 7788,
             diskCacheMb = 2048,
-            bufferPipelineMb = 20
+            bufferPipelineMb = 20,
+            autoSleepEnabled = false,
+            autoSleepTimeoutMinutes = 30
         )
         saveStoredConfig(updated)
         Toast.makeText(getApplication(), "✓ Defaults restored: Cache 2048MB, Buffer 20MB, Port 7788", Toast.LENGTH_SHORT).show()
         return updated
+    }
+
+    fun updateAutoSleep(enabled: Boolean, timeoutMinutes: Int) {
+        val updated = _config.value.copy(
+            autoSleepEnabled = enabled,
+            autoSleepTimeoutMinutes = timeoutMinutes
+        )
+        saveStoredConfig(updated)
+        if (enabled && StreamerForegroundService.isServiceRunning) {
+            com.tgserver.streamer.server.StreamTrafficStats.notifyActivity()
+        }
+        val msg = if (enabled) {
+            val durationText = when (timeoutMinutes) {
+                15 -> "15 min"
+                30 -> "30 min"
+                60 -> "1 hour"
+                120 -> "2 hours"
+                360 -> "6 hours"
+                else -> "${timeoutMinutes}m"
+            }
+            "✓ Auto Sleep set to $durationText"
+        } else {
+            "✓ Auto Sleep disabled"
+        }
+        Toast.makeText(getApplication(), msg, Toast.LENGTH_SHORT).show()
     }
 
     fun detectTailscaleIp(): String? {
@@ -865,7 +914,9 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                 "startOnBoot": ${cfg.startOnBoot},
                 "autoScanNewContent": ${cfg.autoScanNewContent},
                 "replaceSameQuality": ${cfg.replaceSameQuality},
-                "skipExactDuplicates": ${cfg.skipExactDuplicates}
+                "skipExactDuplicates": ${cfg.skipExactDuplicates},
+                "autoSleepEnabled": ${cfg.autoSleepEnabled},
+                "autoSleepTimeoutMinutes": ${cfg.autoSleepTimeoutMinutes}
               },
               "monitoredChannelsCount": ${channelList.size}
             }
@@ -885,7 +936,9 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                     startOnBoot = sc.optBoolean("startOnBoot", _config.value.startOnBoot),
                     autoScanNewContent = sc.optBoolean("autoScanNewContent", _config.value.autoScanNewContent),
                     replaceSameQuality = sc.optBoolean("replaceSameQuality", _config.value.replaceSameQuality),
-                    skipExactDuplicates = sc.optBoolean("skipExactDuplicates", _config.value.skipExactDuplicates)
+                    skipExactDuplicates = sc.optBoolean("skipExactDuplicates", _config.value.skipExactDuplicates),
+                    autoSleepEnabled = sc.optBoolean("autoSleepEnabled", _config.value.autoSleepEnabled),
+                    autoSleepTimeoutMinutes = sc.optInt("autoSleepTimeoutMinutes", _config.value.autoSleepTimeoutMinutes)
                 )
                 saveStoredConfig(updated)
                 Toast.makeText(getApplication(), "✓ Settings successfully restored from backup!", Toast.LENGTH_LONG).show()

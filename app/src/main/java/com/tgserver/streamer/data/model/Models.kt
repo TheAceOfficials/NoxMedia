@@ -10,7 +10,8 @@ data class ChannelInfo(
     val autoIndex: Boolean = true,
     val lastSyncTime: Long = 0L,
     val isAnime: Boolean = false,
-    val lastScannedMsgId: Int = 0
+    val lastScannedMsgId: Int = 0,
+    val avatarUrl: String? = null
 ) {
     val scanStatusText: String
         get() {
@@ -59,7 +60,9 @@ data class MediaItem(
     var kitsuId: Int? = null,
     val isSplit: Boolean = false,
     val parts: List<SplitPart> = emptyList(),
-    var isHidden: Boolean = false
+    var isHidden: Boolean = false,
+    var dateAdded: Long = 0L,
+    var rating: Double = 0.0
 ) {
     val formattedSize: String
         get() {
@@ -80,6 +83,156 @@ data class MediaItem(
             val m = (durationSeconds % 3600) / 60
             return if (h > 0) "${h}h ${m}m" else "${m}m"
         }
+}
+
+fun formatShortBadge(badge: String): String {
+    if (badge.isBlank()) return badge
+    return badge
+        .replace("English", "Eng", ignoreCase = true)
+        .replace("Hindi", "Hin", ignoreCase = true)
+        .replace("Kannada", "Kan", ignoreCase = true)
+        .replace("Malayalam", "Mal", ignoreCase = true)
+        .replace("Tamil", "Tam", ignoreCase = true)
+        .replace("Telugu", "Tel", ignoreCase = true)
+        .replace("Japanese", "Jap", ignoreCase = true)
+        .replace("Korean", "Kor", ignoreCase = true)
+        .replace("Spanish", "Spa", ignoreCase = true)
+        .replace("French", "Fre", ignoreCase = true)
+        .replace("German", "Ger", ignoreCase = true)
+        .replace("Italian", "Ita", ignoreCase = true)
+        .replace("Russian", "Rus", ignoreCase = true)
+        .replace("Chinese", "Chi", ignoreCase = true)
+        .replace("Multi Audio", "Multi", ignoreCase = true)
+        .replace("Dual Audio", "Dual", ignoreCase = true)
+}
+
+/**
+ * Grouped media entity representing a single Movie or TV Show title
+ */
+data class MediaGroup(
+    val key: String,
+    val title: String,
+    val type: String, // "movie", "series", "anime"
+    val year: String?,
+    val posterUrl: String?,
+    val backdropUrl: String?,
+    val overview: String?,
+    val imdbId: String?,
+    val tmdbId: Int?,
+    val qualityBadge: String,
+    val items: List<MediaItem>,
+    val dateAdded: Long = 0L,
+    val rating: Double = 0.0
+) {
+    val distinctEpisodeCount: Int
+        get() = items.map { Pair(it.season ?: 1, it.episode ?: 1) }.distinct().size
+
+    val formattedTotalSize: String
+        get() {
+            val totalBytes = items.sumOf { it.sizeBytes }
+            if (totalBytes <= 0L) return "0 MB"
+            val tb = totalBytes.toDouble() / (1024.0 * 1024.0 * 1024.0 * 1024.0)
+            if (tb >= 1.0) {
+                return String.format(java.util.Locale.US, "%.1f TB", tb)
+            }
+            val gb = totalBytes.toDouble() / (1024.0 * 1024.0 * 1024.0)
+            if (gb >= 1.0) {
+                return if (gb >= 100.0) String.format(java.util.Locale.US, "%.0f GB", gb)
+                else String.format(java.util.Locale.US, "%.1f GB", gb)
+            }
+            val mb = totalBytes.toDouble() / (1024.0 * 1024.0)
+            return String.format(java.util.Locale.US, "%.0f MB", mb)
+        }
+}
+
+enum class LibrarySortOrder(val label: String) {
+    RECENT("Recently Added"),
+    NAME_ASC("Name (A → Z)"),
+    NAME_DESC("Name (Z → A)"),
+    YEAR_DESC("Year (Newest)"),
+    YEAR_ASC("Year (Oldest)"),
+    SIZE_DESC("Size (Largest)"),
+    SIZE_ASC("Size (Smallest)"),
+    RATING_DESC("Rating (Highest)")
+}
+
+fun List<MediaItem>.toMediaGroups(): List<MediaGroup> {
+    val allMedia = this
+    val splitItems = allMedia.filter { it.isSplit }
+    val effectiveMedia = if (splitItems.isEmpty()) {
+        allMedia
+    } else {
+        val splitPartMsgIds = splitItems.flatMap { it.parts.map { p -> p.messageId } }.toSet()
+        val splitCleanBases = splitItems.map {
+            it.fileName.lowercase()
+                .replace(Regex("""[\s._-]*(?:part|pt)[\s._-]*\d+.*""", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("""\.(mkv|mp4|avi|webm|ts|m4v)(\.\d{2,4})?$""", RegexOption.IGNORE_CASE), "")
+                .trim()
+        }.toSet()
+
+        allMedia.filter { item ->
+            if (item.isSplit) return@filter true
+            if (splitPartMsgIds.contains(item.messageId)) return@filter false
+            val itemClean = item.fileName.lowercase()
+                .replace(Regex("""[\s._-]*(?:part|pt)[\s._-]*\d+.*""", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("""\.(mkv|mp4|avi|webm|ts|m4v)(\.\d{2,4})?$""", RegexOption.IGNORE_CASE), "")
+                .trim()
+            if (splitCleanBases.contains(itemClean)) {
+                if (item.fileName.contains(Regex("""(?i)(?:part|pt|\.\d{2,4})"""))) {
+                    return@filter false
+                }
+                val splitMatch = splitItems.find {
+                    (it.channelId == item.channelId || it.channelId == 0L || item.channelId == 0L) &&
+                    it.season == item.season && it.episode == item.episode
+                }
+                if (splitMatch != null && item.sizeBytes < splitMatch.sizeBytes) {
+                    return@filter false
+                }
+            }
+            true
+        }
+    }
+
+    return effectiveMedia.groupBy { item ->
+        val cleanTitle = item.title.trim().lowercase()
+        when {
+            item.tmdbId != null && item.tmdbId!! > 0 -> "tmdb_${item.type}_${item.tmdbId}"
+            !item.imdbId.isNullOrBlank() -> "imdb_${item.imdbId}"
+            else -> "title_${item.type}_$cleanTitle"
+        }
+    }.map { (key, items) ->
+        val primary = items.first()
+        val bestPoster = items.firstOrNull { !it.posterUrl.isNullOrBlank() }?.posterUrl ?: primary.posterUrl
+        val bestBackdrop = items.firstOrNull { !it.backdropUrl.isNullOrBlank() }?.backdropUrl ?: primary.backdropUrl
+        val bestOverview = items.firstOrNull { !it.overview.isNullOrBlank() }?.overview ?: primary.overview
+        val bestYear = items.firstOrNull { !it.year.isNullOrBlank() }?.year ?: primary.year
+        val bestQuality = items.maxByOrNull {
+            when {
+                it.quality.contains("4K", ignoreCase = true) || it.quality.contains("2160", ignoreCase = true) -> 4
+                it.quality.contains("1080", ignoreCase = true) -> 3
+                it.quality.contains("720", ignoreCase = true) -> 2
+                else -> 1
+            }
+        }?.qualityBadge ?: primary.qualityBadge
+        val maxDateAdded = items.maxOfOrNull { it.dateAdded } ?: 0L
+        val maxRating = items.map { it.rating }.maxOrNull() ?: 0.0
+
+        MediaGroup(
+            key = key,
+            title = primary.title,
+            type = primary.type,
+            year = bestYear,
+            posterUrl = bestPoster,
+            backdropUrl = bestBackdrop,
+            overview = bestOverview,
+            imdbId = primary.imdbId,
+            tmdbId = primary.tmdbId,
+            qualityBadge = formatShortBadge(bestQuality),
+            items = items.sortedWith(compareBy({ it.season ?: 1 }, { it.episode ?: 1 })),
+            dateAdded = maxDateAdded,
+            rating = maxRating
+        )
+    }
 }
 
 data class UnmatchedItem(
@@ -169,7 +322,9 @@ data class ServerConfig(
     var replaceSameQuality: Boolean = false,
     var skipExactDuplicates: Boolean = true,
     var autoBackupEnabled: Boolean = false,
-    var autoBackupIntervalHours: Int = 12
+    var autoBackupIntervalHours: Int = 12,
+    var autoSleepEnabled: Boolean = false,
+    var autoSleepTimeoutMinutes: Int = 30
 )
 
 data class AuthSession(
