@@ -1552,8 +1552,8 @@ def create_stream(api_id: int, api_hash: str, session_str: str, chat_id: int, pa
 
     async def _async_create():
         now = time.time()
-        # Clean up any streams that have been idle for > 60 seconds
-        expired = [sid for sid, s in list(_active_streams.items()) if now - s._last_active > 60]
+        # Clean up any streams that have been idle for > 30 seconds
+        expired = [sid for sid, s in list(_active_streams.items()) if now - s._last_active > 30]
         for sid in expired:
             s = _active_streams.pop(sid, None)
             if s:

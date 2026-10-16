@@ -809,33 +809,55 @@ class LocalHttpServer(
             media?.mimeType ?: "video/mp4"
         }
 
+        val rangeHeader = headers["range"] ?: headers["Range"]
+        var startByte = 0L
+        var endByte = totalSize - 1L
+
+        if (!rangeHeader.isNullOrBlank() && rangeHeader.startsWith("bytes=")) {
+            val rangeVal = rangeHeader.removePrefix("bytes=").substringBefore(',').trim()
+            val dashIndex = rangeVal.indexOf('-')
+            if (dashIndex != -1) {
+                val startStr = rangeVal.substring(0, dashIndex).trim()
+                val endStr = rangeVal.substring(dashIndex + 1).trim()
+                if (startStr.isEmpty()) {
+                    // Suffix byte range: bytes=-N means the last N bytes of the file (e.g. MKV Cues / index)
+                    val suffixLen = endStr.toLongOrNull() ?: 0L
+                    if (suffixLen > 0L) {
+                        startByte = maxOf(0L, totalSize - suffixLen)
+                        endByte = totalSize - 1L
+                    }
+                } else {
+                    startByte = startStr.toLongOrNull() ?: 0L
+                    if (endStr.isNotEmpty()) {
+                        val parsedEnd = endStr.toLongOrNull()
+                        if (parsedEnd != null && parsedEnd in startByte until totalSize) {
+                            endByte = parsedEnd
+                        }
+                    }
+                }
+            }
+        }
+
         // Handle HEAD requests immediately without starting Pyrogram stream
         if (session.method == Method.HEAD) {
-            val response = newFixedLengthResponse(Response.Status.OK, mime, "")
+            val response = if (rangeHeader != null) {
+                newFixedLengthResponse(Response.Status.PARTIAL_CONTENT, mime, "").apply {
+                    addHeader("Content-Range", "bytes $startByte-$endByte/$totalSize")
+                    addHeader("Content-Length", "${endByte - startByte + 1}")
+                }
+            } else {
+                newFixedLengthResponse(Response.Status.OK, mime, "").apply {
+                    addHeader("Content-Length", "$totalSize")
+                }
+            }
             response.addHeader("Accept-Ranges", "bytes")
-            response.addHeader("Content-Range", "bytes 0-${totalSize - 1}/$totalSize")
-            response.addHeader("Content-Length", "$totalSize")
+            response.addHeader("Connection", "keep-alive")
             response.addHeader("Content-Disposition", "inline; filename=\"$fileName\"")
             return response
         }
 
-        val rangeHeader = headers["range"] ?: headers["Range"]
-        var startByte = 0L
-        var endByte = -1L
-
-        if (!rangeHeader.isNullOrBlank() && rangeHeader.startsWith("bytes=")) {
-            val rangeVal = rangeHeader.removePrefix("bytes=").trim()
-            val dashIndex = rangeVal.indexOf('-')
-            if (dashIndex != -1) {
-                val startStr = rangeVal.substring(0, dashIndex)
-                val endStr = rangeVal.substring(dashIndex + 1)
-                startByte = startStr.toLongOrNull() ?: 0L
-                endByte = endStr.toLongOrNull() ?: -1L
-            }
-        }
-
         // Pass resolvedMessageId (from actual media item) and targetParam (item.id) for lookup
-        Log.i(TAG, "Incoming Video Stream: target=$targetParam, resolvedMsg=$resolvedMessageId, ch=$effectiveChannelId, range=$rangeHeader, method=${session.method}")
+        Log.i(TAG, "Incoming Video Stream: target=$targetParam, resolvedMsg=$resolvedMessageId, ch=$effectiveChannelId, range=$rangeHeader (parsed: $startByte-$endByte/$totalSize), method=${session.method}")
         val chunk = try {
             tgClient.getStreamSource(effectiveChannelId, resolvedMessageId, startByte, endByte, mediaId = targetParam)
         } catch (e: Exception) {

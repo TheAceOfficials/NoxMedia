@@ -2135,8 +2135,8 @@ class TelegramClientManager(private val context: Context) {
 
         val effectiveChannelId = media?.channelId ?: channelId
         val totalSize = media?.sizeBytes ?: 50_000_000L
-        val effectiveEnd = if (endByte <= 0L || endByte >= totalSize) totalSize - 1 else endByte
-        val contentLength = effectiveEnd - startByte + 1
+        val effectiveEnd = if (endByte < startByte || endByte >= totalSize) totalSize - 1 else endByte
+        val contentLength = maxOf(0L, effectiveEnd - startByte + 1)
 
         val mimeType = if (media?.fileName?.contains(".mkv", ignoreCase = true) == true ||
             media?.mimeType?.contains("matroska", ignoreCase = true) == true
