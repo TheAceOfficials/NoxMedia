@@ -54,6 +54,7 @@ class TgMediaInputStream(
 
             val nextChunk = pyBytes.toJava(ByteArray::class.java)
             if (nextChunk.isEmpty()) {
+                Log.d(TAG, "Stream $streamId returned empty chunk: totalRead=$totalBytesRead/$totalBytesToRead")
                 return -1
             }
 

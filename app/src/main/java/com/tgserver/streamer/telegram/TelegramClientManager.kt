@@ -83,8 +83,6 @@ class TelegramClientManager(private val context: Context) {
     private val detectedDeadIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val managerScope = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
     private var autoScanJob: Job? = null
-    @Volatile
-    private var activeVideoStreamId: String? = null
 
     private val _apiCredentials = MutableStateFlow(
         Pair(
@@ -2189,18 +2187,6 @@ class TelegramClientManager(private val context: Context) {
                 }
 
                 val partsJson = gson.toJson(partsList)
-                Log.d(TAG, "create_stream request: partsCount=${partsList.size}, channelId=$effectiveChannelId, range=$startByte-$effectiveEnd/$totalSize")
-
-                // Seek / Range jump optimization: Proactively terminate previous active stream immediately
-                activeVideoStreamId?.let { prevId ->
-                    try {
-                        Log.d(TAG, "Seek detected: terminating previous stream $prevId immediately")
-                        bridge.callAttr("close_stream", prevId)
-                    } catch (ce: Exception) {
-                        Log.w(TAG, "Notice closing previous stream $prevId: ${ce.message}")
-                    }
-                }
-
                 val streamId = bridge.callAttr(
                     "create_stream",
                     apiId,
@@ -2212,8 +2198,9 @@ class TelegramClientManager(private val context: Context) {
                     effectiveEnd
                 )?.toString() ?: ""
 
+                Log.i(TAG, "create_stream result: streamId=$streamId, partsCount=${partsList.size}, channelId=$effectiveChannelId, range=$startByte-$effectiveEnd/$totalSize")
+
                 if (streamId.isNotBlank()) {
-                    activeVideoStreamId = streamId
                     val stream = TgMediaInputStream(bridge, streamId, contentLength)
                     return StreamChunkResult(
                         inputStream = stream,

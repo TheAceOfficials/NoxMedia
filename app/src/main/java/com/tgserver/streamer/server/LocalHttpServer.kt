@@ -835,6 +835,7 @@ class LocalHttpServer(
         }
 
         // Pass resolvedMessageId (from actual media item) and targetParam (item.id) for lookup
+        Log.i(TAG, "Incoming Video Stream: target=$targetParam, resolvedMsg=$resolvedMessageId, ch=$effectiveChannelId, range=$rangeHeader, method=${session.method}")
         val chunk = try {
             tgClient.getStreamSource(effectiveChannelId, resolvedMessageId, startByte, endByte, mediaId = targetParam)
         } catch (e: Exception) {
@@ -845,6 +846,8 @@ class LocalHttpServer(
                 "Stream error: ${e.message}"
             )
         }
+
+        Log.i(TAG, "Serving Video Stream: start=${chunk.startByte}, end=${chunk.endByte}, len=${chunk.contentLength}, total=${chunk.totalSize}, mime=$mime")
 
         val response = if (rangeHeader != null) {
             newFixedLengthResponse(

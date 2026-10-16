@@ -66,7 +66,6 @@ _auth_state = {
 
 # Active streaming sessions and cache
 _active_streams: Dict[str, Any] = {}
-_media_to_stream_id: Dict[str, str] = {}
 _file_id_cache: Dict[Tuple[int, int], FileId] = {}
 _media_session_lock = asyncio.Lock()
 _channel_peer_lock = asyncio.Lock()
@@ -979,7 +978,7 @@ async def _ensure_channel_peer(client: Client, chat_id: int) -> int:
 
         # 2. Iterate dialogs once to resolve and cache the peer in Pyrogram
         try:
-            async for dialog in client.get_dialogs():
+            async for dialog in client.get_dialogs(limit=50):
                 dchat = dialog.chat
                 if dchat:
                     did = dchat.id
@@ -1544,41 +1543,23 @@ class VirtualStreamSession:
                 except Exception:
                     break
 
-            # Instantly cancel all pending background chunk fetches for this chat so old chunks abort!
-            for k, t in list(_pending_fetches.items()):
-                if k[0] == self.chat_id:
-                    _pending_fetches.pop(k, None)
-                    if not t.done():
-                        t.cancel()
-
 def create_stream(api_id: int, api_hash: str, session_str: str, chat_id: int, parts_json: str, start_byte: int, end_byte: int) -> str:
     """
     Initializes a virtual byte stream with concurrent pre-buffering and returns a unique stream_id.
-    Immediately terminates any previous active stream for the same media/channel to ensure instant seeks.
+    Supports concurrent HTTP 206 range requests (header demuxing, cues indexing, and playback).
     """
-    global _active_streams, _media_to_stream_id
+    global _active_streams
 
     async def _async_create():
         now = time.time()
-        # Clean up any streams that have been idle for > 10 seconds
-        expired = [sid for sid, s in list(_active_streams.items()) if now - s._last_active > 10]
+        # Clean up any streams that have been idle for > 60 seconds
+        expired = [sid for sid, s in list(_active_streams.items()) if now - s._last_active > 60]
         for sid in expired:
             s = _active_streams.pop(sid, None)
             if s:
                 s.close()
 
         parts = json.loads(parts_json)
-        first_msg = parts[0].get("messageId") or parts[0].get("message_id") if parts else 0
-        media_key = f"{chat_id}_{first_msg}"
-
-        # Proactive Seek Cancellation: Close any prior stream for this media in 0ms!
-        old_sid = _media_to_stream_id.get(media_key)
-        if old_sid:
-            old_s = _active_streams.pop(old_sid, None)
-            if old_s:
-                print(f"[create_stream] Cancelling prior stream {old_sid} for media {media_key} (Seek detected)", flush=True)
-                old_s.close()
-
         client = await _get_connected_stream_client(api_id, api_hash, session_str)
         # Ensure channel peer access hash is resolved in Pyrogram's memory cache before tasks start
         await _ensure_channel_peer(client, int(chat_id))
@@ -1587,7 +1568,6 @@ def create_stream(api_id: int, api_hash: str, session_str: str, chat_id: int, pa
         session = VirtualStreamSession(client, int(chat_id), parts, int(start_byte), int(end_byte))
         session.start_prefetch()
         _active_streams[stream_id] = session
-        _media_to_stream_id[media_key] = stream_id
         return stream_id
 
     try:
@@ -1608,7 +1588,7 @@ def read_stream_chunk(stream_id: str, max_bytes: int = 1048576) -> bytes:
         return b""
 
     try:
-        return run_async(session.read_bytes(int(max_bytes)), timeout=30)
+        return run_async(session.read_bytes(int(max_bytes)), timeout=40)
     except Exception as e:
         print(f"Error reading chunk for stream {stream_id}: {e}")
         traceback.print_exc()
@@ -1618,13 +1598,10 @@ def close_stream(stream_id: str):
     """
     Closes and cancels an active stream session and cleans up its prefetch buffer.
     """
-    global _active_streams, _media_to_stream_id
+    global _active_streams
     session = _active_streams.pop(stream_id, None)
     if session:
         session.close()
-    for k, v in list(_media_to_stream_id.items()):
-        if v == stream_id:
-            _media_to_stream_id.pop(k, None)
 
 def check_dead_messages(api_id: int, api_hash: str, session_str: str, chat_id: int, message_ids_json: str) -> str:
     """
