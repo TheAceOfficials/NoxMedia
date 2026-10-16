@@ -69,11 +69,6 @@ _active_streams: Dict[str, Any] = {}
 _media_to_stream_id: Dict[str, str] = {}
 _file_id_cache: Dict[Tuple[int, int], FileId] = {}
 _media_session_lock = asyncio.Lock()
-_DC_MEDIA_SESSIONS_COUNT = 3
-_media_session_pools: Dict[int, List[Any]] = {}
-_session_round_robin: Dict[int, int] = {}
-_dc_auth_keys: Dict[int, bytes] = {}
-_dc_authorized: set = set()
 _channel_peer_lock = asyncio.Lock()
 _resolved_channels: Dict[int, int] = {}
 _file_id_lock = asyncio.Lock()
@@ -1007,102 +1002,60 @@ async def _ensure_channel_peer(client: Client, chat_id: int) -> int:
         _resolved_channels[chat_id] = chat_id
         return chat_id
 
-async def _init_single_media_session(client: Client, dc_id: int) -> Session:
-    global _dc_auth_keys, _dc_authorized
-    test_mode = await client.storage.test_mode()
-    current_dc = await client.storage.dc_id()
+async def _get_media_session(client: Client, dc_id: int) -> Session:
+    """
+    Obtains or initializes a reliable authenticated media Session for datacenter dc_id.
+    """
+    if not hasattr(client, "media_sessions"):
+        client.media_sessions = {}
 
-    if dc_id not in _dc_auth_keys:
+    session = client.media_sessions.get(dc_id)
+    if session and getattr(session, "is_started", None) and session.is_started.is_set():
+        return session
+
+    async with _media_session_lock:
+        session = client.media_sessions.get(dc_id)
+        if session and getattr(session, "is_started", None) and session.is_started.is_set():
+            return session
+
+        test_mode = await client.storage.test_mode()
+        current_dc = await client.storage.dc_id()
+
         if dc_id != current_dc:
             auth_key = await Auth(client, dc_id, test_mode).create()
         else:
             auth_key = await client.storage.auth_key()
-        _dc_auth_keys[dc_id] = auth_key
-    else:
-        auth_key = _dc_auth_keys[dc_id]
 
-    session = Session(client, dc_id, auth_key, test_mode, is_media=True)
-    session.no_updates = True
-    session.timeout = 30
-    session.sleep_threshold = 60
+        session = Session(client, dc_id, auth_key, test_mode, is_media=True)
+        session.no_updates = True
+        session.timeout = 30
+        session.sleep_threshold = 60
 
-    await session.start()
+        await session.start()
 
-    if dc_id != current_dc and dc_id not in _dc_authorized:
-        exported_ok = False
-        for _ in range(6):
-            try:
-                exported = await client.invoke(raw.functions.auth.ExportAuthorization(dc_id=dc_id))
-                await session.invoke(raw.functions.auth.ImportAuthorization(id=exported.id, bytes=exported.bytes), timeout=15.0)
-                exported_ok = True
-                _dc_authorized.add(dc_id)
-                break
-            except errors.AuthBytesInvalid:
-                await asyncio.sleep(0.5)
-            except OSError:
-                await asyncio.sleep(1)
-            except Exception:
-                await asyncio.sleep(0.5)
-
-        if not exported_ok:
-            try:
-                await session.stop()
-            except Exception:
-                pass
-            raise RuntimeError(f"Failed to export/import authorization for DC {dc_id}")
-
-    return session
-
-async def _get_media_session(client: Client, dc_id: int) -> Session:
-    """
-    Obtains an authenticated media Session from a multi-connection pool for datacenter dc_id.
-    Distributes MTProto chunk requests across parallel TCP sockets to eliminate head-of-line blocking
-    and unlock maximum download bandwidth on both 32-bit and 64-bit devices.
-    """
-    global _media_session_pools, _session_round_robin
-
-    pool = _media_session_pools.get(dc_id, [])
-    active_pool = [s for s in pool if getattr(s, "is_started", None) and s.is_started.is_set()]
-
-    # If at least 1 session is ready, return it immediately (0ms delay for current chunk)
-    if active_pool:
-        idx = _session_round_robin.get(dc_id, 0)
-        session = active_pool[idx % len(active_pool)]
-        _session_round_robin[dc_id] = idx + 1
-
-        # Background warmup of extra sessions up to _DC_MEDIA_SESSIONS_COUNT
-        if len(active_pool) < _DC_MEDIA_SESSIONS_COUNT and not getattr(client, f"_warming_dc_{dc_id}", False):
-            setattr(client, f"_warming_dc_{dc_id}", True)
-            async def _warmup():
+        if dc_id != current_dc:
+            exported_ok = False
+            for _ in range(6):
                 try:
-                    async with _media_session_lock:
-                        cur_pool = [s for s in _media_session_pools.get(dc_id, []) if getattr(s, "is_started", None) and s.is_started.is_set()]
-                        if len(cur_pool) < _DC_MEDIA_SESSIONS_COUNT:
-                            new_s = await _init_single_media_session(client, dc_id)
-                            cur_pool.append(new_s)
-                            _media_session_pools[dc_id] = cur_pool
-                            print(f"[MediaSessionPool] Added parallel session to DC {dc_id} pool (active: {len(cur_pool)})", flush=True)
-                except Exception as ex:
-                    print(f"[MediaSessionPool] Warmup notice for DC {dc_id}: {ex}", flush=True)
-                finally:
-                    setattr(client, f"_warming_dc_{dc_id}", False)
-            asyncio.create_task(_warmup())
+                    exported = await client.invoke(raw.functions.auth.ExportAuthorization(dc_id=dc_id))
+                    await session.invoke(raw.functions.auth.ImportAuthorization(id=exported.id, bytes=exported.bytes), timeout=15.0)
+                    exported_ok = True
+                    break
+                except errors.AuthBytesInvalid:
+                    await asyncio.sleep(0.5)
+                except OSError:
+                    await asyncio.sleep(1)
+                except Exception:
+                    await asyncio.sleep(0.5)
 
-        return session
+            if not exported_ok:
+                try:
+                    await session.stop()
+                except Exception:
+                    pass
+                raise RuntimeError(f"Failed to export/import authorization for DC {dc_id}")
 
-    # Otherwise initialize the primary session synchronously under lock
-    async with _media_session_lock:
-        pool = _media_session_pools.get(dc_id, [])
-        active_pool = [s for s in pool if getattr(s, "is_started", None) and s.is_started.is_set()]
-        if active_pool:
-            idx = _session_round_robin.get(dc_id, 0)
-            session = active_pool[idx % len(active_pool)]
-            _session_round_robin[dc_id] = idx + 1
-            return session
-
-        session = await _init_single_media_session(client, dc_id)
-        _media_session_pools[dc_id] = [session]
-        _session_round_robin[dc_id] = 1
+        client.media_sessions[dc_id] = session
         return session
 
 def _get_location_from_file_id(file_id_obj: FileId):
@@ -1254,12 +1207,6 @@ async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_
                     return raw_chunk
                 return None
         except asyncio.CancelledError:
-            # Immediate seek abort: drop TCP connection so Telegram server instantly stops sending old chunk packets!
-            if session and getattr(session, "connection", None):
-                try:
-                    await session.connection.close()
-                except Exception:
-                    pass
             raise
         except (asyncio.TimeoutError, TimeoutError):
             tries += 1
@@ -1276,10 +1223,9 @@ async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_
                 m = re.search(r'(\d+)', err_str)
                 w = int(m.group(1)) if m else 3
                 await asyncio.sleep(w + 0.5)
-            elif any(x in err_str for x in ["AuthKey", "SessionRevoked", "ConnectionReset", "BrokenPipe"]):
-                pool = _media_session_pools.get(dc_id, [])
-                if session in pool:
-                    pool.remove(session)
+            elif any(x in err_str for x in ["AuthKey", "SessionRevoked", "ConnectionReset", "BrokenPipe", "Bad file descriptor", "OSError"]):
+                if hasattr(client, "media_sessions"):
+                    client.media_sessions.pop(dc_id, None)
                 try:
                     await session.stop()
                 except Exception:
@@ -1546,24 +1492,32 @@ class VirtualStreamSession:
 
     async def read_bytes(self, max_bytes: int) -> bytes:
         self._last_active = time.time()
-        while len(self.buffer) < max_bytes and not self._closed and not self._eof:
-            if not self.queue.empty():
-                item = self.queue.get_nowait()
+        # Drain all items already queued into buffer
+        while not self.queue.empty():
+            item = self.queue.get_nowait()
+            if item is None:
+                self._eof = True
+                break
+            self.buffer.extend(item)
+
+        # If buffer is empty and stream is active, wait for the first incoming chunk
+        if not self.buffer and not self._closed and not self._eof:
+            try:
+                item = await asyncio.wait_for(self.queue.get(), timeout=30.0)
                 if item is None:
                     self._eof = True
-                    break
-                self.buffer.extend(item)
-            else:
-                try:
-                    item = await asyncio.wait_for(self.queue.get(), timeout=35.0)
-                    if item is None:
-                        self._eof = True
-                        break
+                else:
                     self.buffer.extend(item)
-                except asyncio.TimeoutError:
-                    print(f"[VirtualStreamSession] Timeout waiting for stream queue", flush=True)
-                    self._eof = True
-                    break
+                    # Drain any additional items that completed in the meantime
+                    while not self.queue.empty():
+                        extra = self.queue.get_nowait()
+                        if extra is None:
+                            self._eof = True
+                            break
+                        self.buffer.extend(extra)
+            except asyncio.TimeoutError:
+                print(f"[VirtualStreamSession] Timeout waiting for stream queue", flush=True)
+                self._eof = True
 
         if not self.buffer:
             return b""
