@@ -72,6 +72,8 @@ _media_session_lock = asyncio.Lock()
 _DC_MEDIA_SESSIONS_COUNT = 3
 _media_session_pools: Dict[int, List[Any]] = {}
 _session_round_robin: Dict[int, int] = {}
+_dc_auth_keys: Dict[int, bytes] = {}
+_dc_authorized: set = set()
 _channel_peer_lock = asyncio.Lock()
 _resolved_channels: Dict[int, int] = {}
 _file_id_lock = asyncio.Lock()
@@ -1006,13 +1008,18 @@ async def _ensure_channel_peer(client: Client, chat_id: int) -> int:
         return chat_id
 
 async def _init_single_media_session(client: Client, dc_id: int) -> Session:
+    global _dc_auth_keys, _dc_authorized
     test_mode = await client.storage.test_mode()
     current_dc = await client.storage.dc_id()
 
-    if dc_id != current_dc:
-        auth_key = await Auth(client, dc_id, test_mode).create()
+    if dc_id not in _dc_auth_keys:
+        if dc_id != current_dc:
+            auth_key = await Auth(client, dc_id, test_mode).create()
+        else:
+            auth_key = await client.storage.auth_key()
+        _dc_auth_keys[dc_id] = auth_key
     else:
-        auth_key = await client.storage.auth_key()
+        auth_key = _dc_auth_keys[dc_id]
 
     session = Session(client, dc_id, auth_key, test_mode, is_media=True)
     session.no_updates = True
@@ -1021,13 +1028,14 @@ async def _init_single_media_session(client: Client, dc_id: int) -> Session:
 
     await session.start()
 
-    if dc_id != current_dc:
+    if dc_id != current_dc and dc_id not in _dc_authorized:
         exported_ok = False
         for _ in range(6):
             try:
                 exported = await client.invoke(raw.functions.auth.ExportAuthorization(dc_id=dc_id))
                 await session.invoke(raw.functions.auth.ImportAuthorization(id=exported.id, bytes=exported.bytes), timeout=15.0)
                 exported_ok = True
+                _dc_authorized.add(dc_id)
                 break
             except errors.AuthBytesInvalid:
                 await asyncio.sleep(0.5)
@@ -1245,6 +1253,14 @@ async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_
                 if raw_chunk is not None:
                     return raw_chunk
                 return None
+        except asyncio.CancelledError:
+            # Immediate seek abort: drop TCP connection so Telegram server instantly stops sending old chunk packets!
+            if session and getattr(session, "connection", None):
+                try:
+                    await session.connection.close()
+                except Exception:
+                    pass
+            raise
         except (asyncio.TimeoutError, TimeoutError):
             tries += 1
             await asyncio.sleep(0.3)
@@ -1306,6 +1322,8 @@ async def _get_or_fetch_chunk(client: Client, chat_id: int, msg_id: int, fetch_o
         async with _fetch_dedup_lock:
             if _pending_fetches.get(key) is task:
                 _pending_fetches.pop(key, None)
+                if not task.done():
+                    task.cancel()
         raise
     except Exception:
         return None
@@ -1325,6 +1343,8 @@ async def _do_fetch_chunk_network(client: Client, chat_id: int, msg_id: int, fet
             if _disk_cache_dir and _disk_cache_max_mb != 0:
                 _save_chunk_to_disk(chat_id, msg_id, fetch_off, limit, chunk)
         return chunk
+    except asyncio.CancelledError:
+        raise
     except Exception as e:
         print(f"[ChunkFetch] Error fetching chunk {key}: {e}")
         return None
@@ -1449,7 +1469,7 @@ class VirtualStreamSession:
                 first_msg_id = self.tasks[0]["msg_id"]
                 await _resolve_file_id(self.client, self.chat_id, first_msg_id)
 
-            MAX_IN_FLIGHT = min(6, max(3, _buffer_pipeline_mb // 4))
+            MAX_IN_FLIGHT = min(3, max(2, _buffer_pipeline_mb // 8))
             task_idx = 0
             total_tasks = len(self.tasks)
 
@@ -1499,7 +1519,7 @@ class VirtualStreamSession:
                                 self.active_tasks.discard(t_retry)
                             if slice_bytes is not None:
                                 if len(slice_bytes) > 0:
-                                    await self.queue.put(slice_bytes)
+                                     await self.queue.put(slice_bytes)
                                 retried_ok = True
                                 break
                         except asyncio.CancelledError:
@@ -1569,6 +1589,13 @@ class VirtualStreamSession:
                     self.queue.get_nowait()
                 except Exception:
                     break
+
+            # Instantly cancel all pending background chunk fetches for this chat so old chunks abort!
+            for k, t in list(_pending_fetches.items()):
+                if k[0] == self.chat_id:
+                    _pending_fetches.pop(k, None)
+                    if not t.done():
+                        t.cancel()
 
 def create_stream(api_id: int, api_hash: str, session_str: str, chat_id: int, parts_json: str, start_byte: int, end_byte: int) -> str:
     """

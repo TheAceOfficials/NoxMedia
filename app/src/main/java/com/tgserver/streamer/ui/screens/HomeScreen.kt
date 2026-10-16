@@ -604,26 +604,6 @@ private fun RecentMediaCard(
                     )
                 }
             }
-
-            // Quality Badge Top Right
-            if (group.qualityBadge.isNotBlank()) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(5.dp)
-                        .clip(RoundedCornerShape(5.dp))
-                        .background(Color(0xCC111218))
-                        .border(0.5.dp, Color(0x33FFFFFF), RoundedCornerShape(5.dp))
-                        .padding(horizontal = 4.dp, vertical = 1.5.dp)
-                ) {
-                    Text(
-                        text = group.qualityBadge,
-                        color = Color(0xFFE4E4E7),
-                        fontFamily = NdotFont,
-                        fontSize = 8.5.sp
-                    )
-                }
-            }
         }
 
         // Title
