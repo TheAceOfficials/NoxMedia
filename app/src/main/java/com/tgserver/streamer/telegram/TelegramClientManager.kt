@@ -83,6 +83,8 @@ class TelegramClientManager(private val context: Context) {
     private val detectedDeadIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val managerScope = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
     private var autoScanJob: Job? = null
+    @Volatile
+    private var activePlaybackStreamId: String? = null
 
     private val _apiCredentials = MutableStateFlow(
         Pair(
@@ -2187,6 +2189,22 @@ class TelegramClientManager(private val context: Context) {
                 }
 
                 val partsJson = gson.toJson(partsList)
+
+                // Smart Playback Stream Management:
+                // Full playback streams (contentLength > 5MB) supersede prior playback streams immediately
+                // to kill background downloads of obsolete timeline positions and free 100% bandwidth.
+                // Small metadata probes (Cues, header probes <= 5MB) run independently without killing playback!
+                if (contentLength > 5_000_000L) {
+                    activePlaybackStreamId?.let { prevId ->
+                        Log.i(TAG, "Seek detected: terminating previous playback stream $prevId immediately to free bandwidth")
+                        try {
+                            bridge.callAttr("close_stream", prevId)
+                        } catch (ce: Exception) {
+                            Log.w(TAG, "Notice closing superseded stream $prevId: ${ce.message}")
+                        }
+                    }
+                }
+
                 val streamId = bridge.callAttr(
                     "create_stream",
                     apiId,
@@ -2201,6 +2219,9 @@ class TelegramClientManager(private val context: Context) {
                 Log.i(TAG, "create_stream result: streamId=$streamId, partsCount=${partsList.size}, channelId=$effectiveChannelId, range=$startByte-$effectiveEnd/$totalSize")
 
                 if (streamId.isNotBlank()) {
+                    if (contentLength > 5_000_000L) {
+                        activePlaybackStreamId = streamId
+                    }
                     val stream = TgMediaInputStream(bridge, streamId, contentLength)
                     return StreamChunkResult(
                         inputStream = stream,
