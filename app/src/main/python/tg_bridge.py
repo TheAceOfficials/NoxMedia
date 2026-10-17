@@ -1605,10 +1605,11 @@ def create_stream(api_id: int, api_hash: str, session_str: str, chat_id: int, pa
         return stream_id
 
     try:
-        return run_async(_async_create(), timeout=25)
+        return run_async(_async_create(), timeout=35)
     except Exception as e:
-        _log_stream(f"Error creating stream: {e}", level="E")
-        traceback.print_exc()
+        tb = traceback.format_exc()
+        _log_stream(f"Error creating stream: {e}\n{tb}", level="E")
+        print(f"[create_stream] Error creating stream: {e}", flush=True)
         return ""
 
 def read_stream_chunk(stream_id: str, max_bytes: int = 1048576) -> bytes:

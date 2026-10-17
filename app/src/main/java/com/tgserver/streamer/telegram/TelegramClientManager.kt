@@ -2276,8 +2276,7 @@ class TelegramClientManager(private val context: Context) {
                     )
                 }
 
-                val t0 = System.currentTimeMillis()
-                val streamId = bridge.callAttr(
+                var streamId = bridge.callAttr(
                     "create_stream",
                     apiId,
                     apiHash,
@@ -2287,6 +2286,21 @@ class TelegramClientManager(private val context: Context) {
                     startByte,
                     effectiveEnd
                 )?.toString() ?: ""
+
+                if (streamId.isBlank()) {
+                    StreamLog.w(TAG, "create_stream [$platform] returned blank on attempt 1, retrying after 400ms...")
+                    try { Thread.sleep(400) } catch (_: InterruptedException) {}
+                    streamId = bridge.callAttr(
+                        "create_stream",
+                        apiId,
+                        apiHash,
+                        sessionStr,
+                        effectiveChannelId,
+                        partsJson,
+                        startByte,
+                        effectiveEnd
+                    )?.toString() ?: ""
+                }
                 val pyElapsed = System.currentTimeMillis() - t0
 
                 StreamLog.i(TAG, "create_stream [$platform] in ${pyElapsed}ms: streamId=$streamId, partsCount=${partsList.size}, channelId=$effectiveChannelId, range=$startByte-$effectiveEnd/$totalSize (contentLength=$contentLength)")
@@ -2437,28 +2451,28 @@ class TelegramClientManager(private val context: Context) {
             startByte >= maxOf(0L, totalSize - 150_000_000L) ||
             (totalSize - startByte) <= (totalSize * 0.15).toLong()
         )
+        // A probe is a small byte request (<= 15MB) or a request targeting the end of the file (Cues/Index tables)
         val isIosProbe = contentLength <= 15_000_000L || isNearFileEnd
-        // Cover EBML container headers, track definitions, and first 30 seconds of video
-        val isInitialPlayback = startByte <= 25_000_000L
-        val isUserSeek = !isIosProbe && !isInitialPlayback && contentLength > 15_000_000L
 
-        StreamLog.i(TAG, "[iOS] Stream Intent: range=$startByte-$effectiveEnd/$totalSize (len=$contentLength bytes), isProbe=$isIosProbe, isInitial=$isInitialPlayback, isSeek=$isUserSeek")
+        if (isIosProbe) {
+            StreamLog.i(TAG, "[iOS] Metadata/Cues probe: range=$startByte-$effectiveEnd/$totalSize (len=$contentLength) - running concurrently")
+            return
+        }
 
-        if (isUserSeek) {
-            // Never terminate a header stream at byte 0; let it complete or close via client socket
-            if (iosActiveStreamStartByte > 0L) {
-                iosActiveStreamId?.let { prevId ->
-                    StreamLog.w(TAG, "[iOS] User timeline seek detected to byte $startByte: terminating previous iOS stream $prevId (started at $iosActiveStreamStartByte)")
-                    try {
-                        bridge.callAttr("close_stream", prevId)
-                        StreamLog.i(TAG, "[iOS] Previous iOS playback stream $prevId closed successfully")
-                    } catch (ce: Exception) {
-                        StreamLog.w(TAG, "[iOS] Notice closing superseded stream $prevId: ${ce.message}")
-                    }
-                }
-            } else {
-                StreamLog.i(TAG, "[iOS] Keeping byte 0 header stream ($iosActiveStreamId) active alongside seek to $startByte")
+        // Active playback stream:
+        // If there was an active playback stream running and the new stream starts at a different startByte (user resumed, seeked, or restarted):
+        // We MUST terminate the previous stream so it stops downloading chunks from Telegram in the background!
+        val prevStreamId = iosActiveStreamId
+        val prevStart = iosActiveStreamStartByte
+        if (prevStreamId != null && prevStart != startByte) {
+            StreamLog.w(TAG, "[iOS] Playback position shifted ($prevStart -> $startByte): terminating previous playback stream $prevStreamId to prevent background data consumption")
+            try {
+                bridge.callAttr("close_stream", prevStreamId)
+                StreamLog.i(TAG, "[iOS] Previous iOS stream $prevStreamId terminated successfully")
+            } catch (ce: Exception) {
+                StreamLog.w(TAG, "[iOS] Notice closing superseded stream $prevStreamId: ${ce.message}")
             }
+            iosActiveStreamId = null
         }
     }
 

@@ -23,7 +23,21 @@ object ClientPlatformDetector {
         if (userAgent.isNullOrBlank()) return ClientPlatform.OTHER
         val ua = userAgent.lowercase()
 
-        // 1. iOS / Apple Ecosystem Indicators
+        // 1. Android Indicators (Priority check to ensure Android TV & Mobile are 100% protected)
+        // ExoPlayer is Android's default media engine
+        // Dalvik is Android's VM
+        // Android / AndroidTV identifiers
+        if (ua.contains("android") ||
+            ua.contains("exoplayer") ||
+            ua.contains("dalvik") ||
+            ua.contains("nuvio-android") ||
+            ua.contains("nuvio/android") ||
+            ua.contains("stremio-android") ||
+            ua.contains("stremio/android")) {
+            return ClientPlatform.ANDROID
+        }
+
+        // 2. iOS / Apple Ecosystem Indicators
         // AppleCoreMedia is the AVFoundation / AVPlayer user-agent
         // CFNetwork / Darwin is the iOS system networking framework
         // KSPlayer, MobileVLCKit, Outplayer, Infuse are iOS media players
@@ -48,20 +62,6 @@ object ClientPlatformDetector {
             ua.contains("stremio/ios") ||
             (ua.contains("ios") && !ua.contains("bios"))) {
             return ClientPlatform.IOS
-        }
-
-        // 2. Android Indicators
-        // ExoPlayer is Android's default media engine
-        // Dalvik is Android's VM
-        // Android / AndroidTV identifiers
-        if (ua.contains("android") ||
-            ua.contains("exoplayer") ||
-            ua.contains("dalvik") ||
-            ua.contains("nuvio-android") ||
-            ua.contains("nuvio/android") ||
-            ua.contains("stremio-android") ||
-            ua.contains("stremio/android")) {
-            return ClientPlatform.ANDROID
         }
 
         // 3. Web browsers (desktop or mobile browser)

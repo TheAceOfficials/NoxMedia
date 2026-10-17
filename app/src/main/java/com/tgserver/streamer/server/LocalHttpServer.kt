@@ -1080,8 +1080,6 @@ class LocalHttpServer(
         response.addHeader("Accept-Ranges", "bytes")
         response.addHeader("Connection", "keep-alive")
         response.addHeader("Content-Disposition", "inline; filename=\"$fileName\"")
-        response.addHeader("Cache-Control", "no-cache, no-store, must-revalidate")
-        response.addHeader("Pragma", "no-cache")
         return response
     }
 
