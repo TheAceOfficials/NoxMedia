@@ -2452,7 +2452,7 @@ class TelegramClientManager(private val context: Context) {
             startByte >= maxOf(0L, totalSize - 150_000_000L) ||
             (totalSize - startByte) <= (totalSize * 0.15).toLong()
         )
-        // A probe is a small byte request (<= 15MB) or a request targeting the end of the file (Cues/Index tables)
+        // 1. Probes: small byte requests (<= 15MB) or requests targeting the end of file (Cues/Index tables)
         val isIosProbe = contentLength <= 15_000_000L || isNearFileEnd
 
         if (isIosProbe) {
@@ -2460,13 +2460,26 @@ class TelegramClientManager(private val context: Context) {
             return
         }
 
-        // Active playback stream:
-        // If there was an active playback stream running and the new stream starts at a different startByte (user resumed, seeked, or restarted):
-        // We MUST terminate the previous stream so it stops downloading chunks from Telegram in the background!
+        // 2. Initial container header stream at byte 0
+        val isInitialHeader = startByte <= 2_000_000L && iosActiveStreamId == null
+
+        // 3. User Seek Detection:
+        //    A real timeline jump occurs when:
+        //    - Jump forward by more than 10MB (user jumped ahead on timeline)
+        //    - Jump backward by more than 2MB (user rewound)
+        //    - Resuming from 5s+ away from byte 0 when an initial byte-0 stream was started
+        //    Minor byte adjustments (< 2MB backwards, < 10MB forward) are keyframe/cluster alignment
+        //    and must NOT terminate the active stream, allowing instant playback!
         val prevStreamId = iosActiveStreamId
         val prevStart = iosActiveStreamStartByte
-        if (prevStreamId != null && prevStart != startByte) {
-            StreamLog.w(TAG, "[iOS] Playback position shifted ($prevStart -> $startByte): terminating previous playback stream $prevStreamId to prevent background data consumption")
+        val isSeekJump = prevStreamId != null && (
+            startByte > prevStart + 10_000_000L ||
+            startByte < prevStart - 2_000_000L ||
+            (prevStart <= 2_000_000L && startByte > 2_000_000L)
+        )
+
+        if (isSeekJump) {
+            StreamLog.w(TAG, "[iOS] User timeline seek detected ($prevStart -> $startByte): terminating previous stream $prevStreamId to free 100% bandwidth for instant seek")
             try {
                 bridge.callAttr("close_stream", prevStreamId)
                 StreamLog.i(TAG, "[iOS] Previous iOS stream $prevStreamId terminated successfully")
@@ -2474,6 +2487,10 @@ class TelegramClientManager(private val context: Context) {
                 StreamLog.w(TAG, "[iOS] Notice closing superseded stream $prevStreamId: ${ce.message}")
             }
             iosActiveStreamId = null
+        } else if (isInitialHeader) {
+            StreamLog.i(TAG, "[iOS] Initial container header stream at byte $startByte (len=$contentLength bytes)")
+        } else {
+            StreamLog.i(TAG, "[iOS] Playback continuous/nearby stream: range=$startByte-$effectiveEnd/$totalSize (len=$contentLength bytes, prevStart=$prevStart)")
         }
     }
 
