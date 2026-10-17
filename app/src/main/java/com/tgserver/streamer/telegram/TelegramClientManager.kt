@@ -2189,7 +2189,8 @@ class TelegramClientManager(private val context: Context) {
         startByte: Long,
         endByte: Long,
         mediaId: String? = null,
-        platform: ClientPlatform = ClientPlatform.ANDROID
+        platform: ClientPlatform = ClientPlatform.ANDROID,
+        userAgent: String = ""
     ): StreamChunkResult {
         val extractedMsgId = mediaId?.removePrefix("tg_")?.removeSuffix("_split")
             ?.substringAfterLast("_")
@@ -2276,6 +2277,7 @@ class TelegramClientManager(private val context: Context) {
                         effectiveEnd = effectiveEnd,
                         totalSize = totalSize,
                         contentLength = contentLength,
+                        userAgent = userAgent,
                         bridge = bridge
                     )
                 } else {
@@ -2324,13 +2326,14 @@ class TelegramClientManager(private val context: Context) {
 
                 if (streamId.isNotBlank()) {
                     if (platform == ClientPlatform.IOS) {
-                        val isHeaderProbe = startByte <= 2_000_000L && contentLength <= 2_000_000L && iosActiveStreamId != null
+                        val isLavfProbe = userAgent.contains("lavf", ignoreCase = true)
+                        val isHeaderProbe = startByte <= 2_000_000L && (contentLength <= 2_000_000L || isLavfProbe) && iosActiveStreamId != null
                         val isNearFileEnd = totalSize > 0 && (
                             startByte >= maxOf(0L, totalSize - 150_000_000L) ||
                             (totalSize - startByte) <= (totalSize * 0.15).toLong()
                         )
                         val isCuesProbe = isNearFileEnd && contentLength <= 25_000_000L
-                        val isIosProbe = isHeaderProbe || isCuesProbe
+                        val isIosProbe = isLavfProbe || isHeaderProbe || isCuesProbe
                         if (!isIosProbe) {
                             iosActiveStreamId = streamId
                             iosActiveStreamStartByte = startByte
@@ -2346,7 +2349,14 @@ class TelegramClientManager(private val context: Context) {
                             androidActiveStreamId = streamId
                         }
                     }
-                    val stream = TgMediaInputStream(bridge, streamId, contentLength)
+                    val stream = TgMediaInputStream(bridge, streamId, contentLength) { closedId ->
+                        if (iosActiveStreamId == closedId) {
+                            iosActiveStreamId = null
+                        }
+                        if (androidActiveStreamId == closedId) {
+                            androidActiveStreamId = null
+                        }
+                    }
                     return StreamChunkResult(
                         inputStream = stream,
                         contentLength = contentLength,
@@ -2456,6 +2466,7 @@ class TelegramClientManager(private val context: Context) {
         effectiveEnd: Long,
         totalSize: Long,
         contentLength: Long,
+        userAgent: String,
         bridge: com.chaquo.python.PyObject
     ) {
         val currentMediaKey = "${effectiveChannelId}_${media?.id ?: extractedMsgId ?: messageId}"
@@ -2473,12 +2484,16 @@ class TelegramClientManager(private val context: Context) {
         }
         iosActiveMediaKey = currentMediaKey
 
-        // 1. Initial Container Header Probe:
-        //    Reads container metadata (EBML, Tracks, Codecs) at the very start of the file.
-        //    Only considered a probe when it's small (<= 2MB) and an active playback stream already exists.
-        val isHeaderProbe = startByte <= 2_000_000L && contentLength <= 2_000_000L && iosActiveStreamId != null
+        // 1. Auxiliary FFmpeg / Lavf metadata probe:
+        //    Nuvio iOS uses Lavf (FFmpeg) concurrently to inspect tracks/codecs/subtitles.
+        //    It is NEVER the primary playback engine (libmpv is) and must run concurrently without killing active playback.
+        val isLavfProbe = userAgent.contains("lavf", ignoreCase = true)
 
-        // 2. Cues / Index / Moov Probe:
+        // 2. Initial Container Header Probe:
+        //    Reads container metadata (EBML, Tracks, Codecs) at the very start of the file.
+        val isHeaderProbe = startByte <= 2_000_000L && (contentLength <= 2_000_000L || isLavfProbe) && iosActiveStreamId != null
+
+        // 3. Cues / Index / Moov Probe:
         //    Reads the seek table / index at the end of the file.
         val isNearFileEnd = totalSize > 0 && (
             startByte >= maxOf(0L, totalSize - 150_000_000L) ||
@@ -2486,25 +2501,23 @@ class TelegramClientManager(private val context: Context) {
         )
         val isCuesProbe = isNearFileEnd && contentLength <= 25_000_000L
 
-        if (isHeaderProbe || isCuesProbe) {
-            StreamLog.i(TAG, "[iOS] Metadata/Cues probe: range=$startByte-$effectiveEnd/$totalSize (len=$contentLength) - running concurrently")
+        if (isLavfProbe || isHeaderProbe || isCuesProbe) {
+            StreamLog.i(TAG, "[iOS] Metadata/Cues probe (UA: '$userAgent'): range=$startByte-$effectiveEnd/$totalSize (len=$contentLength) - running concurrently")
             return
         }
 
-        // 3. Playback & Seek Streams:
+        // 4. Playback & Seek Streams (libmpv):
         //    Every other request is an active playback stream at a timeline position.
-        //    If a previous playback stream exists at a different position (seek / jump),
-        //    terminate it IMMEDIATELY so 100% bandwidth and CPU is dedicated to the new seek point!
+        //    If ANY previous playback stream exists, terminate it IMMEDIATELY!
+        //    Whether the user seeked by 10 minutes or libmpv hopped by 1.5MB to the next cluster:
+        //    The new request supersedes the old one. Terminating the old stream immediately
+        //    stops background MTProto downloads in 0ms, prevents multi-stream accumulation,
+        //    and dedicates 100% bandwidth to the target keyframe for instant playback!
         val prevStreamId = iosActiveStreamId
         val prevStart = iosActiveStreamStartByte
-        val isSeekJump = prevStreamId != null && (
-            startByte > prevStart + 6_000_000L ||
-            startByte < prevStart - 3_000_000L ||
-            (prevStart <= 2_000_000L && startByte > 2_000_000L)
-        )
 
-        if (isSeekJump) {
-            StreamLog.w(TAG, "[iOS] User timeline seek detected ($prevStart -> $startByte): terminating previous stream $prevStreamId to free 100% bandwidth for instant seek")
+        if (prevStreamId != null) {
+            StreamLog.w(TAG, "[iOS] Active stream superseded ($prevStart -> $startByte): terminating previous stream $prevStreamId to free 100% bandwidth for instant seek")
             try {
                 bridge.callAttr("close_stream", prevStreamId)
                 StreamLog.i(TAG, "[iOS] Previous iOS stream $prevStreamId terminated successfully")
@@ -2512,8 +2525,6 @@ class TelegramClientManager(private val context: Context) {
                 StreamLog.w(TAG, "[iOS] Notice closing superseded stream $prevStreamId: ${ce.message}")
             }
             iosActiveStreamId = null
-        } else {
-            StreamLog.i(TAG, "[iOS] Playback continuous/nearby stream: range=$startByte-$effectiveEnd/$totalSize (len=$contentLength bytes, prevStart=$prevStart)")
         }
     }
 

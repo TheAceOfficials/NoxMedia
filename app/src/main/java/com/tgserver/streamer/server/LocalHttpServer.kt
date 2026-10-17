@@ -1039,7 +1039,12 @@ class LocalHttpServer(
                 }
             }
             response.addHeader("Accept-Ranges", "bytes")
-            response.addHeader("Connection", "keep-alive")
+            val clientConnection = headers["connection"] ?: headers["Connection"]
+            if (clientConnection?.contains("close", ignoreCase = true) == true) {
+                response.addHeader("Connection", "close")
+            } else {
+                response.addHeader("Connection", "keep-alive")
+            }
             response.addHeader("Content-Disposition", "inline; filename=\"$fileName\"")
             return response
         }
@@ -1048,7 +1053,10 @@ class LocalHttpServer(
         StreamLog.i(TAG, "[iOS-Stream] Requesting iOS stream source from Telegram: range=$startByte-$endByte/$totalSize (len=$requestedLength bytes / ${StreamTrafficStats.formatBytes(requestedLength)})")
         val t0 = System.currentTimeMillis()
         val chunk = try {
-            tgClient.getStreamSource(effectiveChannelId, resolvedMessageId, startByte, endByte, mediaId = targetParam, platform = ClientPlatform.IOS)
+            tgClient.getStreamSource(
+                effectiveChannelId, resolvedMessageId, startByte, endByte,
+                mediaId = targetParam, platform = ClientPlatform.IOS, userAgent = userAgent
+            )
         } catch (e: Exception) {
             StreamLog.e(TAG, "[iOS-Stream] Stream error for $uri: ${e.message}", e)
             val isAuthErr = e.message?.contains("AUTH_KEY_UNREGISTERED", ignoreCase = true) == true ||
@@ -1082,7 +1090,12 @@ class LocalHttpServer(
         }
 
         response.addHeader("Accept-Ranges", "bytes")
-        response.addHeader("Connection", "keep-alive")
+        val clientConnection = headers["connection"] ?: headers["Connection"]
+        if (clientConnection?.contains("close", ignoreCase = true) == true) {
+            response.addHeader("Connection", "close")
+        } else {
+            response.addHeader("Connection", "keep-alive")
+        }
         response.addHeader("Content-Disposition", "inline; filename=\"$fileName\"")
         return response
     }

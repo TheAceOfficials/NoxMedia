@@ -16,7 +16,8 @@ class TgMediaInputStream(
     private val bridge: PyObject,
     private val streamId: String,
     private val totalBytesToRead: Long,
-    private val chunkSize: Int = 1048576
+    private val chunkSize: Int = 1048576,
+    private val onClosed: ((String) -> Unit)? = null
 ) : InputStream() {
 
     private val openTime = System.currentTimeMillis()
@@ -114,6 +115,11 @@ class TgMediaInputStream(
                 bridge.callAttr("close_stream", streamId)
             } catch (e: Exception) {
                 StreamLog.w(TAG, "Error closing stream $streamId: ${e.message}")
+            }
+            try {
+                onClosed?.invoke(streamId)
+            } catch (e: Exception) {
+                StreamLog.w(TAG, "Error in onClosed callback for stream $streamId: ${e.message}")
             }
         }
         super.close()
