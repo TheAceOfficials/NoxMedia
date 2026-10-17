@@ -25,6 +25,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import com.tgserver.streamer.metadata.EnrichedMetadata
 import com.tgserver.streamer.metadata.MetadataEnricher
+import com.tgserver.streamer.server.ClientPlatform
 import com.tgserver.streamer.service.StreamerForegroundService
 import java.io.BufferedReader
 import java.io.ByteArrayInputStream
@@ -84,10 +85,17 @@ class TelegramClientManager(private val context: Context) {
     private val detectedDeadIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val managerScope = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
     private var autoScanJob: Job? = null
+    // Android playback stream tracking (isolated)
     @Volatile
-    private var activePlaybackStreamId: String? = null
+    private var androidActiveStreamId: String? = null
     @Volatile
-    private var activePlaybackMediaKey: String? = null
+    private var androidActiveMediaKey: String? = null
+
+    // iOS playback stream tracking (isolated)
+    @Volatile
+    private var iosActiveStreamId: String? = null
+    @Volatile
+    private var iosActiveMediaKey: String? = null
 
     private val _apiCredentials = MutableStateFlow(
         Pair(
@@ -2162,7 +2170,8 @@ class TelegramClientManager(private val context: Context) {
         messageId: Int,
         startByte: Long,
         endByte: Long,
-        mediaId: String? = null
+        mediaId: String? = null,
+        platform: ClientPlatform = ClientPlatform.ANDROID
     ): StreamChunkResult {
         val extractedMsgId = mediaId?.removePrefix("tg_")?.removeSuffix("_split")
             ?.substringAfterLast("_")
@@ -2196,7 +2205,7 @@ class TelegramClientManager(private val context: Context) {
             media?.mimeType ?: "video/mp4"
         }
 
-        Log.d(TAG, "getStreamSource: mediaId=$mediaId, effectiveMsgId=$extractedMsgId, isSplit=${media?.isSplit}, partsCount=${media?.parts?.size}, range=$startByte-$effectiveEnd/$totalSize, mime=$mimeType")
+        Log.d(TAG, "getStreamSource [$platform]: mediaId=$mediaId, effectiveMsgId=$extractedMsgId, isSplit=${media?.isSplit}, partsCount=${media?.parts?.size}, range=$startByte-$effectiveEnd/$totalSize, mime=$mimeType")
 
         val apiId = getApiId()
         val apiHash = getApiHash()
@@ -2238,55 +2247,31 @@ class TelegramClientManager(private val context: Context) {
 
                 val partsJson = gson.toJson(partsList)
 
-                val currentMediaKey = "${effectiveChannelId}_${media?.id ?: extractedMsgId ?: messageId}"
-                val isDifferentMedia = activePlaybackMediaKey != null && activePlaybackMediaKey != currentMediaKey
-                if (isDifferentMedia) {
-                    activePlaybackStreamId?.let { prevId ->
-                        StreamLog.w(TAG, "New media selected ($currentMediaKey vs $activePlaybackMediaKey): terminating previous playback stream $prevId")
-                        try {
-                            bridge.callAttr("close_stream", prevId)
-                        } catch (ce: Exception) {
-                            StreamLog.w(TAG, "Notice closing stream for previous media: ${ce.message}")
-                        }
-                    }
-                    activePlaybackStreamId = null
-                }
-                activePlaybackMediaKey = currentMediaKey
-
-                // Accurate Stream Intent Classification:
-                // 1. Cues / Index / Metadata Probes:
-                //    - Explicit small ranges (<= 15MB) anywhere in file
-                //    - OR requests starting near the end of the file (within last 150MB or last 15% of totalSize)
-                //      where Matroska Cues or MP4 moov tables reside (even when open-ended "bytes=N-").
-                //    These run concurrently and NEVER terminate or supersede active playback streams!
-                val isNearFileEnd = totalSize > 0 && (
-                    startByte >= maxOf(0L, totalSize - 150_000_000L) ||
-                    (totalSize - startByte) <= (totalSize * 0.15).toLong()
-                )
-                val isMetadataOrCuesProbe = contentLength <= 15_000_000L || isNearFileEnd
-
-                // 2. Initial Playback:
-                //    Starts at byte 0 or within the first 5MB of the container.
-                val isInitialPlayback = startByte <= 5_000_000L
-
-                // 3. True User Seek:
-                //    An active timeline jump to an arbitrary mid-movie position (not header, not cue probe).
-                val isUserSeek = !isMetadataOrCuesProbe && !isInitialPlayback && contentLength > 15_000_000L
-
-                if (isUserSeek) {
-                    activePlaybackStreamId?.let { prevId ->
-                        StreamLog.w(TAG, "User timeline seek detected to byte $startByte (mid-media): terminating previous playback stream $prevId to free 100% bandwidth")
-                        try {
-                            bridge.callAttr("close_stream", prevId)
-                            StreamLog.i(TAG, "Previous playback stream $prevId closed successfully")
-                        } catch (ce: Exception) {
-                            StreamLog.w(TAG, "Notice closing superseded stream $prevId: ${ce.message}")
-                        }
-                    }
-                } else if (isMetadataOrCuesProbe) {
-                    StreamLog.i(TAG, "Metadata / Cues probe detected: range=$startByte-$effectiveEnd (len=$contentLength bytes, nearEnd=$isNearFileEnd) - running concurrently without killing active playback stream ($activePlaybackStreamId)")
+                // Platform-specific stream management to ensure Android TV playback remains 100% stable
+                if (platform == ClientPlatform.IOS) {
+                    manageIosPlaybackStream(
+                        effectiveChannelId = effectiveChannelId,
+                        media = media,
+                        extractedMsgId = extractedMsgId,
+                        messageId = messageId,
+                        startByte = startByte,
+                        effectiveEnd = effectiveEnd,
+                        totalSize = totalSize,
+                        contentLength = contentLength,
+                        bridge = bridge
+                    )
                 } else {
-                    StreamLog.i(TAG, "Initial playback stream: range=$startByte-$effectiveEnd (len=$contentLength bytes)")
+                    manageAndroidPlaybackStream(
+                        effectiveChannelId = effectiveChannelId,
+                        media = media,
+                        extractedMsgId = extractedMsgId,
+                        messageId = messageId,
+                        startByte = startByte,
+                        effectiveEnd = effectiveEnd,
+                        totalSize = totalSize,
+                        contentLength = contentLength,
+                        bridge = bridge
+                    )
                 }
 
                 val t0 = System.currentTimeMillis()
@@ -2302,12 +2287,28 @@ class TelegramClientManager(private val context: Context) {
                 )?.toString() ?: ""
                 val pyElapsed = System.currentTimeMillis() - t0
 
-                StreamLog.i(TAG, "create_stream result in ${pyElapsed}ms: streamId=$streamId, partsCount=${partsList.size}, channelId=$effectiveChannelId, range=$startByte-$effectiveEnd/$totalSize (contentLength=$contentLength)")
+                StreamLog.i(TAG, "create_stream [$platform] in ${pyElapsed}ms: streamId=$streamId, partsCount=${partsList.size}, channelId=$effectiveChannelId, range=$startByte-$effectiveEnd/$totalSize (contentLength=$contentLength)")
 
                 if (streamId.isNotBlank()) {
-                    // Only track playback streams (NOT metadata / Cues probes!)
-                    if (!isMetadataOrCuesProbe) {
-                        activePlaybackStreamId = streamId
+                    if (platform == ClientPlatform.IOS) {
+                        val isNearFileEnd = totalSize > 0 && (
+                            startByte >= maxOf(0L, totalSize - 150_000_000L) ||
+                            (totalSize - startByte) <= (totalSize * 0.15).toLong()
+                        )
+                        val isIosProbe = contentLength <= 15_000_000L || isNearFileEnd
+                        if (!isIosProbe) {
+                            iosActiveStreamId = streamId
+                        }
+                    } else {
+                        // Android: Only track playback streams (NOT metadata / Cues probes!)
+                        val isNearFileEnd = totalSize > 0 && (
+                            startByte >= maxOf(0L, totalSize - 150_000_000L) ||
+                            (totalSize - startByte) <= (totalSize * 0.15).toLong()
+                        )
+                        val isMetadataOrCuesProbe = contentLength <= 15_000_000L || isNearFileEnd
+                        if (!isMetadataOrCuesProbe) {
+                            androidActiveStreamId = streamId
+                        }
                     }
                     val stream = TgMediaInputStream(bridge, streamId, contentLength)
                     return StreamChunkResult(
@@ -2325,9 +2326,131 @@ class TelegramClientManager(private val context: Context) {
                 StreamLog.e(TAG, "Error creating live MTProto stream: ${e.message}", e)
                 throw java.io.IOException("Failed to create MTProto stream: ${e.message}", e)
             }
+        } else {
+            StreamLog.e(TAG, "MTProto bridge unavailable or session empty (bridge=${bridge != null}, session=${sessionStr.isNotBlank()}, apiId=$apiId)")
         }
 
-        throw java.io.IOException("MTProto stream unavailable: session inactive or streamId blank for mediaId=$mediaId")
+        throw java.io.IOException("MTProto stream could not be created for message $messageId")
+    }
+
+    /**
+     * Preserved Android Stream Management:
+     * Fully tested and confirmed instant playback on ExoPlayer / Android TV.
+     */
+    private fun manageAndroidPlaybackStream(
+        effectiveChannelId: Long,
+        media: MediaItem?,
+        extractedMsgId: Int?,
+        messageId: Int,
+        startByte: Long,
+        effectiveEnd: Long,
+        totalSize: Long,
+        contentLength: Long,
+        bridge: com.chaquo.python.PyObject
+    ) {
+        val currentMediaKey = "${effectiveChannelId}_${media?.id ?: extractedMsgId ?: messageId}"
+        val isDifferentMedia = androidActiveMediaKey != null && androidActiveMediaKey != currentMediaKey
+        if (isDifferentMedia) {
+            androidActiveStreamId?.let { prevId ->
+                StreamLog.w(TAG, "[Android] New media selected ($currentMediaKey vs $androidActiveMediaKey): terminating previous playback stream $prevId")
+                try {
+                    bridge.callAttr("close_stream", prevId)
+                } catch (ce: Exception) {
+                    StreamLog.w(TAG, "[Android] Notice closing stream for previous media: ${ce.message}")
+                }
+            }
+            androidActiveStreamId = null
+        }
+        androidActiveMediaKey = currentMediaKey
+
+        // Accurate Stream Intent Classification for Android (ExoPlayer):
+        // 1. Cues / Index / Metadata Probes:
+        //    - Explicit small ranges (<= 15MB) anywhere in file
+        //    - OR requests starting near the end of the file (within last 150MB or last 15% of totalSize)
+        //      where Matroska Cues or MP4 moov tables reside (even when open-ended "bytes=N-").
+        //    These run concurrently and NEVER terminate or supersede active playback streams!
+        val isNearFileEnd = totalSize > 0 && (
+            startByte >= maxOf(0L, totalSize - 150_000_000L) ||
+            (totalSize - startByte) <= (totalSize * 0.15).toLong()
+        )
+        val isMetadataOrCuesProbe = contentLength <= 15_000_000L || isNearFileEnd
+
+        // 2. Initial Playback:
+        //    Starts at byte 0 or within the first 5MB of the container.
+        val isInitialPlayback = startByte <= 5_000_000L
+
+        // 3. True User Seek:
+        //    An active timeline jump to an arbitrary mid-movie position (not header, not cue probe).
+        val isUserSeek = !isMetadataOrCuesProbe && !isInitialPlayback && contentLength > 15_000_000L
+
+        if (isUserSeek) {
+            androidActiveStreamId?.let { prevId ->
+                StreamLog.w(TAG, "[Android] User timeline seek detected to byte $startByte (mid-media): terminating previous playback stream $prevId to free 100% bandwidth")
+                try {
+                    bridge.callAttr("close_stream", prevId)
+                    StreamLog.i(TAG, "[Android] Previous playback stream $prevId closed successfully")
+                } catch (ce: Exception) {
+                    StreamLog.w(TAG, "[Android] Notice closing superseded stream $prevId: ${ce.message}")
+                }
+            }
+        } else if (isMetadataOrCuesProbe) {
+            StreamLog.i(TAG, "[Android] Metadata / Cues probe detected: range=$startByte-$effectiveEnd (len=$contentLength bytes, nearEnd=$isNearFileEnd) - running concurrently without killing active playback stream ($androidActiveStreamId)")
+        } else {
+            StreamLog.i(TAG, "[Android] Initial playback stream: range=$startByte-$effectiveEnd (len=$contentLength bytes)")
+        }
+    }
+
+    /**
+     * Isolated iOS Stream Management:
+     * Independent tracking and tuning for Apple ecosystem players without affecting Android.
+     */
+    private fun manageIosPlaybackStream(
+        effectiveChannelId: Long,
+        media: MediaItem?,
+        extractedMsgId: Int?,
+        messageId: Int,
+        startByte: Long,
+        effectiveEnd: Long,
+        totalSize: Long,
+        contentLength: Long,
+        bridge: com.chaquo.python.PyObject
+    ) {
+        val currentMediaKey = "${effectiveChannelId}_${media?.id ?: extractedMsgId ?: messageId}"
+        val isDifferentMedia = iosActiveMediaKey != null && iosActiveMediaKey != currentMediaKey
+        if (isDifferentMedia) {
+            iosActiveStreamId?.let { prevId ->
+                StreamLog.w(TAG, "[iOS] New media selected ($currentMediaKey vs $iosActiveMediaKey): terminating previous iOS playback stream $prevId")
+                try {
+                    bridge.callAttr("close_stream", prevId)
+                } catch (ce: Exception) {
+                    StreamLog.w(TAG, "[iOS] Notice closing stream for previous media: ${ce.message}")
+                }
+            }
+            iosActiveStreamId = null
+        }
+        iosActiveMediaKey = currentMediaKey
+
+        val isNearFileEnd = totalSize > 0 && (
+            startByte >= maxOf(0L, totalSize - 150_000_000L) ||
+            (totalSize - startByte) <= (totalSize * 0.15).toLong()
+        )
+        val isIosProbe = contentLength <= 15_000_000L || isNearFileEnd
+        val isInitialPlayback = startByte <= 5_000_000L
+        val isUserSeek = !isIosProbe && !isInitialPlayback && contentLength > 15_000_000L
+
+        StreamLog.i(TAG, "[iOS] Stream Intent: range=$startByte-$effectiveEnd/$totalSize (len=$contentLength bytes), isProbe=$isIosProbe, isInitial=$isInitialPlayback, isSeek=$isUserSeek")
+
+        if (isUserSeek) {
+            iosActiveStreamId?.let { prevId ->
+                StreamLog.w(TAG, "[iOS] User timeline seek detected to byte $startByte: terminating previous iOS stream $prevId")
+                try {
+                    bridge.callAttr("close_stream", prevId)
+                    StreamLog.i(TAG, "[iOS] Previous iOS playback stream $prevId closed successfully")
+                } catch (ce: Exception) {
+                    StreamLog.w(TAG, "[iOS] Notice closing superseded stream $prevId: ${ce.message}")
+                }
+            }
+        }
     }
 
     fun updateStreamCacheConfig(diskCacheMb: Int, bufferPipelineMb: Int) {

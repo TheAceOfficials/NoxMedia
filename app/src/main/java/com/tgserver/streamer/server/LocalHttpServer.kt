@@ -93,7 +93,7 @@ class LocalHttpServer(
                 normUri == "/manifest.json" || normUri == "" || normUri == "/" -> handleManifest()
                 normUri.startsWith("/catalog/") -> handleCatalog(normUri)
                 normUri.startsWith("/meta/") -> handleMeta(normUri)
-                normUri.startsWith("/stream/") && !normUri.startsWith("/stream/video/") -> handleStreamDescriptor(normUri)
+                normUri.startsWith("/stream/") && !normUri.startsWith("/stream/video/") -> handleStreamDescriptor(session, normUri, headers)
 
                 // 2. HTTP 206 Partial Content Video Streaming Engine
                 normUri.startsWith("/stream/video/") -> handleVideoStream(session, normUri, headers)
@@ -375,7 +375,7 @@ class LocalHttpServer(
             .trim()
     }
 
-    private fun handleStreamDescriptor(uri: String): Response {
+    private fun handleStreamDescriptor(session: IHTTPSession, uri: String, headers: Map<String, String>): Response {
         val parts = uri.removeSuffix(".json").split("/")
         val rawId = parts.lastOrNull() ?: ""
 
@@ -567,6 +567,10 @@ class LocalHttpServer(
             finalItems = deduped
         }
 
+        val userAgent = headers["user-agent"] ?: headers["User-Agent"] ?: ""
+        val platform = ClientPlatformDetector.detect(userAgent)
+        StreamLog.i(TAG, "[$platform] Stream descriptor requested: $uri | UA: $userAgent")
+
         val localIp = getLocalIpAddress()
         val streams = finalItems.map { item ->
             val rawFileName = if (item.fileName.isNotBlank()) item.fileName else "${item.title}.mkv"
@@ -578,11 +582,11 @@ class LocalHttpServer(
             val streamUrl = "http://$localIp:${config.port}/stream/video/${item.channelId}/${item.id}/$safeFileName"
             val (streamName, streamTitle) = formatStreamItem(item, rawFileName)
 
-            val behaviorHints = mutableMapOf<String, Any>(
-                "notWebReady" to false,
-                "videoSize" to item.sizeBytes,
-                "filename" to rawFileName
-            )
+            val behaviorHints = if (platform == ClientPlatform.IOS) {
+                getIosBehaviorHints(item, rawFileName)
+            } else {
+                getAndroidBehaviorHints(item, rawFileName)
+            }
 
             mapOf(
                 "name" to streamName,
@@ -594,6 +598,26 @@ class LocalHttpServer(
 
         val res = mapOf("streams" to streams)
         return newFixedLengthResponse(Response.Status.OK, "application/json", gson.toJson(res))
+    }
+
+    private fun getAndroidBehaviorHints(item: MediaItem, rawFileName: String): MutableMap<String, Any> {
+        // Android ExoPlayer natively handles MKV and progressive HTTP 206 directly.
+        return mutableMapOf(
+            "notWebReady" to false,
+            "videoSize" to item.sizeBytes,
+            "filename" to rawFileName
+        )
+    }
+
+    private fun getIosBehaviorHints(item: MediaItem, rawFileName: String): MutableMap<String, Any> {
+        val isMkv = rawFileName.contains(".mkv", ignoreCase = true) || item.mimeType.contains("matroska", ignoreCase = true)
+        // On iOS, Matroska (.mkv) is not natively playable by AVPlayer.
+        // Marking notWebReady: isMkv signals iOS players to route via KSPlayer / VLC / Outplayer
+        return mutableMapOf(
+            "notWebReady" to isMkv,
+            "videoSize" to item.sizeBytes,
+            "filename" to rawFileName
+        )
     }
 
     private fun formatStreamItem(item: MediaItem, rawFileName: String): Pair<String, String> {
@@ -819,11 +843,44 @@ class LocalHttpServer(
         val rangeHeader = headers["range"] ?: headers["Range"]
         val userAgent = headers["user-agent"] ?: headers["User-Agent"] ?: "unknown"
         val clientIp = session.remoteIpAddress ?: "unknown"
+
+        val platform = ClientPlatformDetector.detect(userAgent)
+        StreamLog.i(TAG, "[$platform-Stream] Incoming Video Stream [${session.method}] $uri | Range: ${rangeHeader ?: "none"} | UA: $userAgent | Client: $clientIp")
+        StreamLog.i(TAG, "[$platform-Stream] Resolved target: file='$fileName', size=$totalSize bytes (${StreamTrafficStats.formatBytes(totalSize)}), isSplit=${media?.isSplit}, parts=${media?.parts?.size ?: 1}, target=$targetParam, msgId=$resolvedMessageId, ch=$effectiveChannelId")
+
+        return when (platform) {
+            ClientPlatform.IOS -> handleVideoStreamIos(
+                session, uri, headers, media, targetParam, resolvedMessageId,
+                effectiveChannelId, fileName, totalSize, mime, rangeHeader, userAgent, clientIp
+            )
+            else -> handleVideoStreamAndroid(
+                session, uri, headers, media, targetParam, resolvedMessageId,
+                effectiveChannelId, fileName, totalSize, mime, rangeHeader, userAgent, clientIp
+            )
+        }
+    }
+
+    /**
+     * Preserved Android Stream Engine:
+     * Confirmed instant and smooth playback on ExoPlayer / Android TV. 100% frozen.
+     */
+    private fun handleVideoStreamAndroid(
+        session: IHTTPSession,
+        uri: String,
+        headers: Map<String, String>,
+        media: MediaItem?,
+        targetParam: String,
+        resolvedMessageId: Int,
+        effectiveChannelId: Long,
+        fileName: String,
+        totalSize: Long,
+        mime: String,
+        rangeHeader: String?,
+        userAgent: String,
+        clientIp: String
+    ): Response {
         var startByte = 0L
         var endByte = totalSize - 1L
-
-        StreamLog.i(TAG, "Incoming Video Stream [${session.method}] $uri | Range: ${rangeHeader ?: "none"} | UA: $userAgent | Client: $clientIp")
-        StreamLog.i(TAG, "Resolved target: file='$fileName', size=$totalSize bytes (${StreamTrafficStats.formatBytes(totalSize)}), isSplit=${media?.isSplit}, parts=${media?.parts?.size ?: 1}, target=$targetParam, msgId=$resolvedMessageId, ch=$effectiveChannelId")
 
         if (!rangeHeader.isNullOrBlank() && rangeHeader.startsWith("bytes=")) {
             val rangeVal = rangeHeader.removePrefix("bytes=").substringBefore(',').trim()
@@ -832,7 +889,6 @@ class LocalHttpServer(
                 val startStr = rangeVal.substring(0, dashIndex).trim()
                 val endStr = rangeVal.substring(dashIndex + 1).trim()
                 if (startStr.isEmpty()) {
-                    // Suffix byte range: bytes=-N means the last N bytes of the file (e.g. MKV Cues / index)
                     val suffixLen = endStr.toLongOrNull() ?: 0L
                     if (suffixLen > 0L) {
                         startByte = maxOf(0L, totalSize - suffixLen)
@@ -853,7 +909,7 @@ class LocalHttpServer(
         // Handle HEAD requests immediately without starting Pyrogram stream
         if (session.method == Method.HEAD) {
             val reqLen = endByte - startByte + 1
-            StreamLog.i(TAG, "Serving HEAD response: status=${if (rangeHeader != null) "206 Partial Content" else "200 OK"}, length=${if (rangeHeader != null) reqLen else totalSize}")
+            StreamLog.i(TAG, "[Android-Stream] Serving HEAD response: status=${if (rangeHeader != null) "206 Partial Content" else "200 OK"}, length=${if (rangeHeader != null) reqLen else totalSize}")
             val response = if (rangeHeader != null) {
                 newFixedLengthResponse(Response.Status.PARTIAL_CONTENT, mime, "").apply {
                     addHeader("Content-Range", "bytes $startByte-$endByte/$totalSize")
@@ -870,14 +926,13 @@ class LocalHttpServer(
             return response
         }
 
-        // Pass resolvedMessageId (from actual media item) and targetParam (item.id) for lookup
         val requestedLength = endByte - startByte + 1
-        StreamLog.i(TAG, "Requesting stream source from Telegram: range=$startByte-$endByte/$totalSize (len=$requestedLength bytes / ${StreamTrafficStats.formatBytes(requestedLength)})")
+        StreamLog.i(TAG, "[Android-Stream] Requesting stream source from Telegram: range=$startByte-$endByte/$totalSize (len=$requestedLength bytes / ${StreamTrafficStats.formatBytes(requestedLength)})")
         val t0 = System.currentTimeMillis()
         val chunk = try {
-            tgClient.getStreamSource(effectiveChannelId, resolvedMessageId, startByte, endByte, mediaId = targetParam)
+            tgClient.getStreamSource(effectiveChannelId, resolvedMessageId, startByte, endByte, mediaId = targetParam, platform = ClientPlatform.ANDROID)
         } catch (e: Exception) {
-            StreamLog.e(TAG, "Stream error for $uri: ${e.message}", e)
+            StreamLog.e(TAG, "[Android-Stream] Stream error for $uri: ${e.message}", e)
             return newFixedLengthResponse(
                 Response.Status.INTERNAL_ERROR,
                 "text/plain",
@@ -886,7 +941,7 @@ class LocalHttpServer(
         }
         val elapsed = System.currentTimeMillis() - t0
 
-        StreamLog.i(TAG, "Serving Video Stream [${if (rangeHeader != null) "206 Partial Content" else "200 OK"}]: range=${chunk.startByte}-${chunk.endByte}/${chunk.totalSize}, len=${chunk.contentLength} (${StreamTrafficStats.formatBytes(chunk.contentLength)}), mime=$mime (prep: ${elapsed}ms)")
+        StreamLog.i(TAG, "[Android-Stream] Serving Video Stream [${if (rangeHeader != null) "206 Partial Content" else "200 OK"}]: range=${chunk.startByte}-${chunk.endByte}/${chunk.totalSize}, len=${chunk.contentLength} (${StreamTrafficStats.formatBytes(chunk.contentLength)}), mime=$mime (prep: ${elapsed}ms)")
 
         val response = if (rangeHeader != null) {
             newFixedLengthResponse(
@@ -909,6 +964,124 @@ class LocalHttpServer(
         response.addHeader("Accept-Ranges", "bytes")
         response.addHeader("Connection", "keep-alive")
         response.addHeader("Content-Disposition", "inline; filename=\"$fileName\"")
+        return response
+    }
+
+    /**
+     * Isolated iOS Stream Engine:
+     * Specific tuning and diagnostics for iOS/Apple players without affecting Android.
+     */
+    private fun handleVideoStreamIos(
+        session: IHTTPSession,
+        uri: String,
+        headers: Map<String, String>,
+        media: MediaItem?,
+        targetParam: String,
+        resolvedMessageId: Int,
+        effectiveChannelId: Long,
+        fileName: String,
+        totalSize: Long,
+        mime: String,
+        rangeHeader: String?,
+        userAgent: String,
+        clientIp: String
+    ): Response {
+        StreamLog.i(TAG, "[iOS-Stream] >>> Incoming iOS Video Request: [${session.method}] $uri")
+        StreamLog.i(TAG, "[iOS-Stream] Range: '${rangeHeader ?: "none"}', UA: '$userAgent', Client: '$clientIp'")
+
+        // Log non-range headers for deep Apple handshake diagnostics
+        for ((k, v) in headers) {
+            if (!k.equals("range", ignoreCase = true) && !k.equals("user-agent", ignoreCase = true)) {
+                StreamLog.d(TAG, "[iOS-Stream] Header: $k = $v")
+            }
+        }
+
+        var startByte = 0L
+        var endByte = totalSize - 1L
+
+        if (!rangeHeader.isNullOrBlank() && rangeHeader.startsWith("bytes=")) {
+            val rangeVal = rangeHeader.removePrefix("bytes=").substringBefore(',').trim()
+            val dashIndex = rangeVal.indexOf('-')
+            if (dashIndex != -1) {
+                val startStr = rangeVal.substring(0, dashIndex).trim()
+                val endStr = rangeVal.substring(dashIndex + 1).trim()
+                if (startStr.isEmpty()) {
+                    val suffixLen = endStr.toLongOrNull() ?: 0L
+                    if (suffixLen > 0L) {
+                        startByte = maxOf(0L, totalSize - suffixLen)
+                        endByte = totalSize - 1L
+                    }
+                } else {
+                    startByte = startStr.toLongOrNull() ?: 0L
+                    if (endStr.isNotEmpty()) {
+                        val parsedEnd = endStr.toLongOrNull()
+                        if (parsedEnd != null && parsedEnd in startByte until totalSize) {
+                            endByte = parsedEnd
+                        }
+                    }
+                }
+            }
+        }
+
+        if (session.method == Method.HEAD) {
+            val reqLen = endByte - startByte + 1
+            StreamLog.i(TAG, "[iOS-Stream] Serving HEAD response: status=${if (rangeHeader != null) "206 Partial Content" else "200 OK"}, length=${if (rangeHeader != null) reqLen else totalSize}")
+            val response = if (rangeHeader != null) {
+                newFixedLengthResponse(Response.Status.PARTIAL_CONTENT, mime, "").apply {
+                    addHeader("Content-Range", "bytes $startByte-$endByte/$totalSize")
+                    addHeader("Content-Length", "$reqLen")
+                }
+            } else {
+                newFixedLengthResponse(Response.Status.OK, mime, "").apply {
+                    addHeader("Content-Length", "$totalSize")
+                }
+            }
+            response.addHeader("Accept-Ranges", "bytes")
+            response.addHeader("Connection", "keep-alive")
+            response.addHeader("Content-Disposition", "inline; filename=\"$fileName\"")
+            return response
+        }
+
+        val requestedLength = endByte - startByte + 1
+        StreamLog.i(TAG, "[iOS-Stream] Requesting iOS stream source from Telegram: range=$startByte-$endByte/$totalSize (len=$requestedLength bytes / ${StreamTrafficStats.formatBytes(requestedLength)})")
+        val t0 = System.currentTimeMillis()
+        val chunk = try {
+            tgClient.getStreamSource(effectiveChannelId, resolvedMessageId, startByte, endByte, mediaId = targetParam, platform = ClientPlatform.IOS)
+        } catch (e: Exception) {
+            StreamLog.e(TAG, "[iOS-Stream] Stream error for $uri: ${e.message}", e)
+            return newFixedLengthResponse(
+                Response.Status.INTERNAL_ERROR,
+                "text/plain",
+                "Stream error: ${e.message}"
+            )
+        }
+        val elapsed = System.currentTimeMillis() - t0
+
+        StreamLog.i(TAG, "[iOS-Stream] Serving iOS Stream [${if (rangeHeader != null) "206 Partial Content" else "200 OK"}]: range=${chunk.startByte}-${chunk.endByte}/${chunk.totalSize}, len=${chunk.contentLength} (${StreamTrafficStats.formatBytes(chunk.contentLength)}), mime=$mime (prep: ${elapsed}ms)")
+
+        val response = if (rangeHeader != null) {
+            newFixedLengthResponse(
+                Response.Status.PARTIAL_CONTENT,
+                mime,
+                chunk.inputStream,
+                chunk.contentLength
+            ).apply {
+                addHeader("Content-Range", "bytes ${chunk.startByte}-${chunk.endByte}/${chunk.totalSize}")
+            }
+        } else {
+            newFixedLengthResponse(
+                Response.Status.OK,
+                mime,
+                chunk.inputStream,
+                chunk.totalSize
+            )
+        }
+
+        response.addHeader("Accept-Ranges", "bytes")
+        response.addHeader("Connection", "keep-alive")
+        response.addHeader("Content-Disposition", "inline; filename=\"$fileName\"")
+        response.addHeader("Cache-Control", "no-cache, no-store, must-revalidate")
+        response.addHeader("Pragma", "no-cache")
         return response
     }
 
