@@ -2276,6 +2276,7 @@ class TelegramClientManager(private val context: Context) {
                     )
                 }
 
+                val t0 = System.currentTimeMillis()
                 var streamId = bridge.callAttr(
                     "create_stream",
                     apiId,
