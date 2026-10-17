@@ -1610,6 +1610,8 @@ def create_stream(api_id: int, api_hash: str, session_str: str, chat_id: int, pa
         tb = traceback.format_exc()
         _log_stream(f"Error creating stream: {e}\n{tb}", level="E")
         print(f"[create_stream] Error creating stream: {e}", flush=True)
+        if "AUTH_KEY_UNREGISTERED" in str(e) or "SESSION_REVOKED" in str(e):
+            raise RuntimeError(f"AUTH_KEY_UNREGISTERED: Telegram session expired: {e}")
         return ""
 
 def read_stream_chunk(stream_id: str, max_bytes: int = 1048576) -> bytes:

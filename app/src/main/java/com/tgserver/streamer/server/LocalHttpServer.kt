@@ -933,8 +933,10 @@ class LocalHttpServer(
             tgClient.getStreamSource(effectiveChannelId, resolvedMessageId, startByte, endByte, mediaId = targetParam, platform = ClientPlatform.ANDROID)
         } catch (e: Exception) {
             StreamLog.e(TAG, "[Android-Stream] Stream error for $uri: ${e.message}", e)
+            val isAuthErr = e.message?.contains("AUTH_KEY_UNREGISTERED", ignoreCase = true) == true ||
+                            e.message?.contains("logged out or expired", ignoreCase = true) == true
             return newFixedLengthResponse(
-                Response.Status.INTERNAL_ERROR,
+                if (isAuthErr) Response.Status.UNAUTHORIZED else Response.Status.INTERNAL_ERROR,
                 "text/plain",
                 "Stream error: ${e.message}"
             )
@@ -1049,8 +1051,10 @@ class LocalHttpServer(
             tgClient.getStreamSource(effectiveChannelId, resolvedMessageId, startByte, endByte, mediaId = targetParam, platform = ClientPlatform.IOS)
         } catch (e: Exception) {
             StreamLog.e(TAG, "[iOS-Stream] Stream error for $uri: ${e.message}", e)
+            val isAuthErr = e.message?.contains("AUTH_KEY_UNREGISTERED", ignoreCase = true) == true ||
+                            e.message?.contains("logged out or expired", ignoreCase = true) == true
             return newFixedLengthResponse(
-                Response.Status.INTERNAL_ERROR,
+                if (isAuthErr) Response.Status.UNAUTHORIZED else Response.Status.INTERNAL_ERROR,
                 "text/plain",
                 "Stream error: ${e.message}"
             )

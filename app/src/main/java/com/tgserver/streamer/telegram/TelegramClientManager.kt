@@ -1347,6 +1347,19 @@ class TelegramClientManager(private val context: Context) {
         } catch (_: Exception) {}
     }
 
+    fun handleAuthRevocation(errorMsg: String) {
+        StreamLog.e(TAG, "Telegram session revoked/expired: $errorMsg")
+        val current = _sessionState.value
+        if (current.isLoggedIn) {
+            val updated = current.copy(
+                isLoggedIn = false,
+                lastError = "Telegram session has expired or was revoked. Please log in again."
+            )
+            saveSession(updated)
+            stopAutoScanLoop()
+        }
+    }
+
     // --- Channel Management ---
 
     fun getChannels(): List<ChannelInfo> = channels.values.toList()
@@ -1850,6 +1863,9 @@ class TelegramClientManager(private val context: Context) {
                 if (status != "success") {
                     val err = obj.optString("error", "Failed to fetch batch")
                     Log.e(TAG, "Batch scan failed: $err")
+                    if (err.contains("AUTH_KEY_UNREGISTERED", ignoreCase = true) || err.contains("SESSION_REVOKED", ignoreCase = true)) {
+                        handleAuthRevocation(err)
+                    }
                     break
                 }
 
@@ -2342,13 +2358,20 @@ class TelegramClientManager(private val context: Context) {
                 }
             } catch (e: Exception) {
                 StreamLog.e(TAG, "Error creating live MTProto stream: ${e.message}", e)
+                val msg = e.message ?: ""
+                if (msg.contains("AUTH_KEY_UNREGISTERED", ignoreCase = true) || msg.contains("SESSION_REVOKED", ignoreCase = true)) {
+                    handleAuthRevocation(msg)
+                    throw java.io.IOException("Telegram session has expired (AUTH_KEY_UNREGISTERED). Please re-login in NoxMedia.", e)
+                }
                 throw java.io.IOException("Failed to create MTProto stream: ${e.message}", e)
             }
         } else {
             StreamLog.e(TAG, "MTProto bridge unavailable or session empty (bridge=${bridge != null}, session=${sessionStr.isNotBlank()}, apiId=$apiId)")
         }
 
-        throw java.io.IOException("MTProto stream could not be created for message $messageId")
+        val emptySession = sessionState.value.sessionString.isBlank() || !sessionState.value.isLoggedIn
+        val desc = if (emptySession) "Telegram session is logged out or expired. Please log in again in NoxMedia." else "MTProto stream could not be created for message $messageId"
+        throw java.io.IOException(desc)
     }
 
     /**
