@@ -578,9 +578,8 @@ class LocalHttpServer(
             val streamUrl = "http://$localIp:${config.port}/stream/video/${item.channelId}/${item.id}/$safeFileName"
             val (streamName, streamTitle) = formatStreamItem(item, rawFileName)
 
-            val isMkv = rawFileName.contains(".mkv", ignoreCase = true) || item.mimeType.contains("matroska", ignoreCase = true)
             val behaviorHints = mutableMapOf<String, Any>(
-                "notWebReady" to isMkv,
+                "notWebReady" to false,
                 "videoSize" to item.sizeBytes,
                 "filename" to rawFileName
             )

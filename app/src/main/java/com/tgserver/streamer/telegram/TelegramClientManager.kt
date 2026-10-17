@@ -86,6 +86,8 @@ class TelegramClientManager(private val context: Context) {
     private var autoScanJob: Job? = null
     @Volatile
     private var activePlaybackStreamId: String? = null
+    @Volatile
+    private var activePlaybackMediaKey: String? = null
 
     private val _apiCredentials = MutableStateFlow(
         Pair(
@@ -2236,13 +2238,44 @@ class TelegramClientManager(private val context: Context) {
 
                 val partsJson = gson.toJson(partsList)
 
-                // Smart Playback Stream Management:
-                // Full playback streams (contentLength > 5MB) supersede prior playback streams immediately
-                // to kill background downloads of obsolete timeline positions and free 100% bandwidth.
-                // Small metadata probes (Cues, header probes <= 5MB) run independently without killing playback!
-                if (contentLength > 5_000_000L) {
+                val currentMediaKey = "${effectiveChannelId}_${media?.id ?: extractedMsgId ?: messageId}"
+                val isDifferentMedia = activePlaybackMediaKey != null && activePlaybackMediaKey != currentMediaKey
+                if (isDifferentMedia) {
                     activePlaybackStreamId?.let { prevId ->
-                        StreamLog.w(TAG, "Seek detected: terminating previous playback stream $prevId immediately to free bandwidth for range $startByte-$effectiveEnd")
+                        StreamLog.w(TAG, "New media selected ($currentMediaKey vs $activePlaybackMediaKey): terminating previous playback stream $prevId")
+                        try {
+                            bridge.callAttr("close_stream", prevId)
+                        } catch (ce: Exception) {
+                            StreamLog.w(TAG, "Notice closing stream for previous media: ${ce.message}")
+                        }
+                    }
+                    activePlaybackStreamId = null
+                }
+                activePlaybackMediaKey = currentMediaKey
+
+                // Accurate Stream Intent Classification:
+                // 1. Cues / Index / Metadata Probes:
+                //    - Explicit small ranges (<= 15MB) anywhere in file
+                //    - OR requests starting near the end of the file (within last 150MB or last 15% of totalSize)
+                //      where Matroska Cues or MP4 moov tables reside (even when open-ended "bytes=N-").
+                //    These run concurrently and NEVER terminate or supersede active playback streams!
+                val isNearFileEnd = totalSize > 0 && (
+                    startByte >= maxOf(0L, totalSize - 150_000_000L) ||
+                    (totalSize - startByte) <= (totalSize * 0.15).toLong()
+                )
+                val isMetadataOrCuesProbe = contentLength <= 15_000_000L || isNearFileEnd
+
+                // 2. Initial Playback:
+                //    Starts at byte 0 or within the first 5MB of the container.
+                val isInitialPlayback = startByte <= 5_000_000L
+
+                // 3. True User Seek:
+                //    An active timeline jump to an arbitrary mid-movie position (not header, not cue probe).
+                val isUserSeek = !isMetadataOrCuesProbe && !isInitialPlayback && contentLength > 15_000_000L
+
+                if (isUserSeek) {
+                    activePlaybackStreamId?.let { prevId ->
+                        StreamLog.w(TAG, "User timeline seek detected to byte $startByte (mid-media): terminating previous playback stream $prevId to free 100% bandwidth")
                         try {
                             bridge.callAttr("close_stream", prevId)
                             StreamLog.i(TAG, "Previous playback stream $prevId closed successfully")
@@ -2250,8 +2283,10 @@ class TelegramClientManager(private val context: Context) {
                             StreamLog.w(TAG, "Notice closing superseded stream $prevId: ${ce.message}")
                         }
                     }
+                } else if (isMetadataOrCuesProbe) {
+                    StreamLog.i(TAG, "Metadata / Cues probe detected: range=$startByte-$effectiveEnd (len=$contentLength bytes, nearEnd=$isNearFileEnd) - running concurrently without killing active playback stream ($activePlaybackStreamId)")
                 } else {
-                    StreamLog.i(TAG, "Small metadata probe (length=$contentLength bytes <= 5MB) - running without killing active playback stream ($activePlaybackStreamId)")
+                    StreamLog.i(TAG, "Initial playback stream: range=$startByte-$effectiveEnd (len=$contentLength bytes)")
                 }
 
                 val t0 = System.currentTimeMillis()
@@ -2270,7 +2305,8 @@ class TelegramClientManager(private val context: Context) {
                 StreamLog.i(TAG, "create_stream result in ${pyElapsed}ms: streamId=$streamId, partsCount=${partsList.size}, channelId=$effectiveChannelId, range=$startByte-$effectiveEnd/$totalSize (contentLength=$contentLength)")
 
                 if (streamId.isNotBlank()) {
-                    if (contentLength > 5_000_000L) {
+                    // Only track playback streams (NOT metadata / Cues probes!)
+                    if (!isMetadataOrCuesProbe) {
                         activePlaybackStreamId = streamId
                     }
                     val stream = TgMediaInputStream(bridge, streamId, contentLength)
