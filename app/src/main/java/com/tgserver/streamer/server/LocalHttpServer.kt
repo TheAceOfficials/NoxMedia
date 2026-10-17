@@ -101,6 +101,7 @@ class LocalHttpServer(
 
                 // 3. Management REST APIs for Stitch UI
                 uri == "/api/status" -> handleGetStatus()
+                uri == "/api/logs" -> handleGetLogs()
                 uri == "/api/server/toggle" && method == Method.POST -> handleToggleServer()
                 uri == "/api/auth/status" -> handleGetAuthStatus()
                 uri == "/api/auth/session" && method == Method.POST -> handleImportSession(session)
@@ -610,11 +611,10 @@ class LocalHttpServer(
     }
 
     private fun getIosBehaviorHints(item: MediaItem, rawFileName: String): MutableMap<String, Any> {
-        val isMkv = rawFileName.contains(".mkv", ignoreCase = true) || item.mimeType.contains("matroska", ignoreCase = true)
-        // On iOS, Matroska (.mkv) is not natively playable by AVPlayer.
-        // Marking notWebReady: isMkv signals iOS players to route via KSPlayer / VLC / Outplayer
+        // Just like on Android TV, notWebReady: false enables direct progressive HTTP 206 streaming
+        // without triggering Nuvio/Stremio's internal proxy cache pre-fetching the entire file.
         return mutableMapOf(
-            "notWebReady" to isMkv,
+            "notWebReady" to false,
             "videoSize" to item.sizeBytes,
             "filename" to rawFileName
         )
@@ -1122,6 +1122,19 @@ class LocalHttpServer(
         val h = (seconds % 86400) / 3600
         val m = (seconds % 3600) / 60
         return if (d > 0) "${d}d ${h}h" else "${h}h ${m}m"
+    }
+
+    private fun handleGetLogs(): Response {
+        val logFile = StreamLog.getLogFile()
+        if (logFile == null || !logFile.exists()) {
+            return newFixedLengthResponse(Response.Status.OK, "text/plain; charset=utf-8", "No stream logs recorded yet.")
+        }
+        val lines = try {
+            logFile.readLines().takeLast(300).joinToString("\n")
+        } catch (e: Exception) {
+            "Error reading log: ${e.message}"
+        }
+        return newFixedLengthResponse(Response.Status.OK, "text/plain; charset=utf-8", lines)
     }
 
     private fun handleToggleServer(): Response {

@@ -96,6 +96,8 @@ class TelegramClientManager(private val context: Context) {
     private var iosActiveStreamId: String? = null
     @Volatile
     private var iosActiveMediaKey: String? = null
+    @Volatile
+    private var iosActiveStreamStartByte: Long = 0L
 
     private val _apiCredentials = MutableStateFlow(
         Pair(
@@ -2298,6 +2300,7 @@ class TelegramClientManager(private val context: Context) {
                         val isIosProbe = contentLength <= 15_000_000L || isNearFileEnd
                         if (!isIosProbe) {
                             iosActiveStreamId = streamId
+                            iosActiveStreamStartByte = startByte
                         }
                     } else {
                         // Android: Only track playback streams (NOT metadata / Cues probes!)
@@ -2375,12 +2378,12 @@ class TelegramClientManager(private val context: Context) {
         )
         val isMetadataOrCuesProbe = contentLength <= 15_000_000L || isNearFileEnd
 
-        // 2. Initial Playback:
-        //    Starts at byte 0 or within the first 5MB of the container.
-        val isInitialPlayback = startByte <= 5_000_000L
+        // 2. Initial / Resume Playback:
+        //    Starts within the first 25MB of the container (covering EBML headers, tracks, and initial 30 seconds).
+        val isInitialPlayback = startByte <= 25_000_000L
 
         // 3. True User Seek:
-        //    An active timeline jump to an arbitrary mid-movie position (not header, not cue probe).
+        //    An active timeline jump to an arbitrary mid-movie position (> 25MB, not header, not cue probe).
         val isUserSeek = !isMetadataOrCuesProbe && !isInitialPlayback && contentLength > 15_000_000L
 
         if (isUserSeek) {
@@ -2435,20 +2438,26 @@ class TelegramClientManager(private val context: Context) {
             (totalSize - startByte) <= (totalSize * 0.15).toLong()
         )
         val isIosProbe = contentLength <= 15_000_000L || isNearFileEnd
-        val isInitialPlayback = startByte <= 5_000_000L
+        // Cover EBML container headers, track definitions, and first 30 seconds of video
+        val isInitialPlayback = startByte <= 25_000_000L
         val isUserSeek = !isIosProbe && !isInitialPlayback && contentLength > 15_000_000L
 
         StreamLog.i(TAG, "[iOS] Stream Intent: range=$startByte-$effectiveEnd/$totalSize (len=$contentLength bytes), isProbe=$isIosProbe, isInitial=$isInitialPlayback, isSeek=$isUserSeek")
 
         if (isUserSeek) {
-            iosActiveStreamId?.let { prevId ->
-                StreamLog.w(TAG, "[iOS] User timeline seek detected to byte $startByte: terminating previous iOS stream $prevId")
-                try {
-                    bridge.callAttr("close_stream", prevId)
-                    StreamLog.i(TAG, "[iOS] Previous iOS playback stream $prevId closed successfully")
-                } catch (ce: Exception) {
-                    StreamLog.w(TAG, "[iOS] Notice closing superseded stream $prevId: ${ce.message}")
+            // Never terminate a header stream at byte 0; let it complete or close via client socket
+            if (iosActiveStreamStartByte > 0L) {
+                iosActiveStreamId?.let { prevId ->
+                    StreamLog.w(TAG, "[iOS] User timeline seek detected to byte $startByte: terminating previous iOS stream $prevId (started at $iosActiveStreamStartByte)")
+                    try {
+                        bridge.callAttr("close_stream", prevId)
+                        StreamLog.i(TAG, "[iOS] Previous iOS playback stream $prevId closed successfully")
+                    } catch (ce: Exception) {
+                        StreamLog.w(TAG, "[iOS] Notice closing superseded stream $prevId: ${ce.message}")
+                    }
                 }
+            } else {
+                StreamLog.i(TAG, "[iOS] Keeping byte 0 header stream ($iosActiveStreamId) active alongside seek to $startByte")
             }
         }
     }

@@ -38,6 +38,10 @@ object ClientPlatformDetector {
             ua.contains("mobilevlckit") ||
             ua.contains("outplayer") ||
             ua.contains("infuse") ||
+            ua.contains("libmpv") ||
+            ua.contains("mpv") ||
+            ua.contains("lavf") ||
+            ua.contains("vlc") ||
             ua.contains("nuvio-ios") ||
             ua.contains("nuvio/ios") ||
             ua.contains("stremio-ios") ||
