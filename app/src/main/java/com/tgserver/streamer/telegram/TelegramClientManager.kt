@@ -2324,11 +2324,13 @@ class TelegramClientManager(private val context: Context) {
 
                 if (streamId.isNotBlank()) {
                     if (platform == ClientPlatform.IOS) {
+                        val isHeaderProbe = startByte <= 2_000_000L && contentLength <= 2_000_000L && iosActiveStreamId != null
                         val isNearFileEnd = totalSize > 0 && (
                             startByte >= maxOf(0L, totalSize - 150_000_000L) ||
                             (totalSize - startByte) <= (totalSize * 0.15).toLong()
                         )
-                        val isIosProbe = contentLength <= 15_000_000L || isNearFileEnd
+                        val isCuesProbe = isNearFileEnd && contentLength <= 25_000_000L
+                        val isIosProbe = isHeaderProbe || isCuesProbe
                         if (!isIosProbe) {
                             iosActiveStreamId = streamId
                             iosActiveStreamStartByte = startByte
@@ -2471,33 +2473,33 @@ class TelegramClientManager(private val context: Context) {
         }
         iosActiveMediaKey = currentMediaKey
 
+        // 1. Initial Container Header Probe:
+        //    Reads container metadata (EBML, Tracks, Codecs) at the very start of the file.
+        //    Only considered a probe when it's small (<= 2MB) and an active playback stream already exists.
+        val isHeaderProbe = startByte <= 2_000_000L && contentLength <= 2_000_000L && iosActiveStreamId != null
+
+        // 2. Cues / Index / Moov Probe:
+        //    Reads the seek table / index at the end of the file.
         val isNearFileEnd = totalSize > 0 && (
             startByte >= maxOf(0L, totalSize - 150_000_000L) ||
             (totalSize - startByte) <= (totalSize * 0.15).toLong()
         )
-        // 1. Probes: small byte requests (<= 15MB) or requests targeting the end of file (Cues/Index tables)
-        val isIosProbe = contentLength <= 15_000_000L || isNearFileEnd
+        val isCuesProbe = isNearFileEnd && contentLength <= 25_000_000L
 
-        if (isIosProbe) {
+        if (isHeaderProbe || isCuesProbe) {
             StreamLog.i(TAG, "[iOS] Metadata/Cues probe: range=$startByte-$effectiveEnd/$totalSize (len=$contentLength) - running concurrently")
             return
         }
 
-        // 2. Initial container header stream at byte 0
-        val isInitialHeader = startByte <= 2_000_000L && iosActiveStreamId == null
-
-        // 3. User Seek Detection:
-        //    A real timeline jump occurs when:
-        //    - Jump forward by more than 10MB (user jumped ahead on timeline)
-        //    - Jump backward by more than 2MB (user rewound)
-        //    - Resuming from 5s+ away from byte 0 when an initial byte-0 stream was started
-        //    Minor byte adjustments (< 2MB backwards, < 10MB forward) are keyframe/cluster alignment
-        //    and must NOT terminate the active stream, allowing instant playback!
+        // 3. Playback & Seek Streams:
+        //    Every other request is an active playback stream at a timeline position.
+        //    If a previous playback stream exists at a different position (seek / jump),
+        //    terminate it IMMEDIATELY so 100% bandwidth and CPU is dedicated to the new seek point!
         val prevStreamId = iosActiveStreamId
         val prevStart = iosActiveStreamStartByte
         val isSeekJump = prevStreamId != null && (
-            startByte > prevStart + 10_000_000L ||
-            startByte < prevStart - 2_000_000L ||
+            startByte > prevStart + 6_000_000L ||
+            startByte < prevStart - 3_000_000L ||
             (prevStart <= 2_000_000L && startByte > 2_000_000L)
         )
 
@@ -2510,8 +2512,6 @@ class TelegramClientManager(private val context: Context) {
                 StreamLog.w(TAG, "[iOS] Notice closing superseded stream $prevStreamId: ${ce.message}")
             }
             iosActiveStreamId = null
-        } else if (isInitialHeader) {
-            StreamLog.i(TAG, "[iOS] Initial container header stream at byte $startByte (len=$contentLength bytes)")
         } else {
             StreamLog.i(TAG, "[iOS] Playback continuous/nearby stream: range=$startByte-$effectiveEnd/$totalSize (len=$contentLength bytes, prevStart=$prevStart)")
         }

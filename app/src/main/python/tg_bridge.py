@@ -1346,6 +1346,7 @@ class VirtualStreamSession:
         self.tasks = self._plan_tasks()
         self.prefetch_task: Optional[asyncio.Task] = None
         self.active_tasks: Set[asyncio.Task] = set()
+        self.in_flight_keys: Set[Tuple[int, int, int]] = set()
         _log_stream(f"Stream[{self.stream_id[:8]}]: Init chat={chat_id}, parts_count={len(self.parts)}, range={start_byte}-{end_byte} ({(self.total_to_read)/(1024*1024):.2f}MB), total_tasks={len(self.tasks)}, buffer_mb={_buffer_pipeline_mb}")
         if self.tasks:
             _log_stream(f"Stream[{self.stream_id[:8]}]: Task[0] msg_id={self.tasks[0]['msg_id']}, off={self.tasks[0]['fetch_off']}, slice={self.tasks[0]['s_start']}-{self.tasks[0]['s_end']}")
@@ -1417,16 +1418,20 @@ class VirtualStreamSession:
         limit = t_info["limit"]
         s_start = t_info["s_start"]
         s_end = t_info["s_end"]
+        key = (self.chat_id, msg_id, fetch_off)
+        self.in_flight_keys.add(key)
+        try:
+            raw_chunk = await _get_or_fetch_chunk(self.client, self.chat_id, msg_id, fetch_off, limit)
+            if raw_chunk is None:
+                return None
 
-        raw_chunk = await _get_or_fetch_chunk(self.client, self.chat_id, msg_id, fetch_off, limit)
-        if raw_chunk is None:
-            return None
-
-        chunk_len = len(raw_chunk)
-        if s_start >= chunk_len:
-            return b""
-        end_idx = min(chunk_len, s_end) if s_end is not None else chunk_len
-        return raw_chunk[s_start:end_idx]
+            chunk_len = len(raw_chunk)
+            if s_start >= chunk_len:
+                return b""
+            end_idx = min(chunk_len, s_end) if s_end is not None else chunk_len
+            return raw_chunk[s_start:end_idx]
+        finally:
+            self.in_flight_keys.discard(key)
 
     async def _prefetch_loop(self):
         in_flight: List[Tuple[int, asyncio.Task]] = []
@@ -1560,6 +1565,17 @@ class VirtualStreamSession:
         if not self._closed:
             self._closed = True
             self._eof = True
+            try:
+                loop = _ensure_event_loop()
+                if loop.is_running():
+                    loop.call_soon_threadsafe(self._do_close_loop_safe)
+                else:
+                    self._do_close_loop_safe()
+            except Exception as e:
+                print(f"[VirtualStreamSession.close] Error: {e}", flush=True)
+
+    def _do_close_loop_safe(self):
+        try:
             pct = (self.bytes_read * 100 / max(1, self.total_to_read))
             _log_stream(f"Stream[{self.stream_id[:8]}]: Closed. Delivered {self.bytes_read / (1024*1024):.2f} MB of {self.total_to_read / (1024*1024):.2f} MB ({pct:.1f}%)")
             if self.prefetch_task and not self.prefetch_task.done():
@@ -1574,6 +1590,19 @@ class VirtualStreamSession:
                     self.queue.get_nowait()
                 except Exception:
                     break
+            try:
+                self.queue.put_nowait(None)
+            except Exception:
+                pass
+
+            # Instantly cancel all pending background chunk network fetches for this session!
+            for k in list(self.in_flight_keys):
+                t = _pending_fetches.pop(k, None)
+                if t and not t.done():
+                    t.cancel()
+            self.in_flight_keys.clear()
+        except Exception as e:
+            print(f"[VirtualStreamSession._do_close_loop_safe] Error: {e}", flush=True)
 
 def create_stream(api_id: int, api_hash: str, session_str: str, chat_id: int, parts_json: str, start_byte: int, end_byte: int) -> str:
     """
