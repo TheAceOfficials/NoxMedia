@@ -209,28 +209,6 @@ fun SplashScreen(
                 fontFamily = NdotFont,
                 letterSpacing = 2.sp
             )
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            // Minimalist Monospace Badge
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(4.5.dp)
-                        .background(Color(0xFFFF3B30), CircleShape) // Nothing signature red dot
-                )
-                Text(
-                    text = "STREAMING ENGINE",
-                    color = Color(0xFF8E8E93),
-                    fontSize = 10.5.sp,
-                    fontFamily = FontFamily.Monospace,
-                    letterSpacing = 2.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
         }
 
         // 3. BOTTOM LOADING SPINNER & INITIALIZING STATUS

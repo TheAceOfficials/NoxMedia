@@ -151,6 +151,24 @@ fun AppRootScreen(viewModel: MainAppViewModel) {
                 }
             }
 
+            // Smooth ambient bottom scrim to gracefully dissolve scrolling cards before reaching the dock
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(115.dp)
+                    .align(Alignment.BottomCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color(0x3B000000),
+                                Color(0x94000000),
+                                Color(0xE8000000)
+                            )
+                        )
+                    )
+            )
+
             // Minimalist Floating Glassmorphic Dock (True Floating Island, Zero Side Box)
             MinimalFloatingNavDock(
                 currentTab = selectedTab,
@@ -173,7 +191,7 @@ fun AppRootScreen(viewModel: MainAppViewModel) {
  * - Symmetrical, perfectly centered icon alignment.
  * - Fluid hold-to-swipe drag scrub gesture with squishy liquid springs.
  * - Profile avatar integrated for Settings tab with active white ring.
- * - Zero background cut-off: completely transparent on the sides.
+ * - True multi-layered frosted smoked glass with specular reflection & zero background cut-off.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -233,34 +251,46 @@ private fun MinimalFloatingNavDock(
         modifier = modifier,
         contentAlignment = Alignment.Center
     ) {
-        // Floating Island Capsule (Compact, Centered, Symmetrical)
+        // Floating Island Capsule (Compact, Centered, Symmetrical, Frosted Glass)
         Box(
             modifier = Modifier
                 .width(276.dp)
                 .height(54.dp)
                 .shadow(
-                    elevation = 20.dp,
+                    elevation = 24.dp,
                     shape = RoundedCornerShape(27.dp),
-                    spotColor = Color(0x99000000),
-                    ambientColor = Color(0x55000000)
+                    spotColor = Color(0xB3000000),
+                    ambientColor = Color(0x66000000)
                 )
                 .clip(RoundedCornerShape(27.dp))
+                // Layer 1: Dense Smoked Obsidian Frosted Base (stops text bleed-through)
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            Color(0xDD15161F), // Frosted dark obsidian
-                            Color(0xF00D0E13)
+                            Color(0xF7151722),
+                            Color(0xFD0D0E14)
                         )
                     )
                 )
+                // Layer 2: Frosted Specular Sheen (mimics frosted glass catching ambient light)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0x28FFFFFF),
+                            Color(0x0CFFFFFF),
+                            Color(0x00FFFFFF)
+                        )
+                    )
+                )
+                // Layer 3: Glass Bevel Outer Border (metallic light-catching top edge)
                 .border(
                     BorderStroke(
-                        1.dp,
+                        1.2.dp,
                         Brush.verticalGradient(
                             colors = listOf(
-                                Color(0x40FFFFFF), // Subtle top rim metallic highlight
-                                Color(0x14FFFFFF),
-                                Color(0x06FFFFFF)
+                                Color(0x55FFFFFF),
+                                Color(0x20FFFFFF),
+                                Color(0x08FFFFFF)
                             )
                         )
                     ),
@@ -305,6 +335,26 @@ private fun MinimalFloatingNavDock(
                     )
                 }
         ) {
+            // Subtle frosted glass top specular reflection line
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .padding(horizontal = 24.dp)
+                    .align(Alignment.TopCenter)
+                    .background(
+                        Brush.horizontalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color(0x30FFFFFF),
+                                Color(0x60FFFFFF),
+                                Color(0x30FFFFFF),
+                                Color.Transparent
+                            )
+                        )
+                    )
+            )
+
             val usableWidthPx = (barWidthPx - 2 * horizontalPaddingPx).coerceAtLeast(1f)
             val slotWidthPx = usableWidthPx / NAV_TABS.size
             val slotWidthDp = with(density) { slotWidthPx.toDp() }
@@ -334,15 +384,20 @@ private fun MinimalFloatingNavDock(
                         .background(
                             Brush.verticalGradient(
                                 colors = listOf(
-                                    Color(0x35FFFFFF), // Elevated frosted highlight
-                                    Color(0x18FFFFFF)
+                                    Color(0x38FFFFFF), // Elevated frosted highlight
+                                    Color(0x16FFFFFF)
                                 )
                             )
                         )
                         .border(
                             BorderStroke(
                                 1.dp,
-                                Color(0x3CFFFFFF)
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color(0x60FFFFFF),
+                                        Color(0x24FFFFFF)
+                                    )
+                                )
                             ),
                             shape = RoundedCornerShape(23.dp)
                         )

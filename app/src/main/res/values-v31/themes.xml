@@ -3,7 +3,7 @@
     <style name="Theme.TGServer" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">#000000</item>
         <item name="android:windowSplashScreenBackground">#000000</item>
-        <item name="android:windowSplashScreenAnimatedIcon">@drawable/noxmedia_icon_trans</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_transparent_splash</item>
         <item name="android:statusBarColor">#000000</item>
         <item name="android:navigationBarColor">#000000</item>
         <item name="android:windowLightStatusBar">false</item>

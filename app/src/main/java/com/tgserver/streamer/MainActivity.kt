@@ -47,8 +47,6 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             TGServerTheme {
-                var isSplashActive by remember { mutableStateOf(true) }
-
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -56,9 +54,10 @@ class MainActivity : ComponentActivity() {
                 ) {
                     AppRootScreen(viewModel = viewModel)
 
-                    if (isSplashActive) {
+                    // Splash screen runs strictly once per app launch session; survives phone rotation
+                    if (!viewModel.isSplashCompleted) {
                         SplashScreen(
-                            onDismiss = { isSplashActive = false }
+                            onDismiss = { viewModel.isSplashCompleted = true }
                         )
                     }
                 }

@@ -8,6 +8,9 @@ import android.content.Intent
 import android.os.Build
 import android.util.Log
 import android.widget.Toast
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.tgserver.streamer.data.model.AuthSession
@@ -50,6 +53,9 @@ data class TelemetryUiState(
 )
 
 class MainAppViewModel(application: Application) : AndroidViewModel(application) {
+
+    /** Tracks whether splash screen has completed during this app session (survives rotation) */
+    var isSplashCompleted by mutableStateOf(false)
 
     private val tgClient: TelegramClientManager =
         StreamerForegroundService.activeTgClient ?: TelegramClientManager(application.applicationContext)
