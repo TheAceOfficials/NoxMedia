@@ -68,12 +68,23 @@ class AlexaVoiceBridge(
         (hueMac.take(6) + "fffe" + hueMac.takeLast(6)).uppercase()
     }
 
+    private var actualHttpPort: Int = httpPort
+
     @Synchronized
     fun start() {
         if (httpServer != null) return
 
         StreamLog.init(context)
-        StreamLog.i(TAG, "Starting Alexa Voice Bridge on port $httpPort (Device Name: \"${deviceNameProvider()}\")")
+        
+        // Attempt port 80 if device has root/permissions, else fallback to httpPort
+        val candidatePort = try {
+            java.net.ServerSocket(80).use { 80 }
+        } catch (_: Exception) {
+            httpPort
+        }
+        actualHttpPort = candidatePort
+
+        StreamLog.i(TAG, "Starting Alexa Voice Bridge on port $actualHttpPort (Device Name: \"${deviceNameProvider()}\")")
 
         // 1. Acquire Wi-Fi Multicast lock
         try {
@@ -89,12 +100,12 @@ class AlexaVoiceBridge(
 
         // 2. Start lightweight local HTTP server for UPnP / WeMo / Hue descriptors
         try {
-            httpServer = DualProtocolHttpServer(httpPort).apply {
+            httpServer = DualProtocolHttpServer(actualHttpPort).apply {
                 start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
             }
-            StreamLog.i(TAG, "Alexa HTTP server listening on http://0.0.0.0:$httpPort")
+            StreamLog.i(TAG, "Alexa HTTP server listening on http://0.0.0.0:$actualHttpPort")
         } catch (e: Exception) {
-            StreamLog.e(TAG, "Failed to start Alexa HTTP server on port $httpPort: ${e.message}")
+            StreamLog.e(TAG, "Failed to start Alexa HTTP server on port $actualHttpPort: ${e.message}")
         }
 
         // 3. Start SSDP UDP listener on 239.255.255.250:1900
@@ -210,6 +221,27 @@ class AlexaVoiceBridge(
         }
     }
 
+    private fun getLocalIpForRemote(remoteAddress: InetAddress): String {
+        try {
+            val remoteBytes = remoteAddress.address
+            val interfaces = Collections.list(NetworkInterface.getNetworkInterfaces())
+            for (iface in interfaces) {
+                if (iface.isLoopback || !iface.isUp) continue
+                for (addr in Collections.list(iface.inetAddresses)) {
+                    if (addr is java.net.Inet4Address && !addr.isLoopbackAddress) {
+                        val localBytes = addr.address
+                        if (localBytes.size == 4 && remoteBytes.size == 4 &&
+                            localBytes[0] == remoteBytes[0] && localBytes[1] == remoteBytes[1]
+                        ) {
+                            return addr.hostAddress ?: ""
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return LocalHttpServer.getLocalIpAddress()
+    }
+
     private fun handleMSearch(
         message: String,
         remoteAddress: InetAddress,
@@ -232,7 +264,7 @@ class AlexaVoiceBridge(
 
         if (!isWeMoSearch && !isHueSearch) return
 
-        val localIp = LocalHttpServer.getLocalIpAddress()
+        val localIp = getLocalIpForRemote(remoteAddress)
         if (localIp.isBlank() || localIp == "127.0.0.1") return
 
         StreamLog.i(TAG, "Alexa M-SEARCH detected from ${remoteAddress.hostAddress}:$remotePort (ST: $st)")
@@ -269,7 +301,7 @@ class AlexaVoiceBridge(
                         "CACHE-CONTROL: max-age=86400\r\n" +
                         "DATE: $dateHeader\r\n" +
                         "EXT:\r\n" +
-                        "LOCATION: http://$localIp:$httpPort/setup.xml\r\n" +
+                        "LOCATION: http://$localIp:$actualHttpPort/setup.xml\r\n" +
                         "OPT: \"http://schemas.upnp.org/upnp/1/0/\"; ns=01\r\n" +
                         "01-NLS: $serialNumber\r\n" +
                         "SERVER: Unspecified, UPnP/1.0, Unspecified\r\n" +
@@ -279,7 +311,7 @@ class AlexaVoiceBridge(
 
                 sendUdpResponse(response.toByteArray(Charsets.UTF_8), remoteAddress, remotePort, socket)
             }
-            StreamLog.i(TAG, "Sent WeMo SSDP responses to ${remoteAddress.hostAddress}:$remotePort")
+            StreamLog.i(TAG, "Sent WeMo SSDP (LOCATION: http://$localIp:$actualHttpPort/setup.xml) to ${remoteAddress.hostAddress}:$remotePort")
         }
 
         // 2. Respond with Philips Hue Bridge if matching
@@ -287,14 +319,14 @@ class AlexaVoiceBridge(
             val hueResponse = "HTTP/1.1 200 OK\r\n" +
                     "CACHE-CONTROL: max-age=100\r\n" +
                     "EXT:\r\n" +
-                    "LOCATION: http://$localIp:$httpPort/description.xml\r\n" +
+                    "LOCATION: http://$localIp:$actualHttpPort/description.xml\r\n" +
                     "SERVER: Linux/3.14.0 UPnP/1.0 IpBridge/1.24.0\r\n" +
                     "hue-bridgeid: $hueBridgeId\r\n" +
                     "ST: urn:schemas-upnp-org:device:basic:1\r\n" +
                     "USN: uuid:2f402f80-da50-11e1-9b23-$hueMac::urn:schemas-upnp-org:device:basic:1\r\n\r\n"
 
             sendUdpResponse(hueResponse.toByteArray(Charsets.UTF_8), remoteAddress, remotePort, socket)
-            StreamLog.i(TAG, "Sent Hue Bridge SSDP response to ${remoteAddress.hostAddress}:$remotePort")
+            StreamLog.i(TAG, "Sent Hue SSDP (LOCATION: http://$localIp:$actualHttpPort/description.xml) to ${remoteAddress.hostAddress}:$remotePort")
         }
     }
 
@@ -325,6 +357,9 @@ class AlexaVoiceBridge(
         override fun serve(session: IHTTPSession): Response {
             val uri = session.uri.trimEnd('/')
             val method = session.method
+            val clientIp = session.remoteIpAddress ?: "unknown"
+
+            StreamLog.i(TAG, "Incoming Alexa HTTP $method $uri from $clientIp")
 
             if (method == Method.HEAD || method == Method.OPTIONS) {
                 val resp = newFixedLengthResponse(Response.Status.OK, "text/plain", "")
@@ -503,7 +538,7 @@ class AlexaVoiceBridge(
     <major>1</major>
     <minor>0</minor>
   </specVersion>
-  <URLBase>http://$localIp:$httpPort/</URLBase>
+  <URLBase>http://$localIp:$actualHttpPort/</URLBase>
   <device>
     <deviceType>urn:schemas-upnp-org:device:basic:1</deviceType>
     <friendlyName>Philips hue ($localIp)</friendlyName>
