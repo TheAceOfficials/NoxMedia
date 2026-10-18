@@ -1553,7 +1553,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         )
                     }
 
-                    UiverseSwitch(
+                    NothingSwitch(
                         checked = alexaVoiceControlEnabled,
                         onCheckedChange = {
                             alexaVoiceControlEnabled = it
