@@ -5,5 +5,5 @@
         android:width="96dp"
         android:height="96dp"
         android:gravity="center"
-        android:drawable="@mipmap/ic_launcher" />
+        android:drawable="@drawable/noxmedia_icon_trans" />
 </layer-list>

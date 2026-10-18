@@ -10,9 +10,16 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import com.tgserver.streamer.theme.TGServerTheme
 import com.tgserver.streamer.ui.AppRootScreen
 import com.tgserver.streamer.ui.MainAppViewModel
+import com.tgserver.streamer.ui.screens.SplashScreen
 
 class MainActivity : ComponentActivity() {
 
@@ -40,7 +47,21 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             TGServerTheme {
-                AppRootScreen(viewModel = viewModel)
+                var isSplashActive by remember { mutableStateOf(true) }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black)
+                ) {
+                    AppRootScreen(viewModel = viewModel)
+
+                    if (isSplashActive) {
+                        SplashScreen(
+                            onDismiss = { isSplashActive = false }
+                        )
+                    }
+                }
             }
         }
     }

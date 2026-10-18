@@ -45,6 +45,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -169,24 +170,35 @@ fun HomeScreen(viewModel: MainAppViewModel) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(
-                    text = "NoxMedia",
-                    color = Color.White,
-                    fontSize = 25.sp,
-                    fontFamily = NdotFont,
-                    letterSpacing = 1.sp
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Image(
+                    painter = painterResource(id = R.drawable.noxmedia_icon_trans),
+                    contentDescription = "NoxMedia Logo",
+                    modifier = Modifier.size(38.dp)
                 )
 
-                val displayName = if (session.firstName.isNotBlank()) session.firstName else "Name"
-                val usernameDisplay = if (session.username.isNotBlank()) "@${session.username}" else "@USERNAME"
-                Text(
-                    text = "$displayName . $usernameDisplay",
-                    color = Color(0xFF7E8088),
-                    fontSize = 11.5.sp,
-                    fontFamily = NdotFont,
-                    letterSpacing = 0.5.sp
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(
+                        text = "NoxMedia",
+                        color = Color.White,
+                        fontSize = 25.sp,
+                        fontFamily = NdotFont,
+                        letterSpacing = 1.sp
+                    )
+
+                    val displayName = if (session.firstName.isNotBlank()) session.firstName else "Name"
+                    val usernameDisplay = if (session.username.isNotBlank()) "@${session.username}" else "@USERNAME"
+                    Text(
+                        text = "$displayName . $usernameDisplay",
+                        color = Color(0xFF7E8088),
+                        fontSize = 11.5.sp,
+                        fontFamily = NdotFont,
+                        letterSpacing = 0.5.sp
+                    )
+                }
             }
 
             // User Profile Photo or Fallback Concentric Ring Glyph
