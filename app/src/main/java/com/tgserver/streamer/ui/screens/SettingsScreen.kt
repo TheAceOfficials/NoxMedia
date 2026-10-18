@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.sp
 import com.tgserver.streamer.theme.*
 import com.tgserver.streamer.ui.MainAppViewModel
 import com.tgserver.streamer.ui.components.*
+import com.tgserver.streamer.update.UpdateUiState
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Locale
@@ -51,6 +52,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
     val coroutineScope = rememberCoroutineScope()
     val session by viewModel.session.collectAsState()
     val config by viewModel.config.collectAsState()
+    val updateState by viewModel.updateState.collectAsState()
 
     // Form inputs state synced with config
     var tmdbKeyInput by remember(config.tmdbApiKey) { mutableStateOf(config.tmdbApiKey) }
@@ -92,6 +94,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
     var expandedStorage by remember { mutableStateOf(false) }
     var expandedAutomation by remember { mutableStateOf(false) }
     var expandedBackup by remember { mutableStateOf(false) }
+    var expandedUpdates by remember { mutableStateOf(false) }
 
     // Dialogs state
     var showLogoutDialog by remember { mutableStateOf(false) }
@@ -1295,6 +1298,191 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                             Icon(Icons.Default.Upload, null, tint = TextPrimary, modifier = Modifier.size(16.dp))
                         }
                     )
+                }
+            }
+
+            // ==================== 9. APP UPDATES ====================
+            val updateSubtitle = when (val s = updateState) {
+                is UpdateUiState.Available -> "Update available: ${s.info.versionTag}"
+                is UpdateUiState.Downloading -> "Downloading update..."
+                is UpdateUiState.ReadyToInstall -> "Downloaded • Ready to install"
+                is UpdateUiState.UpToDate -> "Up to date (v${s.currentVersion})"
+                is UpdateUiState.Checking -> "Checking for updates..."
+                is UpdateUiState.Error -> "Check failed"
+                else -> "v${viewModel.getAppVersion()} • ${viewModel.getDeviceArchitecture()}"
+            }
+
+            MinimalSettingsCard(
+                icon = Icons.Default.SystemUpdate,
+                title = "App & Updates",
+                subtitle = updateSubtitle,
+                isExpanded = expandedUpdates,
+                onToggleExpand = { expandedUpdates = !expandedUpdates }
+            ) {
+                // Version & Architecture details
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "Installed Version",
+                            color = TextSecondary,
+                            fontSize = 12.sp
+                        )
+                        Text(
+                            text = "v${viewModel.getAppVersion()}",
+                            color = TextPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = "Architecture",
+                            color = TextSecondary,
+                            fontSize = 12.sp
+                        )
+                        Text(
+                            text = viewModel.getDeviceArchitecture(),
+                            color = TextPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+                Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(Color(0xFF22242D)))
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Status view & Actions
+                when (val state = updateState) {
+                    is UpdateUiState.Available -> {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    NothingDotBadge(text = "NEW BUILD", dotColor = StatusGreen, textColor = StatusGreen)
+                                    Text(
+                                        text = state.info.versionTag,
+                                        color = TextPrimary,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Text(
+                                    text = state.info.formattedSize,
+                                    color = TextSecondary,
+                                    fontSize = 12.sp
+                                )
+                            }
+
+                            if (state.info.changelog.isNotBlank()) {
+                                Text(
+                                    text = state.info.changelog.take(200),
+                                    color = TextSecondary,
+                                    fontSize = 11.sp,
+                                    lineHeight = 15.sp,
+                                    maxLines = 3,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            NothingPillButton(
+                                text = "Download & Install Update",
+                                onClick = { viewModel.startDownloadUpdate(state.info) },
+                                variant = NothingButtonVariant.Primary,
+                                height = 40.dp,
+                                modifier = Modifier.fillMaxWidth(),
+                                leadingIcon = {
+                                    Icon(Icons.Default.Download, null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                                }
+                            )
+                        }
+                    }
+                    is UpdateUiState.Downloading -> {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            LinearProgressIndicator(
+                                progress = { state.progress },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(6.dp)
+                                    .clip(RoundedCornerShape(3.dp)),
+                                color = StatusGreen,
+                                trackColor = Color(0xFF26262E)
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                val downloadedMb = state.downloadedBytes.toDouble() / (1024.0 * 1024.0)
+                                val totalMb = state.totalBytes.toDouble() / (1024.0 * 1024.0)
+                                Text(
+                                    text = String.format(Locale.US, "%.1f / %.1f MB", downloadedMb, totalMb),
+                                    color = TextSecondary,
+                                    fontSize = 11.sp
+                                )
+                                Text(
+                                    text = "${(state.progress * 100).toInt()}%",
+                                    color = StatusGreen,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                    is UpdateUiState.ReadyToInstall -> {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(
+                                text = "✓ APK downloaded successfully. Ready to install.",
+                                color = StatusGreen,
+                                fontSize = 12.sp
+                            )
+                            NothingPillButton(
+                                text = "Install Now",
+                                onClick = { viewModel.installDownloadedApk(state.apkFile) },
+                                variant = NothingButtonVariant.Primary,
+                                height = 40.dp,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                    else -> {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (updateState is UpdateUiState.UpToDate) "You are on the latest version ✓"
+                                       else if (updateState is UpdateUiState.Error) "Could not connect to GitHub"
+                                       else "Check GitHub Releases for new APK",
+                                color = TextSecondary,
+                                fontSize = 11.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            NothingPillButton(
+                                text = if (updateState is UpdateUiState.Checking) "Checking..." else "Check Now",
+                                onClick = { viewModel.checkForAppUpdate(manual = true) },
+                                variant = NothingButtonVariant.Secondary,
+                                height = 34.dp,
+                                enabled = updateState !is UpdateUiState.Checking,
+                                modifier = Modifier.wrapContentWidth()
+                            )
+                        }
+                    }
                 }
             }
 

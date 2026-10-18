@@ -46,6 +46,11 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import com.tgserver.streamer.ui.components.AppUpdateBanner
+import com.tgserver.streamer.ui.components.AppUpdateDialog
+import com.tgserver.streamer.ui.components.TopBarUpdateBadge
+import com.tgserver.streamer.update.AppReleaseInfo
+import com.tgserver.streamer.update.UpdateUiState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -100,6 +105,11 @@ fun HomeScreen(viewModel: MainAppViewModel) {
             isAwakening = false
         }
     }
+
+    // In-App Updater state
+    val updateState by viewModel.updateState.collectAsState()
+    val isUpdateDismissed by viewModel.isUpdateDismissed.collectAsState()
+    var showUpdateDialog by remember { mutableStateOf(false) }
 
     // Library counts
     val moviesCount = remember(media) {
@@ -201,10 +211,55 @@ fun HomeScreen(viewModel: MainAppViewModel) {
                 }
             }
 
-            // User Profile Photo or Fallback Concentric Ring Glyph
-            ProfileAvatar(
-                photoPath = session.avatarUrl,
-                modifier = Modifier.size(46.dp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // If update is available, show glowing top pill
+                val updateInfo = when (val s = updateState) {
+                    is UpdateUiState.Available -> s.info
+                    is UpdateUiState.Downloading -> AppReleaseInfo(s.fileName, "", "", "", "", s.fileName, s.totalBytes, "", true)
+                    is UpdateUiState.ReadyToInstall -> s.info
+                    else -> null
+                }
+
+                if (updateInfo != null) {
+                    TopBarUpdateBadge(
+                        versionTag = updateInfo.versionTag.ifBlank { "NEW" },
+                        onClick = { showUpdateDialog = true }
+                    )
+                }
+
+                // User Profile Photo or Fallback Concentric Ring Glyph
+                ProfileAvatar(
+                    photoPath = session.avatarUrl,
+                    modifier = Modifier.size(46.dp)
+                )
+            }
+        }
+
+        // IN-APP UPDATE PROMPT BANNER
+        val activeUpdate = when (val s = updateState) {
+            is UpdateUiState.Available -> s.info
+            is UpdateUiState.Downloading -> AppReleaseInfo("NEW", "Update", "", "", "", s.fileName, s.totalBytes, "Compatible", true)
+            is UpdateUiState.ReadyToInstall -> s.info
+            else -> null
+        }
+
+        if (activeUpdate != null && !isUpdateDismissed) {
+            AppUpdateBanner(
+                info = activeUpdate,
+                state = updateState,
+                onActionClick = {
+                    if (updateState is UpdateUiState.ReadyToInstall) {
+                        viewModel.installDownloadedApk((updateState as UpdateUiState.ReadyToInstall).apkFile)
+                    } else if (updateState is UpdateUiState.Available) {
+                        viewModel.startDownloadUpdate((updateState as UpdateUiState.Available).info)
+                    } else {
+                        showUpdateDialog = true
+                    }
+                },
+                onDismiss = { viewModel.dismissUpdateBanner() }
             )
         }
 
@@ -569,6 +624,24 @@ fun HomeScreen(viewModel: MainAppViewModel) {
 
         // Bottom clearance for floating liquid navbar
         Spacer(modifier = Modifier.height(72.dp))
+    }
+
+    // App Update Dialog with Changelog & Download progress
+    val dialogInfo = when (val s = updateState) {
+        is UpdateUiState.Available -> s.info
+        is UpdateUiState.ReadyToInstall -> s.info
+        else -> null
+    }
+
+    if (showUpdateDialog && dialogInfo != null) {
+        AppUpdateDialog(
+            info = dialogInfo,
+            state = updateState,
+            currentVersion = viewModel.getAppVersion(),
+            onDownloadClick = { viewModel.startDownloadUpdate(dialogInfo) },
+            onInstallClick = { file -> viewModel.installDownloadedApk(file) },
+            onDismiss = { showUpdateDialog = false }
+        )
     }
 }
 

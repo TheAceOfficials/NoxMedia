@@ -33,6 +33,10 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import com.tgserver.streamer.update.AppReleaseInfo
+import com.tgserver.streamer.update.AppUpdateManager
+import com.tgserver.streamer.update.UpdateUiState
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 enum class AppTab {
@@ -56,6 +60,11 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
 
     /** Tracks whether splash screen has completed during this app session (survives rotation) */
     var isSplashCompleted by mutableStateOf(false)
+
+    /** In-App Auto Updater instance */
+    val updateManager = AppUpdateManager(application.applicationContext)
+    val updateState: StateFlow<UpdateUiState> = updateManager.updateState
+    val isUpdateDismissed: StateFlow<Boolean> = updateManager.isDismissed
 
     private val tgClient: TelegramClientManager =
         StreamerForegroundService.activeTgClient ?: TelegramClientManager(application.applicationContext)
@@ -135,9 +144,34 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             if (session.value.isLoggedIn) {
                 tgClient.refreshUserProfile()
             }
+            // Auto-check for GitHub app updates in background
+            updateManager.checkForUpdate(manual = false)
         }
         startTelemetryLoop()
     }
+
+    fun checkForAppUpdate(manual: Boolean = true) {
+        viewModelScope.launch {
+            updateManager.checkForUpdate(manual = manual)
+        }
+    }
+
+    fun startDownloadUpdate(info: AppReleaseInfo) {
+        viewModelScope.launch {
+            updateManager.downloadAndInstall(info)
+        }
+    }
+
+    fun dismissUpdateBanner() {
+        updateManager.dismissBanner()
+    }
+
+    fun installDownloadedApk(file: File) {
+        updateManager.installApk(getApplication(), file)
+    }
+
+    fun getAppVersion(): String = updateManager.getAppCurrentVersion()
+    fun getDeviceArchitecture(): String = updateManager.getDeviceArchitecture()
 
     fun refreshUserProfile() {
         viewModelScope.launch(Dispatchers.IO) {
