@@ -239,12 +239,10 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = if (session.username.isNotBlank()) "@${session.username} • Account info & session"
-                                           else "Account info, session and settings",
+                                    text = "Account Information",
                                     color = Color(0xFF8E909B),
                                     fontSize = 12.5.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    fontWeight = FontWeight.Normal
                                 )
                             }
                         }
@@ -307,12 +305,23 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                             AccountDetailRow(
                                 label = "Status",
                                 customValue = {
-                                    NothingDotBadge(
-                                        text = if (session.isLoggedIn) "CONNECTED" else "OFFLINE",
-                                        dotColor = if (session.isLoggedIn) StatusGreen else StatusRed,
-                                        backgroundColor = if (session.isLoggedIn) Color(0x1F34C759) else Color(0x1FFF453A),
-                                        textColor = if (session.isLoggedIn) StatusGreen else StatusRed
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(7.dp)
+                                                .clip(CircleShape)
+                                                .background(if (session.isLoggedIn) Color(0xFF34C759) else Color(0xFFFF453A))
+                                        )
+                                        Text(
+                                            text = if (session.isLoggedIn) "Connected" else "Offline",
+                                            color = if (session.isLoggedIn) Color(0xFF34C759) else Color(0xFFFF453A),
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
                                 }
                             )
 
@@ -498,7 +507,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         },
                         label = "TMDB KEY (V3)",
                         badgeText = "MOVIES & SHOWS",
-                        placeholder = "Paste your TMDB API Key...",
+                        placeholder = "Paste your TMDB API Key",
                         isMonospace = true,
                         singleLine = true,
                         isError = tmdbKeyError != null,
@@ -588,7 +597,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         },
                         label = "TVDB KEY (V4)",
                         badgeText = "SERIES & ANIME",
-                        placeholder = "Paste your TVDB API Key...",
+                        placeholder = "Paste your TVDB API Key",
                         isMonospace = true,
                         singleLine = true,
                         isError = tvdbKeyError != null,
@@ -644,7 +653,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 Spacer(modifier = Modifier.height(14.dp))
 
                 NothingPillButton(
-                    text = if (isVerifyingKeys) "Verifying..." else if (isEditingTmdb || isEditingTvdb || config.tmdbApiKey.isBlank() || config.tvdbApiKey.isBlank()) "Save & Verify Provider Keys →" else "Re-verify Provider Keys →",
+                    text = if (isVerifyingKeys) "Verifying" else if (isEditingTmdb || isEditingTvdb || config.tmdbApiKey.isBlank() || config.tvdbApiKey.isBlank()) "Save & Verify Provider Keys →" else "Re-verify Provider Keys →",
                     isLoading = isVerifyingKeys,
                     onClick = {
                         coroutineScope.launch {
@@ -675,17 +684,71 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
             }
 
             // ==================== 4. ARTWORKS ====================
+            var showArtworkInfo by remember { mutableStateOf(false) }
+
             MinimalSettingsCard(
                 icon = Icons.Default.Image,
                 title = "Artworks",
-                subtitle = if (posterUrlInput.isNotBlank()) "Custom template active" else "Default TMDB / Cinemeta",
+                subtitle = if (posterUrlInput.isNotBlank()) "Custom template" else "TMDB & Cinemeta",
                 isExpanded = expandedArtworks,
                 onToggleExpand = { expandedArtworks = !expandedArtworks }
             ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { showArtworkInfo = !showArtworkInfo }
+                            .padding(vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "Poster Template",
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = "Details",
+                            tint = if (showArtworkInfo) Color.White else TextTertiary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+
+                AnimatedVisibility(
+                    visible = showArtworkInfo,
+                    enter = fadeIn(tween(150)) + expandVertically(),
+                    exit = fadeOut(tween(120)) + shrinkVertically()
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp, bottom = 6.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF161820))
+                            .border(1.dp, Color(0xFF242732), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            text = "Custom poster URL template for movie and series cards. Use {id} as the placeholder for IMDb or TMDB ID. Leave empty to automatically use official TMDB & Cinemeta high-resolution posters.",
+                            color = Color(0xFFA0A3B0),
+                            fontSize = 11.5.sp,
+                            lineHeight = 16.sp
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
                 NothingTextField(
                     value = posterUrlInput,
                     onValueChange = { posterUrlInput = it },
-                    label = "POSTER TEMPLATE URL",
                     placeholder = "https://custom-posters.domain/template/{id}",
                     isMonospace = true,
                     singleLine = true,
@@ -703,13 +766,6 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     } else null
                 )
 
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "Leave empty to use official high-res TMDB & Cinemeta artwork.",
-                    color = TextTertiary,
-                    fontSize = 11.sp
-                )
-
                 Spacer(modifier = Modifier.height(12.dp))
 
                 NothingPillButton(
@@ -722,13 +778,70 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
             }
 
             // ==================== 5. SERVER ====================
+            var showServerEngineInfo by remember { mutableStateOf(false) }
+            var showRemoteAccessInfo by remember { mutableStateOf(false) }
+
             MinimalSettingsCard(
                 icon = Icons.Default.Dns,
                 title = "Server",
-                subtitle = "Port $portInput • Cache ${cacheMbInput}MB" + (if (autoSleepEnabled) " • Sleep ${if (autoSleepMinutes >= 60) "${autoSleepMinutes / 60}h" else "${autoSleepMinutes}m"}" else ""),
+                subtitle = "Port $portInput • Cache ${cacheMbInput}MB",
                 isExpanded = expandedServer,
                 onToggleExpand = { expandedServer = !expandedServer }
             ) {
+                // Engine Pipeline Info Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { showServerEngineInfo = !showServerEngineInfo }
+                            .padding(vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "Engine Pipeline",
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = "Details",
+                            tint = if (showServerEngineInfo) Color.White else TextTertiary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+
+                AnimatedVisibility(
+                    visible = showServerEngineInfo,
+                    enter = fadeIn(tween(150)) + expandVertically(),
+                    exit = fadeOut(tween(120)) + shrinkVertically()
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp, bottom = 6.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF161820))
+                            .border(1.dp, Color(0xFF242732), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            text = "Cache MB: -1 for unlimited disk cache, 0 to disable. Buffer MB: In-memory prefetch buffer for smooth video playback. Port: Local streaming port (default 7788).",
+                            color = Color(0xFFA0A3B0),
+                            fontSize = 11.5.sp,
+                            lineHeight = 16.sp
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
                 // Aligned Cache MB, Buffer MB, and Local Port Row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -780,13 +893,6 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     }
                 }
 
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "-1 = unlimited cache, 0 = disabled. Smaller values save local storage.",
-                    color = TextTertiary,
-                    fontSize = 11.sp
-                )
-
                 Spacer(modifier = Modifier.height(12.dp))
 
                 // Action Buttons Row: Save & Restore Defaults
@@ -827,12 +933,65 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(Color(0xFF22242D)))
                 Spacer(modifier = Modifier.height(14.dp))
 
+                // Remote Access URL Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { showRemoteAccessInfo = !showRemoteAccessInfo }
+                            .padding(vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "Remote Access URL",
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = "Details",
+                            tint = if (showRemoteAccessInfo) Color.White else TextTertiary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                    NothingBadge(text = "OPTIONAL", variant = NothingBadgeVariant.Muted)
+                }
+
+                AnimatedVisibility(
+                    visible = showRemoteAccessInfo,
+                    enter = fadeIn(tween(150)) + expandVertically(),
+                    exit = fadeOut(tween(120)) + shrinkVertically()
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp, bottom = 6.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF161820))
+                            .border(1.dp, Color(0xFF242732), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            text = "Public domain, reverse proxy, or Tailscale address used by external players to reach your TG-Server remotely outside your home Wi-Fi network.",
+                            color = Color(0xFFA0A3B0),
+                            fontSize = 11.5.sp,
+                            lineHeight = 16.sp
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
                 // Remote Public IP / Tunnel URL
                 NothingTextField(
                     value = remoteUrlInput,
                     onValueChange = { remoteUrlInput = it },
-                    label = "REMOTE ACCESS URL",
-                    badgeText = "OPTIONAL",
                     placeholder = "https://noxmedia.my-domain.ts.net",
                     isMonospace = true,
                     singleLine = true
@@ -923,57 +1082,41 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     mutableStateOf(powerManager?.isIgnoringBatteryOptimizations(context.packageName) == true)
                 }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(
-                                text = "Screen-Off Mode",
-                                color = TextPrimary,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                            NothingDotBadge(
-                                text = if (isIgnoringBattery) "ACTIVE" else "OPTIMIZED",
-                                dotColor = if (isIgnoringBattery) StatusGreen else AccentYellow,
-                                textColor = if (isIgnoringBattery) StatusGreen else AccentYellow
+                SettingActionRow(
+                    title = "Screen-Off Mode",
+                    description = if (isIgnoringBattery) "Battery optimization ignored. Background streaming will not disconnect even when device screen is turned off."
+                                  else "Android Doze can terminate background streaming when the screen is locked. Tap Unrestrict to permit uninterrupted background streaming.",
+                    badge = {
+                        NothingDotBadge(
+                            text = if (isIgnoringBattery) "ACTIVE" else "OPTIMIZED",
+                            dotColor = if (isIgnoringBattery) StatusGreen else AccentYellow,
+                            textColor = if (isIgnoringBattery) StatusGreen else AccentYellow
+                        )
+                    },
+                    action = {
+                        if (!isIgnoringBattery) {
+                            NothingPillButton(
+                                text = "Unrestrict",
+                                onClick = {
+                                    try {
+                                        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                            data = Uri.parse("package:${context.packageName}")
+                                        }
+                                        context.startActivity(intent)
+                                    } catch (_: Exception) {
+                                        try {
+                                            val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                                            context.startActivity(intent)
+                                        } catch (_: Exception) {}
+                                    }
+                                },
+                                variant = NothingButtonVariant.Primary,
+                                height = 32.dp,
+                                modifier = Modifier.wrapContentWidth()
                             )
                         }
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = if (isIgnoringBattery) "Battery optimization ignored. Background streaming will not disconnect."
-                            else "Android Doze can cut Wi-Fi when screen is off.",
-                            color = TextTertiary,
-                            fontSize = 11.sp,
-                            lineHeight = 15.sp
-                        )
                     }
-
-                    if (!isIgnoringBattery) {
-                        NothingPillButton(
-                            text = "Unrestrict",
-                            onClick = {
-                                try {
-                                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                                        data = Uri.parse("package:${context.packageName}")
-                                    }
-                                    context.startActivity(intent)
-                                } catch (_: Exception) {
-                                    try {
-                                        val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-                                        context.startActivity(intent)
-                                    } catch (_: Exception) {}
-                                }
-                            },
-                            variant = NothingButtonVariant.Primary,
-                            height = 32.dp,
-                            modifier = Modifier.wrapContentWidth()
-                        )
-                    }
-                }
+                )
 
                 Spacer(modifier = Modifier.height(14.dp))
                 Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(Color(0xFF22242D)))
@@ -1108,218 +1251,143 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 onToggleExpand = { expandedStorage = !expandedStorage }
             ) {
                 // 1. Duplicate Media Files
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
-                        Text(
-                            text = "Duplicate Media",
-                            color = TextPrimary,
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        if (duplicateScanCount != null) {
-                            Spacer(modifier = Modifier.height(4.dp))
+                SettingActionRow(
+                    title = "Duplicate Media",
+                    description = "Scans library for duplicate entries with identical file size and hash, and lets you safely delete redundant records.",
+                    badge = if (duplicateScanCount != null) {
+                        {
                             NothingDotBadge(
                                 text = if (duplicateScanCount == 0) "0 CLEAN" else "$duplicateScanCount DUPES",
                                 dotColor = if (duplicateScanCount == 0) StatusGreen else StatusAmber,
                                 textColor = if (duplicateScanCount == 0) StatusGreen else StatusAmber
                             )
                         }
-                        Spacer(modifier = Modifier.height(3.dp))
-                        Text(
-                            text = if (duplicateScanCount == null) "Scan catalog for duplicate entries."
-                            else if (duplicateScanCount == 0) "Catalog is clean. No duplicates found."
-                            else "$duplicateScanCount duplicates detected.",
-                            color = TextSecondary,
-                            fontSize = 11.sp,
-                            lineHeight = 14.sp
-                        )
-                    }
+                    } else null,
+                    action = {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            NothingPillButton(
+                                text = "Scan",
+                                onClick = {
+                                    val res = viewModel.scanDuplicates()
+                                    duplicateScanCount = res
+                                    Toast.makeText(context, if (res == 0) "✓ Catalog clean: 0 duplicates" else "⚠ Found $res duplicate entries", Toast.LENGTH_SHORT).show()
+                                },
+                                variant = NothingButtonVariant.Ghost,
+                                height = 32.dp,
+                                modifier = Modifier.wrapContentWidth()
+                            )
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        NothingPillButton(
-                            text = "Scan",
-                            onClick = {
-                                val res = viewModel.scanDuplicates()
-                                duplicateScanCount = res
-                                Toast.makeText(context, if (res == 0) "✓ Catalog clean: 0 duplicates" else "⚠ Found $res duplicate entries", Toast.LENGTH_SHORT).show()
-                            },
-                            variant = NothingButtonVariant.Ghost,
-                            height = 32.dp,
-                            modifier = Modifier.wrapContentWidth()
-                        )
-
-                        NothingPillButton(
-                            text = "Delete",
-                            onClick = {
-                                val res = viewModel.deleteDuplicates()
-                                duplicateScanCount = 0
-                                Toast.makeText(context, if (res > 0) "✓ Deleted $res duplicate items" else "✓ Catalog clean: 0 duplicates", Toast.LENGTH_SHORT).show()
-                            },
-                            variant = if (duplicateScanCount != null && duplicateScanCount!! > 0) NothingButtonVariant.Primary else NothingButtonVariant.Secondary,
-                            height = 32.dp,
-                            modifier = Modifier.wrapContentWidth()
-                        )
+                            NothingPillButton(
+                                text = "Delete",
+                                onClick = {
+                                    val res = viewModel.deleteDuplicates()
+                                    duplicateScanCount = 0
+                                    Toast.makeText(context, if (res > 0) "✓ Deleted $res duplicate items" else "✓ Catalog clean: 0 duplicates", Toast.LENGTH_SHORT).show()
+                                },
+                                variant = if (duplicateScanCount != null && duplicateScanCount!! > 0) NothingButtonVariant.Primary else NothingButtonVariant.Secondary,
+                                height = 32.dp,
+                                modifier = Modifier.wrapContentWidth()
+                            )
+                        }
                     }
-                }
+                )
 
                 Spacer(modifier = Modifier.height(12.dp))
                 Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(Color(0xFF22242D)))
                 Spacer(modifier = Modifier.height(12.dp))
 
                 // 2. Dead Entries
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
-                        Text(
-                            text = "Dead Entries",
-                            color = TextPrimary,
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        if (deadFilesScanCount != null) {
-                            Spacer(modifier = Modifier.height(4.dp))
+                SettingActionRow(
+                    title = "Dead Entries",
+                    description = "Scans library for broken or deleted messages in Telegram channels, and purges inaccessible files.",
+                    badge = if (deadFilesScanCount != null) {
+                        {
                             NothingDotBadge(
                                 text = if (deadFilesScanCount == 0) "0 DEAD" else "$deadFilesScanCount DEAD",
                                 dotColor = if (deadFilesScanCount == 0) StatusGreen else StatusRed,
                                 textColor = if (deadFilesScanCount == 0) StatusGreen else StatusRed
                             )
                         }
-                        Spacer(modifier = Modifier.height(3.dp))
-                        Text(
-                            text = if (deadFilesScanCount == null) "Scan library for broken or deleted messages."
-                            else if (deadFilesScanCount == 0) "All indexed files are online and valid."
-                            else "$deadFilesScanCount broken files detected.",
-                            color = TextSecondary,
-                            fontSize = 11.sp,
-                            lineHeight = 14.sp
-                        )
-                    }
+                    } else null,
+                    action = {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            NothingPillButton(
+                                text = if (isScanningDeadFiles) "Scanning" else "Scan",
+                                onClick = {
+                                    if (isScanningDeadFiles) return@NothingPillButton
+                                    coroutineScope.launch {
+                                        isScanningDeadFiles = true
+                                        val res = viewModel.scanDeadFilesRemote()
+                                        deadFilesScanCount = res
+                                        isScanningDeadFiles = false
+                                        Toast.makeText(
+                                            context,
+                                            if (res == 0) "✓ All indexed media files verified & online" else "⚠ Detected $res deleted or broken files",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                },
+                                variant = NothingButtonVariant.Ghost,
+                                height = 32.dp,
+                                modifier = Modifier.wrapContentWidth()
+                            )
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        NothingPillButton(
-                            text = if (isScanningDeadFiles) "Scanning..." else "Scan",
-                            onClick = {
-                                if (isScanningDeadFiles) return@NothingPillButton
-                                coroutineScope.launch {
-                                    isScanningDeadFiles = true
-                                    val res = viewModel.scanDeadFilesRemote()
-                                    deadFilesScanCount = res
-                                    isScanningDeadFiles = false
-                                    Toast.makeText(
-                                        context,
-                                        if (res == 0) "✓ All indexed media files verified & online" else "⚠ Detected $res deleted or broken files",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                }
-                            },
-                            variant = NothingButtonVariant.Ghost,
-                            height = 32.dp,
-                            modifier = Modifier.wrapContentWidth()
-                        )
-
-                        NothingPillButton(
-                            text = "Purge",
-                            onClick = {
-                                val res = viewModel.purgeDeadFiles()
-                                deadFilesScanCount = 0
-                                Toast.makeText(context, if (res > 0) "✓ Purged $res dead entries" else "✓ Catalog clean: 0 dead files", Toast.LENGTH_SHORT).show()
-                            },
-                            variant = if (deadFilesScanCount != null && deadFilesScanCount!! > 0) NothingButtonVariant.Primary else NothingButtonVariant.Secondary,
-                            height = 32.dp,
-                            modifier = Modifier.wrapContentWidth()
-                        )
+                            NothingPillButton(
+                                text = "Purge",
+                                onClick = {
+                                    val res = viewModel.purgeDeadFiles()
+                                    deadFilesScanCount = 0
+                                    Toast.makeText(context, if (res > 0) "✓ Purged $res dead entries" else "✓ Catalog clean: 0 dead files", Toast.LENGTH_SHORT).show()
+                                },
+                                variant = if (deadFilesScanCount != null && deadFilesScanCount!! > 0) NothingButtonVariant.Primary else NothingButtonVariant.Secondary,
+                                height = 32.dp,
+                                modifier = Modifier.wrapContentWidth()
+                            )
+                        }
                     }
-                }
+                )
 
                 Spacer(modifier = Modifier.height(12.dp))
                 Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(Color(0xFF22242D)))
                 Spacer(modifier = Modifier.height(12.dp))
 
                 // 3. Clear Cache
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
-                        Text(
-                            text = "App Cache",
-                            color = TextPrimary,
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Freed image & temporary stream data (${formatBytes(cacheSizeBytes)}).",
-                            color = TextSecondary,
-                            fontSize = 11.sp
+                SettingActionRow(
+                    title = "App Cache",
+                    description = "Image cache and temporary streaming chunks (${formatBytes(cacheSizeBytes)}). Clearing cache frees storage without affecting your saved media catalog.",
+                    action = {
+                        NothingPillButton(
+                            text = "Clear Cache",
+                            onClick = {
+                                val freed = viewModel.clearAppCache()
+                                cacheSizeBytes = viewModel.getAppCacheSizeBytes()
+                                Toast.makeText(context, "✓ Cache cleared (${formatBytes(freed)} freed)", Toast.LENGTH_SHORT).show()
+                            },
+                            variant = NothingButtonVariant.Secondary,
+                            height = 32.dp,
+                            modifier = Modifier.wrapContentWidth()
                         )
                     }
-
-                    NothingPillButton(
-                        text = "Clear Cache",
-                        onClick = {
-                            val freed = viewModel.clearAppCache()
-                            cacheSizeBytes = viewModel.getAppCacheSizeBytes()
-                            Toast.makeText(context, "✓ Cache cleared (${formatBytes(freed)} freed)", Toast.LENGTH_SHORT).show()
-                        },
-                        variant = NothingButtonVariant.Secondary,
-                        height = 32.dp,
-                        modifier = Modifier.wrapContentWidth()
-                    )
-                }
+                )
 
                 Spacer(modifier = Modifier.height(12.dp))
                 Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(Color(0xFF22242D)))
                 Spacer(modifier = Modifier.height(12.dp))
 
                 // 4. Diagnostic Logs Screen
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { showLogsScreen = true }
-                        .padding(vertical = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(
-                                text = "Diagnostic Logs",
-                                color = TextPrimary,
-                                fontSize = 13.5.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            NothingDotBadge(
-                                text = "LOGCAT",
-                                dotColor = AccentApple,
-                                textColor = TextSecondary
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Inspect, search, copy, share, and clear real-time system logs.",
-                            color = TextSecondary,
-                            fontSize = 11.sp
+                SettingActionRow(
+                    title = "Diagnostic Logs",
+                    description = "Inspect, search, copy, share, and clear real-time system logs and engine streaming activity.",
+                    action = {
+                        NothingPillButton(
+                            text = "View Logs →",
+                            onClick = { showLogsScreen = true },
+                            variant = NothingButtonVariant.Secondary,
+                            height = 32.dp,
+                            modifier = Modifier.wrapContentWidth()
                         )
                     }
-
-                    NothingPillButton(
-                        text = "View Logs →",
-                        onClick = { showLogsScreen = true },
-                        variant = NothingButtonVariant.Secondary,
-                        height = 32.dp,
-                        modifier = Modifier.wrapContentWidth()
-                    )
-                }
+                )
             }
 
             // ==================== 7. AUTOMATION ====================
@@ -1475,10 +1543,10 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
             // ==================== 9. APP UPDATES ====================
             val updateSubtitle = when (val s = updateState) {
                 is UpdateUiState.Available -> "Update available: ${s.info.versionTag}"
-                is UpdateUiState.Downloading -> "Downloading update..."
+                is UpdateUiState.Downloading -> "Downloading update"
                 is UpdateUiState.ReadyToInstall -> "Downloaded • Ready to install"
                 is UpdateUiState.UpToDate -> "Up to date (v${s.currentVersion})"
-                is UpdateUiState.Checking -> "Checking for updates..."
+                is UpdateUiState.Checking -> "Checking for updates"
                 is UpdateUiState.Error -> "Check failed"
                 else -> "v${viewModel.getAppVersion()} • ${viewModel.getDeviceArchitecture()}"
             }
@@ -1645,7 +1713,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                             )
 
                             NothingPillButton(
-                                text = if (updateState is UpdateUiState.Checking) "Checking..." else "Check Now",
+                                text = if (updateState is UpdateUiState.Checking) "Checking" else "Check Now",
                                 onClick = { viewModel.checkForAppUpdate(manual = true) },
                                 variant = NothingButtonVariant.Secondary,
                                 height = 34.dp,
@@ -1658,17 +1726,20 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
             }
 
             // ==================== FOOTER ====================
-            Column(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 10.dp, bottom = 12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+                    .padding(top = 14.dp, bottom = 8.dp),
+                contentAlignment = Alignment.Center
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                Text(
+                    text = "Designed by The Ace",
+                    color = Color(0xFF6B7280),
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 0.3.sp,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(8.dp))
                         .clickable {
                             try {
                                 val intent = Intent(
@@ -1680,30 +1751,8 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                                 Toast.makeText(context, "Could not open Instagram link", Toast.LENGTH_SHORT).show()
                             }
                         }
-                        .padding(horizontal = 14.dp, vertical = 8.dp)
-                ) {
-                    Text(
-                        text = "Designed by",
-                        color = Color(0xFF6B7280),
-                        fontSize = 11.5.sp,
-                        fontFamily = FontFamily.Monospace,
-                        letterSpacing = 0.2.sp
-                    )
-                    Text(
-                        text = "The Ace",
-                        color = Color.White,
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = NdotFont,
-                        letterSpacing = 0.5.sp
-                    )
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-                        contentDescription = "Instagram link",
-                        tint = Color(0xFFE50914),
-                        modifier = Modifier.size(13.dp)
-                    )
-                }
+                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                )
             }
 
             Spacer(modifier = Modifier.height(36.dp))
@@ -2057,6 +2106,81 @@ private fun SettingToggleRow(
                 checked = checked,
                 onCheckedChange = onCheckedChange
             )
+        }
+
+        AnimatedVisibility(
+            visible = showInfo,
+            enter = fadeIn(tween(150)) + expandVertically(),
+            exit = fadeOut(tween(120)) + shrinkVertically()
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF161820))
+                    .border(1.dp, Color(0xFF242732), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 10.dp, vertical = 8.dp)
+            ) {
+                Text(
+                    text = description,
+                    color = Color(0xFFA0A3B0),
+                    fontSize = 11.5.sp,
+                    lineHeight = 16.sp
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Clean setting action row with title, optional badge, expandable info capsule on tap, and action controls.
+ */
+@Composable
+private fun SettingActionRow(
+    title: String,
+    description: String,
+    badge: (@Composable () -> Unit)? = null,
+    action: (@Composable () -> Unit)? = null
+) {
+    var showInfo by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable { showInfo = !showInfo }
+                    .padding(vertical = 2.dp)
+            ) {
+                Text(
+                    text = title,
+                    color = TextPrimary,
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                Icon(
+                    imageVector = Icons.Default.Info,
+                    contentDescription = "Details",
+                    tint = if (showInfo) Color.White else TextTertiary,
+                    modifier = Modifier.size(15.dp)
+                )
+                if (badge != null) {
+                    badge()
+                }
+            }
+
+            if (action != null) {
+                Spacer(modifier = Modifier.width(8.dp))
+                action()
+            }
         }
 
         AnimatedVisibility(

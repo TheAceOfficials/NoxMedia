@@ -525,7 +525,7 @@ fun AdaptiveScreenContainer(
 /**
  * Sleek Pill Toggle Switch (Inspired by Uiverse.io SelfMadeSystem design).
  * Elongated aspect ratio (212.5 / 84.5 ~ 2.51), smooth 0.5s ease-out transitions,
- * outer halo border, sliding thumb, and animated flipping vector glyph with haptic feedback.
+ * outer halo border, and clean sliding white thumb with haptic feedback.
  */
 @Composable
 fun NothingSwitch(
@@ -534,7 +534,7 @@ fun NothingSwitch(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     activeColor: Color = StatusGreen,
-    inactiveColor: Color = Color(0xFF232530)
+    inactiveColor: Color = Color(0xFF262833)
 ) {
     val haptic = LocalHapticFeedback.current
     val trackHeight = 22.dp
@@ -548,7 +548,6 @@ fun NothingSwitch(
     // 0.5s ease-out transition matching --a: 0.5s ease-out
     val animSpecColor = tween<Color>(durationMillis = 500, easing = FastOutSlowInEasing)
     val animSpecDp = tween<Dp>(durationMillis = 500, easing = FastOutSlowInEasing)
-    val animSpecFloat = tween<Float>(durationMillis = 500, easing = FastOutSlowInEasing)
 
     val thumbOffset by animateDpAsState(
         targetValue = if (checked) maxTravel else padding,
@@ -570,22 +569,10 @@ fun NothingSwitch(
         targetValue = when {
             !enabled -> Color(0xFF22242D)
             checked -> activeColor.copy(alpha = 0.35f)
-            else -> Color(0xFF363947)
+            else -> Color(0xFF383B4A)
         },
         animationSpec = animSpecColor,
         label = "switch_halo_border"
-    )
-
-    val scaleYAnim by animateFloatAsState(
-        targetValue = if (checked) -1f else 1f,
-        animationSpec = animSpecFloat,
-        label = "switch_scale_y"
-    )
-
-    val glyphProgress by animateFloatAsState(
-        targetValue = if (checked) 1f else 0f,
-        animationSpec = animSpecFloat,
-        label = "switch_glyph_progress"
     )
 
     Box(
@@ -604,51 +591,14 @@ fun NothingSwitch(
             },
         contentAlignment = Alignment.CenterStart
     ) {
-        // Sliding Thumb
+        // Clean tactile white thumb (SelfMadeSystem slider)
         Box(
             modifier = Modifier
                 .padding(start = thumbOffset)
                 .size(thumbSize)
                 .clip(CircleShape)
-                .background(Color.White),
-            contentAlignment = Alignment.Center
-        ) {
-            Canvas(
-                modifier = Modifier
-                    .size(10.dp)
-                    .graphicsLayer { scaleY = scaleYAnim }
-            ) {
-                val strokeWidthPx = 1.8.dp.toPx()
-                val glyphColor = if (checked) activeColor else Color(0xFF4A4D5C)
-
-                // Vector path reproducing the Uiverse SelfMadeSystem glyph:
-                // Smooth checkmark / curve that flips vertically when checked
-                val path = Path().apply {
-                    val w = size.width
-                    val h = size.height
-                    if (glyphProgress > 0.5f) {
-                        // Checkmark curve
-                        moveTo(w * 0.15f, h * 0.52f)
-                        lineTo(w * 0.42f, h * 0.78f)
-                        lineTo(w * 0.85f, h * 0.25f)
-                    } else {
-                        // Minus / curved dash
-                        moveTo(w * 0.2f, h * 0.5f)
-                        lineTo(w * 0.8f, h * 0.5f)
-                    }
-                }
-
-                drawPath(
-                    path = path,
-                    color = glyphColor,
-                    style = Stroke(
-                        width = strokeWidthPx,
-                        cap = StrokeCap.Round,
-                        join = StrokeJoin.Round
-                    )
-                )
-            }
-        }
+                .background(Color.White)
+        )
     }
 }
 
