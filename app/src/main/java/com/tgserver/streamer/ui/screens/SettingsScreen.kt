@@ -958,7 +958,11 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                             modifier = Modifier.size(14.dp)
                         )
                     }
-                    NothingBadge(text = "OPTIONAL", variant = NothingBadgeVariant.Muted)
+                    NothingDotBadge(
+                        text = "OPTIONAL",
+                        dotColor = TextTertiary,
+                        textColor = TextTertiary
+                    )
                 }
 
                 AnimatedVisibility(
