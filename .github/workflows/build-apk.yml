@@ -48,8 +48,28 @@ jobs:
       - name: Grant Execute Permission for Gradlew
         run: chmod +x gradlew
 
+      - name: Resolve Version Info
+        id: versioning
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            # When you push a git tag like v2.0 or v3.1.5
+            TAG_NAME="${{ github.ref_name }}"
+            VER_NAME="${TAG_NAME#v}"
+            echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
+            echo "version_name=${VER_NAME}" >> $GITHUB_OUTPUT
+            echo "release_title=NoxMedia ${TAG_NAME}" >> $GITHUB_OUTPUT
+          else
+            # Continuous push: reads baseVersion from app/build.gradle.kts (e.g. 1.0)
+            BASE_VER=$(grep -m1 'val baseVersion =' app/build.gradle.kts | cut -d '"' -f2 || echo "1.0")
+            [ -z "$BASE_VER" ] && BASE_VER="1.0"
+            FULL_VER="${BASE_VER}.${{ github.run_number }}"
+            echo "tag_name=v${FULL_VER}" >> $GITHUB_OUTPUT
+            echo "version_name=${FULL_VER}" >> $GITHUB_OUTPUT
+            echo "release_title=NoxMedia v${FULL_VER}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Build All APKs
-        run: ./gradlew assembleArm64Debug assembleArmv7Debug assembleUniversalDebug --stacktrace --no-daemon
+        run: ./gradlew assembleArm64Debug assembleArmv7Debug assembleUniversalDebug -PBUILD_NUMBER=${{ github.run_number }} -PVERSION_NAME=${{ steps.versioning.outputs.version_name }} --stacktrace --no-daemon
 
       - name: Prepare Output APKs
         run: |
@@ -59,22 +79,15 @@ jobs:
           cp app/build/outputs/apk/universal/debug/app-universal-debug.apk output/NoxMedia-universal.apk
           ls -lh output/
 
-      - name: Clean up old 'latest' release and tag
-        if: "!startsWith(github.ref, 'refs/tags/v')"
-        run: |
-          gh release delete latest --yes --cleanup-tag || true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Publish to GitHub Releases
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'latest' }}
-          name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'NoxMedia Latest APK' }}
+          tag_name: ${{ steps.versioning.outputs.tag_name }}
+          name: ${{ steps.versioning.outputs.release_title }}
           target_commitish: ${{ github.sha }}
           body: |
-            Direct APK downloads for NoxMedia Mobile Streamer engine:
+            Direct APK downloads for ${{ steps.versioning.outputs.release_title }}:
 
             - 📱 **NoxMedia-arm64-v8a.apk**: Modern 64-bit Android devices (Recommended, ~35MB)
             - 📱 **NoxMedia-armeabi-v7a.apk**: Older & budget 32-bit Android devices (Compatible with older phones, ~33MB)

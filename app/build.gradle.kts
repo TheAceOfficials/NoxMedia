@@ -5,6 +5,10 @@ plugins {
   id("com.chaquo.python")
 }
 
+val baseVersion = "1.0"
+val buildCode = project.findProperty("BUILD_NUMBER")?.toString()?.toIntOrNull() ?: 1
+val computedVersion = project.findProperty("VERSION_NAME")?.toString() ?: "$baseVersion.$buildCode"
+
 android {
     namespace = "com.tgserver.streamer"
     compileSdk = 36
@@ -12,8 +16,8 @@ android {
         applicationId = "com.tgserver.streamer"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = buildCode
+        versionName = computedVersion
     }
 
     flavorDimensions += "abi"
