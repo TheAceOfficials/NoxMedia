@@ -3,12 +3,14 @@ package com.tgserver.streamer.server
 import android.content.Context
 import android.net.wifi.WifiManager
 import android.provider.Settings
-import android.util.Log
 import fi.iki.elonen.NanoHTTPD
 import kotlinx.coroutines.*
 import java.net.DatagramPacket
+import java.net.DatagramSocket
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.MulticastSocket
+import java.net.NetworkInterface
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -17,11 +19,15 @@ private const val MULTICAST_IP = "239.255.255.250"
 private const val SSDP_PORT = 1900
 
 /**
- * Alexa Voice Control Bridge using Belkin WeMo Smart Switch UPnP emulation.
+ * Universal Local Alexa Voice Control Bridge.
  *
- * Enables Amazon Echo devices on the local Wi-Fi network to discover NoxMedia
- * as a native smart switch without requiring an Amazon Developer account, AWS Lambda,
- * or cloud subscriptions.
+ * Implements dual local protocols supported natively by Amazon Echo hardware:
+ * 1. Belkin WeMo Smart Switch UPnP emulation
+ * 2. Philips Hue Bridge V1 emulation
+ *
+ * Enables Amazon Echo devices across all generations (Echo Dot, Echo Show, Echo Studio)
+ * on local Wi-Fi to discover and control NoxMedia without cloud subscriptions,
+ * AWS Lambda, or custom skills.
  */
 class AlexaVoiceBridge(
     private val context: Context,
@@ -30,13 +36,13 @@ class AlexaVoiceBridge(
     private val isRunningProvider: () -> Boolean,
     private val onStateChange: (Boolean) -> Unit
 ) {
-    private var httpServer: WeMoHttpServer? = null
+    private var httpServer: DualProtocolHttpServer? = null
     private var multicastLock: WifiManager.MulticastLock? = null
     private var ssdpJob: Job? = null
     private var ssdpSocket: MulticastSocket? = null
     private val coroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    // Generate consistent unique serial per physical device
+    // Unique serial per device
     private val serialNumber: String by lazy {
         try {
             val androidId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
@@ -54,58 +60,76 @@ class AlexaVoiceBridge(
         "Socket-1_0-$serialNumber"
     }
 
+    private val hueMac: String by lazy {
+        serialNumber.takeLast(12).lowercase().padEnd(12, '0')
+    }
+
+    private val hueBridgeId: String by lazy {
+        (hueMac.take(6) + "fffe" + hueMac.takeLast(6)).uppercase()
+    }
+
     @Synchronized
     fun start() {
         if (httpServer != null) return
 
-        Log.i(TAG, "Starting Alexa Voice Control bridge on port $httpPort (Device: ${deviceNameProvider()})")
+        StreamLog.init(context)
+        StreamLog.i(TAG, "Starting Alexa Voice Bridge on port $httpPort (Device Name: \"${deviceNameProvider()}\")")
 
-        // 1. Acquire Wi-Fi Multicast lock to receive SSDP broadcast packets on Android
+        // 1. Acquire Wi-Fi Multicast lock
         try {
             val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
-            multicastLock = wifiManager?.createMulticastLock("NoxMediaAlexaLock")?.apply {
-                setReferenceCounted(true)
+            multicastLock = wifiManager?.createMulticastLock("NoxMediaAlexaMulticastLock")?.apply {
+                setReferenceCounted(false)
                 acquire()
             }
+            StreamLog.i(TAG, "Acquired Wi-Fi MulticastLock")
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to acquire multicast lock: ${e.message}")
+            StreamLog.w(TAG, "Failed to acquire MulticastLock: ${e.message}")
         }
 
-        // 2. Start lightweight local HTTP server for UPnP / WeMo descriptors & SOAP actions
+        // 2. Start lightweight local HTTP server for UPnP / WeMo / Hue descriptors
         try {
-            httpServer = WeMoHttpServer(httpPort).apply {
+            httpServer = DualProtocolHttpServer(httpPort).apply {
                 start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
             }
-            Log.i(TAG, "Alexa UPnP HTTP server listening on port $httpPort")
+            StreamLog.i(TAG, "Alexa HTTP server listening on http://0.0.0.0:$httpPort")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start Alexa UPnP HTTP server on port $httpPort", e)
+            StreamLog.e(TAG, "Failed to start Alexa HTTP server on port $httpPort: ${e.message}")
         }
 
-        // 3. Start SSDP UDP listener for Alexa "Discover Devices" M-SEARCH packets
+        // 3. Start SSDP UDP listener on 239.255.255.250:1900
         startSsdpListener()
     }
 
     @Synchronized
     fun stop() {
-        Log.i(TAG, "Stopping Alexa Voice Control bridge...")
+        StreamLog.i(TAG, "Stopping Alexa Voice Bridge...")
         ssdpJob?.cancel()
         ssdpJob = null
 
         try {
             ssdpSocket?.let { s ->
                 val group = InetAddress.getByName(MULTICAST_IP)
-                s.leaveGroup(group)
+                val groupAddr = InetSocketAddress(group, SSDP_PORT)
+                try {
+                    val interfaces = Collections.list(NetworkInterface.getNetworkInterfaces())
+                    for (netIf in interfaces) {
+                        if (!netIf.isLoopback && netIf.isUp && netIf.supportsMulticast()) {
+                            try { s.leaveGroup(groupAddr, netIf) } catch (_: Exception) {}
+                        }
+                    }
+                } catch (_: Exception) {}
                 s.close()
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Error closing SSDP socket: ${e.message}")
+            StreamLog.w(TAG, "Error closing SSDP socket: ${e.message}")
         }
         ssdpSocket = null
 
         try {
             httpServer?.stop()
         } catch (e: Exception) {
-            Log.w(TAG, "Error stopping Alexa HTTP server: ${e.message}")
+            StreamLog.w(TAG, "Error stopping Alexa HTTP server: ${e.message}")
         }
         httpServer = null
 
@@ -114,7 +138,7 @@ class AlexaVoiceBridge(
                 if (it.isHeld) it.release()
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Error releasing multicast lock: ${e.message}")
+            StreamLog.w(TAG, "Error releasing MulticastLock: ${e.message}")
         }
         multicastLock = null
     }
@@ -124,24 +148,51 @@ class AlexaVoiceBridge(
         ssdpJob = coroutineScope.launch {
             while (isActive) {
                 try {
-                    val socket = MulticastSocket(SSDP_PORT).apply {
+                    // MUST create unbound socket first, enable SO_REUSEADDR, and then bind to SSDP_PORT
+                    val socket = MulticastSocket(null).apply {
                         reuseAddress = true
                         timeToLive = 4
                         receiveBufferSize = 65536
-                        val group = InetAddress.getByName(MULTICAST_IP)
-                        joinGroup(group)
+                        bind(InetSocketAddress(SSDP_PORT))
                     }
                     ssdpSocket = socket
 
-                    val buffer = ByteArray(2048)
-                    Log.i(TAG, "Listening for Alexa SSDP M-SEARCH discovery on 239.255.255.250:$SSDP_PORT")
+                    // Join group explicitly on active multicast network interfaces (wlan0, etc.)
+                    val group = InetAddress.getByName(MULTICAST_IP)
+                    val groupAddr = InetSocketAddress(group, SSDP_PORT)
+                    var joinedCount = 0
+                    try {
+                        val interfaces = Collections.list(NetworkInterface.getNetworkInterfaces())
+                        for (netIf in interfaces) {
+                            if (!netIf.isLoopback && netIf.isUp && netIf.supportsMulticast()) {
+                                try {
+                                    socket.joinGroup(groupAddr, netIf)
+                                    StreamLog.i(TAG, "Joined SSDP group on interface: ${netIf.name}")
+                                    joinedCount++
+                                } catch (e: Exception) {
+                                    StreamLog.w(TAG, "Could not join SSDP on ${netIf.name}: ${e.message}")
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {}
 
+                    if (joinedCount == 0) {
+                        try {
+                            socket.joinGroup(group)
+                            StreamLog.i(TAG, "Joined SSDP group on default interface")
+                        } catch (e: Exception) {
+                            StreamLog.w(TAG, "Could not join SSDP default interface: ${e.message}")
+                        }
+                    }
+
+                    StreamLog.i(TAG, "SSDP listener active. Listening for Alexa discovery on 239.255.255.250:1900")
+
+                    val buffer = ByteArray(4096)
                     while (isActive && !socket.isClosed) {
                         val packet = DatagramPacket(buffer, buffer.size)
                         try {
                             socket.receive(packet)
                             val message = String(packet.data, 0, packet.length, Charsets.UTF_8)
-
                             if (message.startsWith("M-SEARCH", ignoreCase = true)) {
                                 handleMSearch(message, packet.address, packet.port, socket)
                             }
@@ -151,7 +202,7 @@ class AlexaVoiceBridge(
                     }
                 } catch (e: Exception) {
                     if (isActive) {
-                        Log.w(TAG, "SSDP listener loop error: ${e.message}. Rebinding in 5s...")
+                        StreamLog.w(TAG, "SSDP listener socket error: ${e.message}. Rebinding in 5s...")
                         delay(5000)
                     }
                 }
@@ -165,77 +216,126 @@ class AlexaVoiceBridge(
         remotePort: Int,
         socket: MulticastSocket
     ) {
-        val st = message.lines()
-            .firstOrNull { it.trim().startsWith("ST:", ignoreCase = true) }
-            ?.substringAfter(":")
-            ?.trim()
-            ?: return
+        val lines = message.lines()
+        val stLine = lines.firstOrNull { it.trim().startsWith("ST:", ignoreCase = true) }
+        val st = stLine?.substringAfter(":")?.trim() ?: ""
 
-        // Alexa searches for Belkin devices using any of these ST targets
-        val matches = st.equals("ssdp:all", ignoreCase = true) ||
+        val isWeMoSearch = st.equals("ssdp:all", ignoreCase = true) ||
                 st.contains("urn:Belkin:device:**", ignoreCase = true) ||
                 st.contains("urn:Belkin:device:controllee:1", ignoreCase = true) ||
                 st.contains("urn:Belkin:service:basicevent:1", ignoreCase = true) ||
                 st.equals("upnp:rootdevice", ignoreCase = true)
 
-        if (!matches) return
+        val isHueSearch = st.equals("ssdp:all", ignoreCase = true) ||
+                st.equals("upnp:rootdevice", ignoreCase = true) ||
+                st.contains("urn:schemas-upnp-org:device:basic:1", ignoreCase = true)
+
+        if (!isWeMoSearch && !isHueSearch) return
 
         val localIp = LocalHttpServer.getLocalIpAddress()
         if (localIp.isBlank() || localIp == "127.0.0.1") return
 
-        val targetSt = if (st.equals("upnp:rootdevice", ignoreCase = true)) {
-            "upnp:rootdevice"
-        } else {
-            "urn:Belkin:device:controllee:1"
-        }
-
-        val targetUsn = if (st.equals("upnp:rootdevice", ignoreCase = true)) {
-            "uuid:$deviceUuid::upnp:rootdevice"
-        } else {
-            "uuid:$deviceUuid::urn:Belkin:device:controllee:1"
-        }
+        StreamLog.i(TAG, "Alexa M-SEARCH detected from ${remoteAddress.hostAddress}:$remotePort (ST: $st)")
 
         val sdf = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.US).apply {
             timeZone = TimeZone.getTimeZone("GMT")
         }
         val dateHeader = sdf.format(Date())
 
-        val response = "HTTP/1.1 200 OK\r\n" +
-                "CACHE-CONTROL: max-age=86400\r\n" +
-                "DATE: $dateHeader\r\n" +
-                "EXT:\r\n" +
-                "LOCATION: http://$localIp:$httpPort/setup.xml\r\n" +
-                "OPT: \"http://schemas.upnp.org/upnp/1/0/\"; ns=01\r\n" +
-                "01-NLS: $serialNumber\r\n" +
-                "SERVER: Unspecified, UPnP/1.0, Unspecified\r\n" +
-                "X-User-Agent: redsonic\r\n" +
-                "ST: $targetSt\r\n" +
-                "USN: $targetUsn\r\n\r\n"
+        // 1. Respond with WeMo UPnP if matching
+        if (isWeMoSearch) {
+            val targets = when {
+                st.equals("ssdp:all", ignoreCase = true) -> listOf(
+                    "upnp:rootdevice" to "uuid:$deviceUuid::upnp:rootdevice",
+                    "urn:Belkin:device:controllee:1" to "uuid:$deviceUuid::urn:Belkin:device:controllee:1",
+                    "urn:Belkin:device:**" to "uuid:$deviceUuid::urn:Belkin:device:**"
+                )
+                st.contains("urn:Belkin:device:controllee:1", ignoreCase = true) -> listOf(
+                    "urn:Belkin:device:controllee:1" to "uuid:$deviceUuid::urn:Belkin:device:controllee:1"
+                )
+                st.contains("urn:Belkin:service:basicevent:1", ignoreCase = true) -> listOf(
+                    "urn:Belkin:service:basicevent:1" to "uuid:$deviceUuid::urn:Belkin:service:basicevent:1"
+                )
+                st.contains("urn:Belkin:device:**", ignoreCase = true) -> listOf(
+                    "urn:Belkin:device:**" to "uuid:$deviceUuid::urn:Belkin:device:**"
+                )
+                else -> listOf(
+                    "upnp:rootdevice" to "uuid:$deviceUuid::upnp:rootdevice"
+                )
+            }
 
-        try {
-            val bytes = response.toByteArray(Charsets.UTF_8)
-            val sendPacket = DatagramPacket(bytes, bytes.size, remoteAddress, remotePort)
-            socket.send(sendPacket)
-            Log.d(TAG, "Sent WeMo M-SEARCH response to Alexa at ${remoteAddress.hostAddress}:$remotePort")
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to send M-SEARCH response: ${e.message}")
+            for ((tSt, tUsn) in targets) {
+                val response = "HTTP/1.1 200 OK\r\n" +
+                        "CACHE-CONTROL: max-age=86400\r\n" +
+                        "DATE: $dateHeader\r\n" +
+                        "EXT:\r\n" +
+                        "LOCATION: http://$localIp:$httpPort/setup.xml\r\n" +
+                        "OPT: \"http://schemas.upnp.org/upnp/1/0/\"; ns=01\r\n" +
+                        "01-NLS: $serialNumber\r\n" +
+                        "SERVER: Unspecified, UPnP/1.0, Unspecified\r\n" +
+                        "X-User-Agent: redsonic\r\n" +
+                        "ST: $tSt\r\n" +
+                        "USN: $tUsn\r\n\r\n"
+
+                sendUdpResponse(response.toByteArray(Charsets.UTF_8), remoteAddress, remotePort, socket)
+            }
+            StreamLog.i(TAG, "Sent WeMo SSDP responses to ${remoteAddress.hostAddress}:$remotePort")
+        }
+
+        // 2. Respond with Philips Hue Bridge if matching
+        if (isHueSearch) {
+            val hueResponse = "HTTP/1.1 200 OK\r\n" +
+                    "CACHE-CONTROL: max-age=100\r\n" +
+                    "EXT:\r\n" +
+                    "LOCATION: http://$localIp:$httpPort/description.xml\r\n" +
+                    "SERVER: Linux/3.14.0 UPnP/1.0 IpBridge/1.24.0\r\n" +
+                    "hue-bridgeid: $hueBridgeId\r\n" +
+                    "ST: urn:schemas-upnp-org:device:basic:1\r\n" +
+                    "USN: uuid:2f402f80-da50-11e1-9b23-$hueMac::urn:schemas-upnp-org:device:basic:1\r\n\r\n"
+
+            sendUdpResponse(hueResponse.toByteArray(Charsets.UTF_8), remoteAddress, remotePort, socket)
+            StreamLog.i(TAG, "Sent Hue Bridge SSDP response to ${remoteAddress.hostAddress}:$remotePort")
         }
     }
 
+    private fun sendUdpResponse(
+        bytes: ByteArray,
+        remoteAddress: InetAddress,
+        remotePort: Int,
+        multicastSocket: MulticastSocket
+    ) {
+        val packet = DatagramPacket(bytes, bytes.size, remoteAddress, remotePort)
+        try {
+            multicastSocket.send(packet)
+        } catch (_: Exception) {}
+
+        // Ephemeral DatagramSocket guarantees unicast packet dispatch across Android OS network filters
+        try {
+            DatagramSocket().use { unicastSocket ->
+                unicastSocket.send(packet)
+            }
+        } catch (_: Exception) {}
+    }
+
     /**
-     * NanoHTTPD instance serving WeMo XML files and handling SOAP control actions.
+     * NanoHTTPD instance handling both WeMo UPnP/SOAP endpoints and Philips Hue REST API endpoints.
      */
-    private inner class WeMoHttpServer(port: Int) : NanoHTTPD("0.0.0.0", port) {
+    private inner class DualProtocolHttpServer(port: Int) : NanoHTTPD("0.0.0.0", port) {
 
         override fun serve(session: IHTTPSession): Response {
             val uri = session.uri.trimEnd('/')
             val method = session.method
 
             if (method == Method.HEAD || method == Method.OPTIONS) {
-                return newFixedLengthResponse(Response.Status.OK, "text/plain", "")
+                val resp = newFixedLengthResponse(Response.Status.OK, "text/plain", "")
+                resp.addHeader("Access-Control-Allow-Origin", "*")
+                resp.addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
+                resp.addHeader("Access-Control-Allow-Headers", "Content-Type")
+                return resp
             }
 
             return when {
+                // ================= WeMo Endpoints =================
                 uri.isEmpty() || uri == "/" || uri.endsWith("/setup.xml") -> {
                     serveSetupXml()
                 }
@@ -243,13 +343,24 @@ class AlexaVoiceBridge(
                     serveEventServiceXml()
                 }
                 uri.endsWith("/upnp/control/basicevent1") -> {
-                    handleSoapAction(session)
+                    handleWeMoSoapAction(session)
                 }
+
+                // ================= Philips Hue Endpoints =================
+                uri.endsWith("/description.xml") -> {
+                    serveHueDescriptionXml()
+                }
+                uri.startsWith("/api") -> {
+                    handleHueApi(session, uri)
+                }
+
                 else -> {
                     newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "Not Found")
                 }
             }
         }
+
+        // --- WeMo Descriptors ---
 
         private fun serveSetupXml(): Response {
             val friendlyName = deviceNameProvider().ifBlank { "NoxMedia" }
@@ -286,6 +397,7 @@ class AlexaVoiceBridge(
   </device>
 </root>""".trimIndent()
 
+            StreamLog.i(TAG, "Served WeMo /setup.xml ($friendlyName)")
             val resp = newFixedLengthResponse(Response.Status.OK, "text/xml; charset=\"utf-8\"", xml)
             resp.addHeader("Content-Type", "text/xml; charset=\"utf-8\"")
             return resp
@@ -334,7 +446,7 @@ class AlexaVoiceBridge(
             return resp
         }
 
-        private fun handleSoapAction(session: IHTTPSession): Response {
+        private fun handleWeMoSoapAction(session: IHTTPSession): Response {
             val postBody = try {
                 val map = HashMap<String, String>()
                 session.parseBody(map)
@@ -343,14 +455,13 @@ class AlexaVoiceBridge(
                 ""
             }
 
-            Log.i(TAG, "Received Alexa SOAP action request: ${postBody.take(120)}")
+            StreamLog.i(TAG, "Received WeMo SOAP action: ${postBody.take(120)}")
 
-            // Check if SetBinaryState
             if (postBody.contains("SetBinaryState", ignoreCase = true)) {
                 val match = Regex("<BinaryState>([01])</BinaryState>", RegexOption.IGNORE_CASE).find(postBody)
                 val targetState = match?.groupValues?.get(1) == "1"
 
-                Log.i(TAG, "Alexa instructed state change: TURN ${if (targetState) "ON" else "OFF"}")
+                StreamLog.i(TAG, "Alexa WeMo state change: TURN ${if (targetState) "ON" else "OFF"}")
                 onStateChange(targetState)
 
                 val stateValue = if (targetState) 1 else 0
@@ -367,7 +478,7 @@ class AlexaVoiceBridge(
                 return resp
             }
 
-            // Check if GetBinaryState
+            // GetBinaryState
             val currentState = if (isRunningProvider()) 1 else 0
             val xmlResponse = """<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
   <s:Body>
@@ -379,6 +490,108 @@ class AlexaVoiceBridge(
 
             val resp = newFixedLengthResponse(Response.Status.OK, "text/xml; charset=\"utf-8\"", xmlResponse)
             resp.addHeader("Content-Type", "text/xml; charset=\"utf-8\"")
+            return resp
+        }
+
+        // --- Philips Hue Endpoints ---
+
+        private fun serveHueDescriptionXml(): Response {
+            val localIp = LocalHttpServer.getLocalIpAddress()
+            val xml = """<?xml version="1.0"?>
+<root xmlns="urn:schemas-upnp-org:device-1-0">
+  <specVersion>
+    <major>1</major>
+    <minor>0</minor>
+  </specVersion>
+  <URLBase>http://$localIp:$httpPort/</URLBase>
+  <device>
+    <deviceType>urn:schemas-upnp-org:device:basic:1</deviceType>
+    <friendlyName>Philips hue ($localIp)</friendlyName>
+    <manufacturer>Royal Philips Electronics</manufacturer>
+    <manufacturerURL>http://www.philips.com</manufacturerURL>
+    <modelDescription>Philips hue Personal Wireless Lighting</modelDescription>
+    <modelName>Philips hue bridge 2012</modelName>
+    <modelNumber>929000226503</modelNumber>
+    <modelURL>http://www.meethue.com</modelURL>
+    <serialNumber>$serialNumber</serialNumber>
+    <UDN>uuid:2f402f80-da50-11e1-9b23-$hueMac</UDN>
+  </device>
+</root>""".trimIndent()
+
+            StreamLog.i(TAG, "Served Hue /description.xml")
+            val resp = newFixedLengthResponse(Response.Status.OK, "text/xml; charset=\"utf-8\"", xml)
+            resp.addHeader("Content-Type", "text/xml; charset=\"utf-8\"")
+            return resp
+        }
+
+        private fun handleHueApi(session: IHTTPSession, uri: String): Response {
+            val method = session.method
+            val friendlyName = deviceNameProvider().ifBlank { "NoxMedia" }
+            val isRunning = isRunningProvider()
+
+            // 1. Initial Echo device registration (POST /api)
+            if (method == Method.POST && (uri == "/api" || uri == "/api/")) {
+                StreamLog.i(TAG, "Alexa Hue registered paired devicetype")
+                val json = """[{"success":{"username":"1028d66426293e1073e523f45a64ac47"}}]"""
+                val resp = newFixedLengthResponse(Response.Status.OK, "application/json", json)
+                resp.addHeader("Access-Control-Allow-Origin", "*")
+                return resp
+            }
+
+            // 2. Control light state (PUT /api/<user>/lights/1/state)
+            if (method == Method.PUT && uri.contains("/lights/1/state")) {
+                val postBody = try {
+                    val map = HashMap<String, String>()
+                    session.parseBody(map)
+                    map["postData"] ?: ""
+                } catch (e: Exception) {
+                    ""
+                }
+
+                val targetOn = postBody.contains("\"on\":true", ignoreCase = true) ||
+                        postBody.contains("\"on\": true", ignoreCase = true)
+
+                StreamLog.i(TAG, "Alexa Hue state command: TURN ${if (targetOn) "ON" else "OFF"}")
+                onStateChange(targetOn)
+
+                val json = """[{"success":{"/lights/1/state/on":$targetOn}}]"""
+                val resp = newFixedLengthResponse(Response.Status.OK, "application/json", json)
+                resp.addHeader("Access-Control-Allow-Origin", "*")
+                return resp
+            }
+
+            // 3. List lights or single light details (GET /api/<user>/lights)
+            val jsonLights = """{
+  "1": {
+    "state": {
+      "on": $isRunning,
+      "bri": 254,
+      "alert": "none",
+      "mode": "homeautomation",
+      "reachable": true
+    },
+    "type": "Dimmable light",
+    "name": "$friendlyName",
+    "modelid": "LWB010",
+    "manufacturername": "Philips",
+    "productname": "Hue white lamp",
+    "uniqueid": "00:17:88:01:00:bd:c7:de-0b",
+    "swversion": "1.29.0_r21169"
+  }
+}""".trimIndent()
+
+            val jsonFullConfig = """{
+  "lights": $jsonLights,
+  "config": {
+    "name": "Philips hue",
+    "swversion": "01036562",
+    "mac": "$hueMac"
+  }
+}""".trimIndent()
+
+            val responseBody = if (uri.endsWith("/lights") || uri.endsWith("/lights/1")) jsonLights else jsonFullConfig
+            val resp = newFixedLengthResponse(Response.Status.OK, "application/json", responseBody)
+            resp.addHeader("Access-Control-Allow-Origin", "*")
             return resp
         }
     }
