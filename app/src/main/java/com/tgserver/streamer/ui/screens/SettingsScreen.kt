@@ -1089,11 +1089,23 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     description = if (isIgnoringBattery) "Battery optimization ignored. Background streaming will not disconnect even when device screen is turned off."
                                   else "Android Doze can terminate background streaming when the screen is locked. Tap Unrestrict to permit uninterrupted background streaming.",
                     badge = {
-                        NothingDotBadge(
-                            text = if (isIgnoringBattery) "ACTIVE" else "OPTIMIZED",
-                            dotColor = if (isIgnoringBattery) StatusGreen else AccentYellow,
-                            textColor = if (isIgnoringBattery) StatusGreen else AccentYellow
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            modifier = Modifier.padding(top = 1.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(5.dp)
+                                    .background(if (isIgnoringBattery) Color(0xFF00E676) else AccentYellow, CircleShape)
+                            )
+                            Text(
+                                text = if (isIgnoringBattery) "Active (Unrestricted)" else "Optimized (Restricted)",
+                                color = if (isIgnoringBattery) Color(0xFF00E676) else AccentYellow,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Normal
+                            )
+                        }
                     },
                     action = {
                         if (!isIgnoringBattery) {
@@ -1257,11 +1269,38 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     title = "Duplicate Media",
                     description = "Scans library for duplicate entries with identical file size and hash, and lets you safely delete redundant records.",
                     badge = {
-                        if (duplicateScanCount != null) {
-                            NothingDotBadge(
-                                text = if (duplicateScanCount == 0) "0 CLEAN" else "$duplicateScanCount DUPES",
-                                dotColor = if (duplicateScanCount == 0) StatusGreen else StatusAmber,
-                                textColor = if (duplicateScanCount == 0) StatusGreen else StatusAmber
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            modifier = Modifier.padding(top = 1.dp)
+                        ) {
+                            val dotColor = when {
+                                duplicateScanCount == null -> TextTertiary
+                                duplicateScanCount == 0 -> Color(0xFF00E676)
+                                else -> StatusAmber
+                            }
+                            val statusText = when {
+                                duplicateScanCount == null -> "Not scanned"
+                                duplicateScanCount == 0 -> "Clean (0 duplicates)"
+                                duplicateScanCount == 1 -> "1 duplicate found"
+                                else -> "$duplicateScanCount duplicates found"
+                            }
+                            val textColor = when {
+                                duplicateScanCount == null -> TextTertiary
+                                duplicateScanCount == 0 -> Color(0xFF00E676)
+                                else -> StatusAmber
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(5.dp)
+                                    .background(dotColor, CircleShape)
+                            )
+                            Text(
+                                text = statusText,
+                                color = textColor,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Normal,
+                                maxLines = 1
                             )
                         }
                     },
@@ -1301,13 +1340,43 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 // 2. Dead Entries
                 SettingActionRow(
                     title = "Dead Entries",
-                    description = "Scans library for broken or deleted messages in Telegram channels, and purges inaccessible files.",
+                    description = "Scans library for broken or deleted messages in Telegram channels, and clears inaccessible files.",
                     badge = {
-                        if (deadFilesScanCount != null) {
-                            NothingDotBadge(
-                                text = if (deadFilesScanCount == 0) "0 DEAD" else "$deadFilesScanCount DEAD",
-                                dotColor = if (deadFilesScanCount == 0) StatusGreen else StatusRed,
-                                textColor = if (deadFilesScanCount == 0) StatusGreen else StatusRed
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            modifier = Modifier.padding(top = 1.dp)
+                        ) {
+                            val dotColor = when {
+                                isScanningDeadFiles -> AccentYellow
+                                deadFilesScanCount == null -> TextTertiary
+                                deadFilesScanCount == 0 -> Color(0xFF00E676)
+                                else -> StatusRed
+                            }
+                            val statusText = when {
+                                isScanningDeadFiles -> "Scanning channels..."
+                                deadFilesScanCount == null -> "Not scanned"
+                                deadFilesScanCount == 0 -> "Clean (0 dead entries)"
+                                deadFilesScanCount == 1 -> "1 dead entry found"
+                                else -> "$deadFilesScanCount dead entries found"
+                            }
+                            val textColor = when {
+                                isScanningDeadFiles -> AccentYellow
+                                deadFilesScanCount == null -> TextTertiary
+                                deadFilesScanCount == 0 -> Color(0xFF00E676)
+                                else -> StatusRed
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(5.dp)
+                                    .background(dotColor, CircleShape)
+                            )
+                            Text(
+                                text = statusText,
+                                color = textColor,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Normal,
+                                maxLines = 1
                             )
                         }
                     },
@@ -1335,11 +1404,11 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                             )
 
                             NothingPillButton(
-                                text = "Purge",
+                                text = "Clear",
                                 onClick = {
                                     val res = viewModel.purgeDeadFiles()
                                     deadFilesScanCount = 0
-                                    Toast.makeText(context, if (res > 0) "✓ Purged $res dead entries" else "✓ Catalog clean: 0 dead files", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, if (res > 0) "✓ Cleared $res dead entries" else "✓ Catalog clean: 0 dead files", Toast.LENGTH_SHORT).show()
                                 },
                                 variant = if (deadFilesScanCount != null && deadFilesScanCount!! > 0) NothingButtonVariant.Primary else NothingButtonVariant.Secondary,
                                 height = 32.dp,
@@ -2153,31 +2222,36 @@ private fun SettingActionRow(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            Column(
                 modifier = Modifier
                     .weight(1f)
-                    .clip(RoundedCornerShape(6.dp))
-                    .clickable { showInfo = !showInfo }
-                    .padding(vertical = 2.dp)
+                    .padding(vertical = 2.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
             ) {
-                Text(
-                    text = title,
-                    color = TextPrimary,
-                    fontSize = 13.5.sp,
-                    fontWeight = FontWeight.Medium
-                )
-                Icon(
-                    imageVector = Icons.Default.Info,
-                    contentDescription = "Details",
-                    tint = if (showInfo) Color.White else TextTertiary,
-                    modifier = Modifier.size(15.dp)
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable { showInfo = !showInfo }
+                ) {
+                    Text(
+                        text = title,
+                        color = TextPrimary,
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = "Details",
+                        tint = if (showInfo) Color.White else TextTertiary,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
                 badge()
             }
 
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(10.dp))
             action()
         }
 
