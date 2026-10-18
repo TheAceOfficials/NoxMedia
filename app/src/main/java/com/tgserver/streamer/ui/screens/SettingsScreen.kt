@@ -102,6 +102,9 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
     var expandedAutomation by remember { mutableStateOf(false) }
     var expandedBackup by remember { mutableStateOf(false) }
     var expandedUpdates by remember { mutableStateOf(false) }
+    var showArtworkInfo by remember { mutableStateOf(false) }
+    var showServerEngineInfo by remember { mutableStateOf(false) }
+    var showRemoteAccessInfo by remember { mutableStateOf(false) }
 
     // Dialogs state
     var showLogoutDialog by remember { mutableStateOf(false) }
@@ -684,8 +687,6 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
             }
 
             // ==================== 4. ARTWORKS ====================
-            var showArtworkInfo by remember { mutableStateOf(false) }
-
             MinimalSettingsCard(
                 icon = Icons.Default.Image,
                 title = "Artworks",
@@ -778,9 +779,6 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
             }
 
             // ==================== 5. SERVER ====================
-            var showServerEngineInfo by remember { mutableStateOf(false) }
-            var showRemoteAccessInfo by remember { mutableStateOf(false) }
-
             MinimalSettingsCard(
                 icon = Icons.Default.Dns,
                 title = "Server",
@@ -1254,15 +1252,15 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 SettingActionRow(
                     title = "Duplicate Media",
                     description = "Scans library for duplicate entries with identical file size and hash, and lets you safely delete redundant records.",
-                    badge = if (duplicateScanCount != null) {
-                        {
+                    badge = {
+                        if (duplicateScanCount != null) {
                             NothingDotBadge(
                                 text = if (duplicateScanCount == 0) "0 CLEAN" else "$duplicateScanCount DUPES",
                                 dotColor = if (duplicateScanCount == 0) StatusGreen else StatusAmber,
                                 textColor = if (duplicateScanCount == 0) StatusGreen else StatusAmber
                             )
                         }
-                    } else null,
+                    },
                     action = {
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                             NothingPillButton(
@@ -1300,15 +1298,15 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 SettingActionRow(
                     title = "Dead Entries",
                     description = "Scans library for broken or deleted messages in Telegram channels, and purges inaccessible files.",
-                    badge = if (deadFilesScanCount != null) {
-                        {
+                    badge = {
+                        if (deadFilesScanCount != null) {
                             NothingDotBadge(
                                 text = if (deadFilesScanCount == 0) "0 DEAD" else "$deadFilesScanCount DEAD",
                                 dotColor = if (deadFilesScanCount == 0) StatusGreen else StatusRed,
                                 textColor = if (deadFilesScanCount == 0) StatusGreen else StatusRed
                             )
                         }
-                    } else null,
+                    },
                     action = {
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                             NothingPillButton(
@@ -2140,8 +2138,8 @@ private fun SettingToggleRow(
 private fun SettingActionRow(
     title: String,
     description: String,
-    badge: (@Composable () -> Unit)? = null,
-    action: (@Composable () -> Unit)? = null
+    badge: @Composable () -> Unit = {},
+    action: @Composable () -> Unit = {}
 ) {
     var showInfo by remember { mutableStateOf(false) }
 
@@ -2172,15 +2170,11 @@ private fun SettingActionRow(
                     tint = if (showInfo) Color.White else TextTertiary,
                     modifier = Modifier.size(15.dp)
                 )
-                if (badge != null) {
-                    badge()
-                }
+                badge()
             }
 
-            if (action != null) {
-                Spacer(modifier = Modifier.width(8.dp))
-                action()
-            }
+            Spacer(modifier = Modifier.width(8.dp))
+            action()
         }
 
         AnimatedVisibility(
