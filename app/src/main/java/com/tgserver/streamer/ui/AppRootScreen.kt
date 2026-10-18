@@ -27,7 +27,6 @@ import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.VideoLibrary
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -50,7 +49,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -70,16 +68,15 @@ import kotlin.math.roundToInt
 
 private data class NavItemData(
     val tab: AppTab,
-    val label: String,
     val selectedIcon: ImageVector,
     val unselectedIcon: ImageVector
 )
 
 private val NAV_TABS = listOf(
-    NavItemData(AppTab.HOME, "Home", Icons.Filled.Home, Icons.Outlined.Home),
-    NavItemData(AppTab.LIBRARY, "Library", Icons.Filled.VideoLibrary, Icons.Outlined.VideoLibrary),
-    NavItemData(AppTab.CHANNELS, "Channels", Icons.Filled.Hub, Icons.Outlined.Hub),
-    NavItemData(AppTab.SETTINGS, "Settings", Icons.Filled.Settings, Icons.Outlined.Settings)
+    NavItemData(AppTab.HOME, Icons.Filled.Home, Icons.Outlined.Home),
+    NavItemData(AppTab.LIBRARY, Icons.Filled.VideoLibrary, Icons.Outlined.VideoLibrary),
+    NavItemData(AppTab.CHANNELS, Icons.Filled.Hub, Icons.Outlined.Hub),
+    NavItemData(AppTab.SETTINGS, Icons.Filled.Settings, Icons.Outlined.Settings)
 )
 
 @Composable
@@ -96,24 +93,19 @@ fun AppRootScreen(viewModel: MainAppViewModel) {
     } else if (!session.isLoggedIn) {
         TelegramLoginScreen(viewModel = viewModel)
     } else {
-        Scaffold(
-            containerColor = BackgroundOled,
-            bottomBar = {
-                EnhancedGlassBottomNav(
-                    currentTab = selectedTab,
-                    avatarUrl = session.avatarUrl,
-                    userInitials = session.initials,
-                    onTabSelected = { viewModel.selectTab(it) }
-                )
-            }
-        ) { innerPadding ->
-            var dragAccumulator by remember { mutableFloatStateOf(0f) }
+        var dragAccumulator by remember { mutableFloatStateOf(0f) }
 
+        // Root Edge-to-Edge Container (No Scaffold bottomBar = No black box strip!)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(BackgroundOled)
+        ) {
+            // Full-screen content layer (scrolls seamlessly behind the floating dock)
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(innerPadding)
-                    // Full-screen horizontal swipe switch between tabs
+                    // Horizontal swipe between tabs
                     .pointerInput(selectedTab) {
                         detectHorizontalDragGestures(
                             onDragStart = { dragAccumulator = 0f },
@@ -158,23 +150,45 @@ fun AppRootScreen(viewModel: MainAppViewModel) {
                     }
                 }
             }
+
+            // Minimalist Floating Glassmorphic Dock (True Floating Island, Zero Side Box)
+            MinimalFloatingNavDock(
+                currentTab = selectedTab,
+                avatarUrl = session.avatarUrl,
+                userInitials = session.initials,
+                onTabSelected = { viewModel.selectTab(it) },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 16.dp)
+            )
         }
     }
 }
 
+/**
+ * Ultra-minimalist, 60fps+ fluid glassmorphic floating navigation island.
+ * Features:
+ * - Only icons (pure minimal aesthetic, zero text clutter).
+ * - Symmetrical, perfectly centered icon alignment.
+ * - Fluid hold-to-swipe drag scrub gesture with squishy liquid springs.
+ * - Profile avatar integrated for Settings tab with active white ring.
+ * - Zero background cut-off: completely transparent on the sides.
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun EnhancedGlassBottomNav(
+private fun MinimalFloatingNavDock(
     currentTab: AppTab,
     avatarUrl: String?,
     userInitials: String,
-    onTabSelected: (AppTab) -> Unit
+    onTabSelected: (AppTab) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val haptic = LocalHapticFeedback.current
     val density = LocalDensity.current
 
     var barWidthPx by remember { mutableFloatStateOf(1f) }
-    val horizontalPaddingPx = remember(density) { with(density) { 6.dp.toPx() } }
+    val horizontalPaddingPx = remember(density) { with(density) { 5.dp.toPx() } }
 
     val targetIndex = remember(currentTab) {
         NAV_TABS.indexOfFirst { it.tab == currentTab }.coerceAtLeast(0).toFloat()
@@ -191,54 +205,51 @@ private fun EnhancedGlassBottomNav(
         }
     }
 
+    // 120 FPS buttery smooth spring interpolation
     val animatedPosition by animateFloatAsState(
         targetValue = if (isDragging) dragPosition else targetIndex,
-        animationSpec = if (isDragging) spring(dampingRatio = 0.95f, stiffness = 1200f)
-                        else spring(dampingRatio = 0.70f, stiffness = 420f),
-        label = "pill_position"
+        animationSpec = if (isDragging) spring(dampingRatio = 0.98f, stiffness = 1600f)
+                        else spring(dampingRatio = 0.72f, stiffness = 420f),
+        label = "dock_pill_pos"
     )
 
-    // Squishy fluid physics: dynamic velocity stretch factor
-    var prevPosition by remember { mutableFloatStateOf(targetIndex) }
-    val instantaneousVelocity = animatedPosition - prevPosition
+    // Liquid squishy stretch physics based on animation speed
+    var prevPos by remember { mutableFloatStateOf(targetIndex) }
+    val velocity = animatedPosition - prevPos
     SideEffect {
-        prevPosition = animatedPosition
+        prevPos = animatedPosition
     }
 
     val dynamicStretch by animateFloatAsState(
-        targetValue = (abs(instantaneousVelocity) * 2.2f).coerceIn(0f, 0.32f),
-        animationSpec = spring(dampingRatio = 0.60f, stiffness = 550f),
-        label = "pill_stretch"
+        targetValue = (abs(velocity) * 1.8f).coerceIn(0f, 0.28f),
+        animationSpec = spring(dampingRatio = 0.65f, stiffness = 600f),
+        label = "dock_pill_stretch"
     )
 
     val pillScaleX = 1.0f + dynamicStretch
-    val pillScaleY = (1.0f - dynamicStretch * 0.38f).coerceAtLeast(0.74f)
+    val pillScaleY = (1.0f - dynamicStretch * 0.35f).coerceAtLeast(0.75f)
 
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(start = 20.dp, end = 20.dp, bottom = 10.dp),
+        modifier = modifier,
         contentAlignment = Alignment.Center
     ) {
-        // Floating Frosted Glass Island Capsule Dock
+        // Floating Island Capsule (Compact, Centered, Symmetrical)
         Box(
             modifier = Modifier
-                .widthIn(max = 440.dp)
-                .fillMaxWidth()
-                .height(66.dp)
+                .width(276.dp)
+                .height(54.dp)
                 .shadow(
                     elevation = 20.dp,
-                    shape = RoundedCornerShape(33.dp),
-                    spotColor = Color(0x80000000),
-                    ambientColor = Color(0x50000000)
+                    shape = RoundedCornerShape(27.dp),
+                    spotColor = Color(0x99000000),
+                    ambientColor = Color(0x55000000)
                 )
-                .clip(RoundedCornerShape(33.dp))
+                .clip(RoundedCornerShape(27.dp))
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            Color(0xF214151D), // Deep dark frosted glass
-                            Color(0xF80B0C10)
+                            Color(0xDD15161F), // Frosted dark obsidian
+                            Color(0xF00D0E13)
                         )
                     )
                 )
@@ -247,16 +258,16 @@ private fun EnhancedGlassBottomNav(
                         1.dp,
                         Brush.verticalGradient(
                             colors = listOf(
-                                Color(0x40FFFFFF), // Subtle top frosted rim light
+                                Color(0x40FFFFFF), // Subtle top rim metallic highlight
                                 Color(0x14FFFFFF),
                                 Color(0x06FFFFFF)
                             )
                         )
                     ),
-                    shape = RoundedCornerShape(33.dp)
+                    shape = RoundedCornerShape(27.dp)
                 )
                 .onSizeChanged { barWidthPx = it.width.toFloat() }
-                // Interactive horizontal swipe / drag scrub across the dock
+                // Hold-to-Swipe Gesture Scrubbing across the dock
                 .pointerInput(Unit) {
                     detectHorizontalDragGestures(
                         onDragStart = { offset ->
@@ -275,11 +286,11 @@ private fun EnhancedGlassBottomNav(
                                 .coerceIn(0f, (NAV_TABS.size - 1).toFloat())
                             dragPosition = frac
 
+                            // Haptic tick on crossing tab boundary
                             val closest = frac.roundToInt().coerceIn(0, NAV_TABS.size - 1)
                             if (closest != lastHapticIndex) {
                                 lastHapticIndex = closest
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                onTabSelected(NAV_TABS[closest].tab)
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             }
                         },
                         onDragEnd = {
@@ -301,9 +312,9 @@ private fun EnhancedGlassBottomNav(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 6.dp, vertical = 5.dp)
+                    .padding(horizontal = 5.dp, vertical = 4.dp)
             ) {
-                // Sliding elevated frosted glass pill indicator
+                // Sliding Elevated Frosted Glass Highlight Pill
                 Box(
                     modifier = Modifier
                         .width(slotWidthDp)
@@ -319,25 +330,25 @@ private fun EnhancedGlassBottomNav(
                             scaleY = pillScaleY
                             transformOrigin = TransformOrigin(0.5f, 0.5f)
                         }
-                        .clip(RoundedCornerShape(26.dp))
+                        .clip(RoundedCornerShape(23.dp))
                         .background(
                             Brush.verticalGradient(
                                 colors = listOf(
-                                    Color(0x2EFFFFFF),
-                                    Color(0x14FFFFFF)
+                                    Color(0x35FFFFFF), // Elevated frosted highlight
+                                    Color(0x18FFFFFF)
                                 )
                             )
                         )
                         .border(
                             BorderStroke(
                                 1.dp,
-                                Color(0x38FFFFFF)
+                                Color(0x3CFFFFFF)
                             ),
-                            shape = RoundedCornerShape(26.dp)
+                            shape = RoundedCornerShape(23.dp)
                         )
                 )
 
-                // Row of dock items (Home, Library, Channels, Settings / Avatar)
+                // Row of symmetrical, icon-only navigation slots
                 Row(
                     modifier = Modifier.fillMaxSize(),
                     horizontalArrangement = Arrangement.SpaceEvenly,
@@ -348,7 +359,7 @@ private fun EnhancedGlassBottomNav(
                         val closeness = (1f - distance).coerceIn(0f, 1f)
                         val isSelected = currentTab == item.tab
 
-                        EnhancedNavItem(
+                        MinimalNavItem(
                             item = item,
                             isSelected = isSelected,
                             closeness = closeness,
@@ -367,9 +378,12 @@ private fun EnhancedGlassBottomNav(
     }
 }
 
+/**
+ * Individual navigation item (pure icon, perfectly centered, no text).
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun EnhancedNavItem(
+private fun MinimalNavItem(
     item: NavItemData,
     isSelected: Boolean,
     closeness: Float,
@@ -380,13 +394,14 @@ private fun EnhancedNavItem(
 ) {
     val isSettings = item.tab == AppTab.SETTINGS
 
+    // Micro bounce scale on selection
     val bounceScale by animateFloatAsState(
-        targetValue = 1.0f + (closeness * 0.06f),
+        targetValue = 1.0f + (closeness * 0.08f),
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessMedium
         ),
-        label = "nav_bounce"
+        label = "nav_item_bounce"
     )
 
     // Load local or cached avatar bitmap synchronously, fallback to remote fetch
@@ -435,7 +450,7 @@ private fun EnhancedNavItem(
     Box(
         modifier = modifier
             .fillMaxHeight()
-            .clip(RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(23.dp))
             .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -444,20 +459,19 @@ private fun EnhancedNavItem(
             ),
         contentAlignment = Alignment.Center
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-            modifier = Modifier.scale(bounceScale)
+        Box(
+            modifier = Modifier.scale(bounceScale),
+            contentAlignment = Alignment.Center
         ) {
             if (isSettings) {
-                // Settings tab displays the Profile Avatar
+                // Profile Avatar Tab (Circular Crop with Active White Glowing Ring)
                 Box(
                     modifier = Modifier
                         .size(28.dp)
                         .clip(CircleShape)
                         .background(Color(0xFF1E2028))
                         .border(
-                            width = if (closeness > 0.5f) 1.5.dp else 1.dp,
+                            width = if (closeness > 0.5f) 1.8.dp else 1.dp,
                             color = if (closeness > 0.5f) Color.White else Color.White.copy(alpha = 0.25f),
                             shape = CircleShape
                         ),
@@ -466,7 +480,7 @@ private fun EnhancedNavItem(
                     if (avatarBitmap != null) {
                         Image(
                             bitmap = avatarBitmap!!,
-                            contentDescription = "Profile Photo",
+                            contentDescription = "Profile Avatar",
                             modifier = Modifier
                                 .fillMaxSize()
                                 .alpha(0.65f + closeness * 0.35f),
@@ -482,60 +496,28 @@ private fun EnhancedNavItem(
                     } else {
                         Icon(
                             imageVector = if (closeness > 0.5f) Icons.Filled.Settings else Icons.Outlined.Settings,
-                            contentDescription = item.label,
+                            contentDescription = "Settings",
                             tint = Color.White.copy(alpha = 0.65f + closeness * 0.35f),
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(17.dp)
                         )
                     }
                 }
             } else {
                 // Standard Tabs (Home, Library, Channels)
-                // Active item gets a high-contrast circular badge (matching screenshot!)
-                val chipBgColor = lerp(
-                    Color.Transparent,
+                // Color smoothly interpolates from muted slate-silver to crisp pure white
+                val iconColor = lerp(
+                    Color(0xFF7E8088),
                     Color.White,
                     closeness
                 )
-                val iconColor = lerp(
-                    Color(0xFF8E8E93),
-                    Color.Black,
-                    closeness
+
+                Icon(
+                    imageVector = if (closeness > 0.5f) item.selectedIcon else item.unselectedIcon,
+                    contentDescription = null,
+                    tint = iconColor,
+                    modifier = Modifier.size(if (closeness > 0.5f) 23.dp else 22.dp)
                 )
-
-                Box(
-                    modifier = Modifier
-                        .size(28.dp)
-                        .clip(CircleShape)
-                        .background(chipBgColor),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = if (closeness > 0.5f) item.selectedIcon else item.unselectedIcon,
-                        contentDescription = item.label,
-                        tint = iconColor,
-                        modifier = Modifier.size(if (closeness > 0.5f) 17.dp else 21.dp)
-                    )
-                }
             }
-
-            Spacer(modifier = Modifier.height(3.dp))
-
-            // Label text below the icon
-            val labelColor = lerp(
-                Color(0xFF8E8E93),
-                Color.White,
-                closeness
-            )
-            Text(
-                text = item.label,
-                color = labelColor,
-                fontSize = 10.5.sp,
-                fontWeight = if (closeness > 0.5f) FontWeight.SemiBold else FontWeight.Medium,
-                fontFamily = FontFamily.Default,
-                letterSpacing = 0.2.sp,
-                maxLines = 1
-            )
         }
     }
 }
-
