@@ -169,32 +169,35 @@ fun HomeScreen(viewModel: MainAppViewModel) {
             .fillMaxSize()
             .background(BackgroundOled)
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 16.dp),
+            .statusBarsPadding()
+            .padding(top = 10.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(22.dp)
     ) {
-        // TOP APP BAR (Nothing OS / Dot-Matrix Minimalist)
+        // TOP APP BAR (Nothing OS / Dot-Matrix Minimalist with Professional Status Bar Clearance)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 10.dp, bottom = 4.dp),
+                .padding(horizontal = 20.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                // Sleek, proportional NoxMedia logo icon (26dp)
                 Image(
                     painter = painterResource(id = R.drawable.noxmedia_icon_trans),
                     contentDescription = "NoxMedia Logo",
-                    modifier = Modifier.size(38.dp)
+                    modifier = Modifier.size(26.dp),
+                    contentScale = ContentScale.Fit
                 )
 
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
                         text = "NoxMedia",
                         color = Color.White,
-                        fontSize = 25.sp,
+                        fontSize = 24.sp,
                         fontFamily = NdotFont,
                         letterSpacing = 1.sp
                     )
@@ -211,29 +214,18 @@ fun HomeScreen(viewModel: MainAppViewModel) {
                 }
             }
 
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                // If update is available, show glowing top pill
-                val updateInfo = when (val s = updateState) {
-                    is UpdateUiState.Available -> s.info
-                    is UpdateUiState.Downloading -> AppReleaseInfo(s.fileName, "", "", "", "", s.fileName, s.totalBytes, "", true)
-                    is UpdateUiState.ReadyToInstall -> s.info
-                    else -> null
-                }
+            // Top Bar Right Action: Update Badge only when update is available (avatar removed as requested)
+            val updateInfo = when (val s = updateState) {
+                is UpdateUiState.Available -> s.info
+                is UpdateUiState.Downloading -> AppReleaseInfo(s.fileName, "", "", "", "", s.fileName, s.totalBytes, "", true)
+                is UpdateUiState.ReadyToInstall -> s.info
+                else -> null
+            }
 
-                if (updateInfo != null) {
-                    TopBarUpdateBadge(
-                        versionTag = updateInfo.versionTag.ifBlank { "NEW" },
-                        onClick = { showUpdateDialog = true }
-                    )
-                }
-
-                // User Profile Photo or Fallback Concentric Ring Glyph
-                ProfileAvatar(
-                    photoPath = session.avatarUrl,
-                    modifier = Modifier.size(46.dp)
+            if (updateInfo != null) {
+                TopBarUpdateBadge(
+                    versionTag = updateInfo.versionTag.ifBlank { "NEW" },
+                    onClick = { showUpdateDialog = true }
                 )
             }
         }
@@ -259,7 +251,10 @@ fun HomeScreen(viewModel: MainAppViewModel) {
                         showUpdateDialog = true
                     }
                 },
-                onDismiss = { viewModel.dismissUpdateBanner() }
+                onDismiss = { viewModel.dismissUpdateBanner() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
             )
         }
 
@@ -267,6 +262,7 @@ fun HomeScreen(viewModel: MainAppViewModel) {
         Card(
             modifier = Modifier
                 .fillMaxWidth()
+                .padding(horizontal = 20.dp)
                 .clip(RoundedCornerShape(20.dp))
                 .border(
                     BorderStroke(1.dp, Color(0xFF282A31)),
@@ -488,6 +484,7 @@ fun HomeScreen(viewModel: MainAppViewModel) {
         Card(
             modifier = Modifier
                 .fillMaxWidth()
+                .padding(horizontal = 20.dp)
                 .clip(RoundedCornerShape(20.dp))
                 .border(
                     BorderStroke(1.dp, Color(0xFF3C1460)),
@@ -570,7 +567,7 @@ fun HomeScreen(viewModel: MainAppViewModel) {
             }
         }
 
-        // RECENTLY ADDED SECTION (Horizontal Row of Newest Media)
+        // RECENTLY ADDED SECTION (Edge-to-Edge Full Width Horizontal Row of Newest Media)
         if (recentlyAdded.isNotEmpty()) {
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -579,7 +576,7 @@ fun HomeScreen(viewModel: MainAppViewModel) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 2.dp),
+                        .padding(horizontal = 20.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -606,8 +603,9 @@ fun HomeScreen(viewModel: MainAppViewModel) {
                 }
 
                 LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    contentPadding = PaddingValues(horizontal = 2.dp)
+                    contentPadding = PaddingValues(horizontal = 20.dp)
                 ) {
                     items(recentlyAdded, key = { it.key }) { group ->
                         RecentMediaCard(

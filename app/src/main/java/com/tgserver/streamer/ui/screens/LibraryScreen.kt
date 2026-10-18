@@ -290,18 +290,19 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                     }
                 )
             } else {
-                // MAIN POSTER GRID LIBRARY VIEW
+                // MAIN POSTER GRID LIBRARY VIEW (Edge-to-Edge with Status Bar Clearance)
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 20.dp, vertical = 14.dp),
+                        .statusBarsPadding()
+                        .padding(top = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     // TOP BAR
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 8.dp),
+                            .padding(horizontal = 20.dp, vertical = 2.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -346,6 +347,7 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .padding(horizontal = 20.dp)
                             .height(42.dp)
                             .clip(RoundedCornerShape(12.dp))
                             .background(Color(0xFF14151B))
@@ -399,7 +401,7 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                         }
                     }
 
-                    // CATEGORY CHIPS
+                    // CATEGORY CHIPS (Edge-to-Edge full width carousel)
                     val categories = listOf(
                         "all" to "ALL",
                         "movies" to "MOVIES",
@@ -407,7 +409,11 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                         "anime" to "ANIME",
                         "4k" to "4K UHD"
                     )
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(horizontal = 20.dp)
+                    ) {
                         items(categories) { (id, label) ->
                             val isSelected = selectedCategory == id
                             Box(
@@ -440,7 +446,7 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 2.dp, vertical = 2.dp),
+                            .padding(horizontal = 20.dp, vertical = 2.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -481,12 +487,13 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                         }
                     }
 
-                    // POSTER GRID
+                    // POSTER GRID (Edge-to-Edge with Inset Padding)
                     if (filteredGroups.isEmpty()) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .weight(1f),
+                                .weight(1f)
+                                .padding(horizontal = 20.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Column(
@@ -516,7 +523,7 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                             horizontalArrangement = Arrangement.spacedBy(14.dp),
                             verticalArrangement = Arrangement.spacedBy(18.dp),
                             modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(bottom = 84.dp)
+                            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 84.dp)
                         ) {
                             items(filteredGroups, key = { it.key }) { group ->
                                 PosterCard(
@@ -727,11 +734,11 @@ private fun ContentDetailsScreen(
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
     ) {
-        // TOP BACKDROP WITH APP BAR
+        // TOP BACKDROP WITH APP BAR (Edge-to-edge behind status bar)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(230.dp)
+                .height(260.dp)
         ) {
             if (!group.backdropUrl.isNullOrBlank()) {
                 RemoteImage(
@@ -774,11 +781,12 @@ private fun ContentDetailsScreen(
                     )
             )
 
-            // Top Bar Overlay
+            // Top Bar Overlay with Status Bar clearance
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 10.dp, start = 12.dp, end = 12.dp),
+                    .statusBarsPadding()
+                    .padding(top = 8.dp, start = 14.dp, end = 14.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {

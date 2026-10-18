@@ -153,13 +153,14 @@ fun LogsScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(BackgroundOled)
+            .statusBarsPadding()
             // Consume horizontal drags so parent tab pager doesn't switch tabs while inspecting logs
             .pointerInput(Unit) {
                 detectHorizontalDragGestures { change, _ ->
                     change.consume()
                 }
             }
-            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .padding(horizontal = 16.dp, top = 8.dp, bottom = 12.dp)
     ) {
         // ==================== TOP NAVIGATION BAR ====================
         Row(

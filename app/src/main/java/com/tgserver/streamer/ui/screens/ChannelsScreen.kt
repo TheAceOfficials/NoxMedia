@@ -80,9 +80,9 @@ fun ChannelsScreen(viewModel: MainAppViewModel) {
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .padding(horizontal = 16.dp),
+            .statusBarsPadding(),
         verticalArrangement = Arrangement.spacedBy(16.dp),
-        contentPadding = PaddingValues(top = 16.dp, bottom = 100.dp)
+        contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 10.dp, bottom = 100.dp)
     ) {
         // 1. TOP HEADER (Channels / NoxMedia • Telegram)
         item {
