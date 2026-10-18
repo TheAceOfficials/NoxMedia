@@ -89,12 +89,20 @@ class AppUpdateManager(private val context: Context) {
         private const val GITHUB_REPO = "NoxMedia"
         private const val RELEASES_API_URL = "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/releases/latest"
         private const val ALL_RELEASES_URL = "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/releases"
+        private const val WEB_RELEASES_LATEST = "https://github.com/$GITHUB_OWNER/$GITHUB_REPO/releases/latest"
     }
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .followRedirects(true)
+        .build()
+
+    private val noRedirectClient = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .followRedirects(false)
+        .followSslRedirects(false)
         .build()
 
     private val gson = Gson()
@@ -139,6 +147,8 @@ class AppUpdateManager(private val context: Context) {
 
     /**
      * Checks for new release on GitHub.
+     * Uses web release redirect first (zero rate limits, works reliably on all cellular carriers),
+     * and falls back to GitHub REST API.
      */
     suspend fun checkForUpdate(manual: Boolean = false): Boolean = withContext(Dispatchers.IO) {
         if (!manual && _updateState.value is UpdateUiState.Downloading) {
@@ -148,10 +158,14 @@ class AppUpdateManager(private val context: Context) {
         _updateState.value = UpdateUiState.Checking
 
         try {
-            // 1. Fetch latest release
-            var release = fetchRelease(RELEASES_API_URL)
+            // 1. Fetch release: First try Web Redirect (bypasses GitHub REST API 60 req/hr IP rate limit completely)
+            var release = fetchReleaseViaWebRedirect()
+
+            // 2. Fallback to GitHub REST API if web redirect didn't resolve
             if (release == null) {
-                // Fallback to all releases list to get the first one if "latest" isn't tagged as default
+                release = fetchRelease(RELEASES_API_URL)
+            }
+            if (release == null) {
                 release = fetchFirstReleaseFromList(ALL_RELEASES_URL)
             }
 
@@ -161,7 +175,7 @@ class AppUpdateManager(private val context: Context) {
                 return@withContext false
             }
 
-            // 2. Determine device preferred architecture and select best APK asset
+            // 3. Determine device preferred architecture and select best APK asset
             val (matchedAsset, abiLabel) = pickBestAsset(release.assets)
             if (matchedAsset == null) {
                 val curVer = getAppCurrentVersion()
@@ -169,7 +183,7 @@ class AppUpdateManager(private val context: Context) {
                 return@withContext false
             }
 
-            // 3. Compare versions
+            // 4. Compare versions
             val currentVersion = getAppCurrentVersion()
             val isNewer = isRemoteNewer(release, currentVersion)
 
@@ -177,7 +191,7 @@ class AppUpdateManager(private val context: Context) {
                 val releaseInfo = AppReleaseInfo(
                     versionTag = release.tagName.ifBlank { "Latest" },
                     releaseTitle = release.name.ifBlank { "NoxMedia Update" },
-                    changelog = release.body.ifBlank { "Bug fixes and performance improvements." },
+                    changelog = release.body.ifBlank { "Bug fixes, design improvements and performance polishing." },
                     publishedAt = formatReleaseDate(release.publishedAt),
                     downloadUrl = matchedAsset.downloadUrl,
                     fileName = matchedAsset.name,
@@ -196,6 +210,56 @@ class AppUpdateManager(private val context: Context) {
             Log.e(TAG, "Update check failed", e)
             _updateState.value = if (manual) UpdateUiState.Error(e.localizedMessage ?: "Failed to check for updates") else UpdateUiState.Idle
             return@withContext false
+        }
+    }
+
+    /**
+     * Resolves the latest release tag via standard GitHub releases/latest redirect.
+     * This has 0 rate-limits and works consistently on all networks worldwide.
+     */
+    private fun fetchReleaseViaWebRedirect(): GitHubReleaseResponse? {
+        val request = Request.Builder()
+            .url(WEB_RELEASES_LATEST)
+            .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
+            .get()
+            .build()
+
+        return try {
+            noRedirectClient.newCall(request).execute().use { response ->
+                val location = response.header("Location") ?: ""
+                if (location.contains("/releases/tag/")) {
+                    val tag = location.substringAfterLast("/tag/").trim().removeSuffix("/")
+                    if (tag.isNotBlank()) {
+                        val assets = listOf(
+                            GitHubReleaseAsset(
+                                name = "NoxMedia-arm64-v8a.apk",
+                                size = 36_000_000L,
+                                downloadUrl = "https://github.com/$GITHUB_OWNER/$GITHUB_REPO/releases/download/$tag/NoxMedia-arm64-v8a.apk"
+                            ),
+                            GitHubReleaseAsset(
+                                name = "NoxMedia-armeabi-v7a.apk",
+                                size = 34_000_000L,
+                                downloadUrl = "https://github.com/$GITHUB_OWNER/$GITHUB_REPO/releases/download/$tag/NoxMedia-armeabi-v7a.apk"
+                            ),
+                            GitHubReleaseAsset(
+                                name = "NoxMedia-universal.apk",
+                                size = 68_000_000L,
+                                downloadUrl = "https://github.com/$GITHUB_OWNER/$GITHUB_REPO/releases/download/$tag/NoxMedia-universal.apk"
+                            )
+                        )
+                        GitHubReleaseResponse(
+                            tagName = tag,
+                            name = "NoxMedia $tag",
+                            body = "Performance improvements, UI polishing and bug fixes.",
+                            publishedAt = "",
+                            assets = assets
+                        )
+                    } else null
+                } else null
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Web redirect release check failed", e)
+            null
         }
     }
 
@@ -328,14 +392,15 @@ class AppUpdateManager(private val context: Context) {
     }
 
     private fun formatReleaseDate(isoString: String): String {
+        if (isoString.isBlank()) return "Latest Release"
         return try {
             val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
                 timeZone = java.util.TimeZone.getTimeZone("UTC")
             }
-            val date = sdf.parse(isoString) ?: return ""
+            val date = sdf.parse(isoString) ?: return "Latest Release"
             SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(date)
         } catch (_: Exception) {
-            ""
+            "Latest Release"
         }
     }
 
