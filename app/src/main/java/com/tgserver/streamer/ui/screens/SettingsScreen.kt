@@ -131,7 +131,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 .fillMaxSize()
                 .statusBarsPadding()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, top = 10.dp, bottom = 80.dp),
+                .padding(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 80.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             // ==================== HEADER ====================

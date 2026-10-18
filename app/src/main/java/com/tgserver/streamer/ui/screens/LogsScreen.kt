@@ -160,7 +160,7 @@ fun LogsScreen(
                     change.consume()
                 }
             }
-            .padding(horizontal = 16.dp, top = 8.dp, bottom = 12.dp)
+            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp)
     ) {
         // ==================== TOP NAVIGATION BAR ====================
         Row(
