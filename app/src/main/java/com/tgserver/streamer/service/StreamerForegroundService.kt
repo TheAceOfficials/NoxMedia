@@ -15,6 +15,7 @@ import androidx.core.app.NotificationCompat
 import com.tgserver.streamer.MainActivity
 import com.tgserver.streamer.data.model.ServerConfig
 import com.tgserver.streamer.posters.SpatialPosterService
+import com.tgserver.streamer.server.AlexaVoiceBridge
 import com.tgserver.streamer.server.LocalHttpServer
 import com.tgserver.streamer.telegram.TelegramClientManager
 
@@ -31,8 +32,12 @@ class StreamerForegroundService : Service() {
         const val ACTION_START = "ACTION_START"
         const val ACTION_STOP = "ACTION_STOP"
         const val ACTION_RESTART = "ACTION_RESTART"
+        const val ACTION_UPDATE_ALEXA = "ACTION_UPDATE_ALEXA"
 
         var isServiceRunning = false
+            private set
+
+        var isStandbyMode = false
             private set
 
         var activeServer: LocalHttpServer? = null
@@ -51,6 +56,7 @@ class StreamerForegroundService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
     private var monitorJob: Job? = null
+    private var alexaBridge: AlexaVoiceBridge? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -66,10 +72,32 @@ class StreamerForegroundService : Service() {
 
         when (action) {
             ACTION_STOP -> {
-                stopServer()
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
-                return START_NOT_STICKY
+                if (activeConfig.alexaVoiceControlEnabled) {
+                    enterStandbyMode()
+                    return START_STICKY
+                } else {
+                    stopAlexaBridge()
+                    stopServer()
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
+            }
+            ACTION_UPDATE_ALEXA -> {
+                if (activeConfig.alexaVoiceControlEnabled) {
+                    startAlexaBridgeIfNeeded()
+                    if (!isServiceRunning) {
+                        enterStandbyMode()
+                        return START_STICKY
+                    }
+                } else {
+                    stopAlexaBridge()
+                    if (!isServiceRunning) {
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        stopSelf()
+                        return START_NOT_STICKY
+                    }
+                }
             }
             ACTION_RESTART -> {
                 stopServer()
@@ -90,10 +118,64 @@ class StreamerForegroundService : Service() {
         // Maintain streaming server process running even when app task is swiped from recents
     }
 
+    private fun startAlexaBridgeIfNeeded() {
+        if (activeConfig.alexaVoiceControlEnabled) {
+            if (alexaBridge == null) {
+                alexaBridge = AlexaVoiceBridge(
+                    context = applicationContext,
+                    httpPort = activeConfig.port + 2,
+                    deviceNameProvider = { activeConfig.alexaDeviceName },
+                    isRunningProvider = { isServiceRunning && server != null },
+                    onStateChange = { shouldRun ->
+                        CoroutineScope(Dispatchers.Main).launch {
+                            if (shouldRun) {
+                                if (!isServiceRunning) {
+                                    startServer()
+                                }
+                            } else {
+                                if (isServiceRunning) {
+                                    enterStandbyMode()
+                                }
+                            }
+                        }
+                    }
+                ).apply { start() }
+            }
+        } else {
+            stopAlexaBridge()
+        }
+    }
+
+    private fun stopAlexaBridge() {
+        alexaBridge?.stop()
+        alexaBridge = null
+    }
+
+    private fun enterStandbyMode() {
+        isStandbyMode = true
+        stopServerInternal()
+        startAlexaBridgeIfNeeded()
+        createNotificationChannel()
+        val notification = buildNotification(
+            "Standby • Listening for Alexa (\"${activeConfig.alexaDeviceName}\")",
+            isStandby = true
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
     private fun startServer() {
+        isStandbyMode = false
         createNotificationChannel()
 
-        val notification = buildNotification("Server running on port ${activeConfig.port}")
+        val notification = buildNotification("Server running on port ${activeConfig.port}", isStandby = false)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
                 NOTIFICATION_ID,
@@ -141,12 +223,13 @@ class StreamerForegroundService : Service() {
             com.tgserver.streamer.server.StreamLog.i("StreamerService", "Server started at http://$ip:${activeConfig.port}/manifest.json")
             updateNotification("Online at http://$ip:${activeConfig.port}/manifest.json")
             startAutoSleepMonitor()
+            startAlexaBridgeIfNeeded()
         } catch (e: Exception) {
             updateNotification("Error starting server: ${e.message}")
         }
     }
 
-    private fun stopServer() {
+    private fun stopServerInternal() {
         try {
             monitorJob?.cancel()
             monitorJob = null
@@ -162,6 +245,10 @@ class StreamerForegroundService : Service() {
             if (wifiLock?.isHeld == true) wifiLock?.release()
         } catch (_: Exception) {
         }
+    }
+
+    private fun stopServer() {
+        stopServerInternal()
     }
 
     private fun startAutoSleepMonitor() {
@@ -183,10 +270,14 @@ class StreamerForegroundService : Service() {
                     val remainingMillis = timeoutMillis - idleMillis
 
                     if (remainingMillis <= 0L) {
-                        Log.i("StreamerService", "Auto-sleep timeout reached (${config.autoSleepTimeoutMinutes}m idle). Stopping server.")
-                        stopServer()
-                        stopForeground(STOP_FOREGROUND_REMOVE)
-                        stopSelf()
+                        Log.i("StreamerService", "Auto-sleep timeout reached (${config.autoSleepTimeoutMinutes}m idle).")
+                        if (config.alexaVoiceControlEnabled) {
+                            enterStandbyMode()
+                        } else {
+                            stopServer()
+                            stopForeground(STOP_FOREGROUND_REMOVE)
+                            stopSelf()
+                        }
                         break
                     } else {
                         if (isStreaming) {
@@ -234,7 +325,7 @@ class StreamerForegroundService : Service() {
         }
     }
 
-    private fun buildNotification(statusText: String): Notification {
+    private fun buildNotification(statusText: String, isStandby: Boolean = false): Notification {
         val pendingIntent = PendingIntent.getActivity(
             this,
             0,
@@ -242,24 +333,27 @@ class StreamerForegroundService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val stopIntent = Intent(this, StreamerForegroundService::class.java).apply {
-            action = ACTION_STOP
+        val actionIntent = Intent(this, StreamerForegroundService::class.java).apply {
+            action = if (isStandby) ACTION_START else ACTION_STOP
         }
-        val stopPendingIntent = PendingIntent.getService(
+        val actionPendingIntent = PendingIntent.getService(
             this,
             1,
-            stopIntent,
+            actionIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        val actionTitle = if (isStandby) "Start Server" else "Stop Server"
+        val actionIcon = if (isStandby) android.R.drawable.ic_media_play else android.R.drawable.ic_menu_close_clear_cancel
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("NoxMedia Server")
+            .setContentTitle(if (isStandby) "NoxMedia (Standby)" else "NoxMedia Server")
             .setContentText(statusText)
-            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setSmallIcon(if (isStandby) android.R.drawable.ic_lock_idle_alarm else android.R.drawable.ic_media_play)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(pendingIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop Server", stopPendingIntent)
+            .addAction(actionIcon, actionTitle, actionPendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
@@ -268,10 +362,11 @@ class StreamerForegroundService : Service() {
 
     private fun updateNotification(statusText: String) {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(NOTIFICATION_ID, buildNotification(statusText))
+        manager.notify(NOTIFICATION_ID, buildNotification(statusText, isStandbyMode))
     }
 
     override fun onDestroy() {
+        stopAlexaBridge()
         stopServer()
         super.onDestroy()
     }

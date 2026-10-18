@@ -147,6 +147,25 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             // Auto-check for GitHub app updates in background
             updateManager.checkForUpdate(manual = false)
         }
+        // Ensure Alexa voice bridge is active if enabled in preferences
+        if (loaded.alexaVoiceControlEnabled) {
+            val context = getApplication<Application>().applicationContext
+            val intent = Intent(context, StreamerForegroundService::class.java).apply {
+                action = StreamerForegroundService.ACTION_UPDATE_ALEXA
+            }
+            try {
+                if (!StreamerForegroundService.isServiceRunning) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        context.startForegroundService(intent)
+                    } else {
+                        context.startService(intent)
+                    }
+                } else {
+                    context.startService(intent)
+                }
+            } catch (_: Exception) {}
+        }
+
         startTelemetryLoop()
     }
 
@@ -684,7 +703,9 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             autoBackupEnabled = prefs.getBoolean("auto_backup_enabled", false),
             autoBackupIntervalHours = prefs.getInt("auto_backup_interval_hours", 12),
             autoSleepEnabled = prefs.getBoolean("auto_sleep_enabled", false),
-            autoSleepTimeoutMinutes = prefs.getInt("auto_sleep_timeout_minutes", 30)
+            autoSleepTimeoutMinutes = prefs.getInt("auto_sleep_timeout_minutes", 30),
+            alexaVoiceControlEnabled = prefs.getBoolean("alexa_voice_control_enabled", false),
+            alexaDeviceName = prefs.getString("alexa_device_name", "NoxMedia") ?: "NoxMedia"
         )
     }
 
@@ -709,6 +730,8 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             putInt("auto_backup_interval_hours", cfg.autoBackupIntervalHours)
             putBoolean("auto_sleep_enabled", cfg.autoSleepEnabled)
             putInt("auto_sleep_timeout_minutes", cfg.autoSleepTimeoutMinutes)
+            putBoolean("alexa_voice_control_enabled", cfg.alexaVoiceControlEnabled)
+            putString("alexa_device_name", cfg.alexaDeviceName)
             apply()
         }
         _config.value = cfg
@@ -849,6 +872,39 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         Toast.makeText(getApplication(), msg, Toast.LENGTH_SHORT).show()
     }
 
+    fun updateAlexaVoiceControl(enabled: Boolean, deviceName: String) {
+        val cleanName = deviceName.trim().ifBlank { "NoxMedia" }
+        val updated = _config.value.copy(
+            alexaVoiceControlEnabled = enabled,
+            alexaDeviceName = cleanName
+        )
+        saveStoredConfig(updated)
+
+        // Notify foreground service of updated Alexa state
+        val context = getApplication<Application>().applicationContext
+        val intent = Intent(context, StreamerForegroundService::class.java).apply {
+            action = StreamerForegroundService.ACTION_UPDATE_ALEXA
+        }
+        try {
+            if (enabled && !StreamerForegroundService.isServiceRunning) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } else {
+                context.startService(intent)
+            }
+        } catch (_: Exception) {}
+
+        val msg = if (enabled) {
+            "✓ Alexa Voice Control active for \"$cleanName\". Say 'Alexa, discover devices'."
+        } else {
+            "✓ Alexa Voice Control disabled"
+        }
+        Toast.makeText(getApplication(), msg, Toast.LENGTH_LONG).show()
+    }
+
     fun detectTailscaleIp(): String? {
         return tgClient.detectTailscaleAddress()
     }
@@ -956,7 +1012,9 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                 "replaceSameQuality": ${cfg.replaceSameQuality},
                 "skipExactDuplicates": ${cfg.skipExactDuplicates},
                 "autoSleepEnabled": ${cfg.autoSleepEnabled},
-                "autoSleepTimeoutMinutes": ${cfg.autoSleepTimeoutMinutes}
+                "autoSleepTimeoutMinutes": ${cfg.autoSleepTimeoutMinutes},
+                "alexaVoiceControlEnabled": ${cfg.alexaVoiceControlEnabled},
+                "alexaDeviceName": "${cfg.alexaDeviceName}"
               },
               "monitoredChannelsCount": ${channelList.size}
             }
@@ -978,7 +1036,9 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                     replaceSameQuality = sc.optBoolean("replaceSameQuality", _config.value.replaceSameQuality),
                     skipExactDuplicates = sc.optBoolean("skipExactDuplicates", _config.value.skipExactDuplicates),
                     autoSleepEnabled = sc.optBoolean("autoSleepEnabled", _config.value.autoSleepEnabled),
-                    autoSleepTimeoutMinutes = sc.optInt("autoSleepTimeoutMinutes", _config.value.autoSleepTimeoutMinutes)
+                    autoSleepTimeoutMinutes = sc.optInt("autoSleepTimeoutMinutes", _config.value.autoSleepTimeoutMinutes),
+                    alexaVoiceControlEnabled = sc.optBoolean("alexaVoiceControlEnabled", _config.value.alexaVoiceControlEnabled),
+                    alexaDeviceName = sc.optString("alexaDeviceName", _config.value.alexaDeviceName)
                 )
                 saveStoredConfig(updated)
                 Toast.makeText(getApplication(), "✓ Settings successfully restored from backup!", Toast.LENGTH_LONG).show()

@@ -78,6 +78,9 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
     var autoBackupHours by remember(config.autoBackupIntervalHours) { mutableIntStateOf(config.autoBackupIntervalHours) }
     var autoSleepEnabled by remember(config.autoSleepEnabled) { mutableStateOf(config.autoSleepEnabled) }
     var autoSleepMinutes by remember(config.autoSleepTimeoutMinutes) { mutableIntStateOf(config.autoSleepTimeoutMinutes) }
+    var alexaVoiceControlEnabled by remember(config.alexaVoiceControlEnabled) { mutableStateOf(config.alexaVoiceControlEnabled) }
+    var alexaDeviceNameInput by remember(config.alexaDeviceName) { mutableStateOf(config.alexaDeviceName) }
+    var showAlexaInfo by remember { mutableStateOf(false) }
 
     // Key verification state
     var isVerifyingKeys by remember { mutableStateOf(false) }
@@ -1465,7 +1468,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
             MinimalSettingsCard(
                 icon = Icons.Default.Sync,
                 title = "Automation",
-                subtitle = "Channel monitoring & duplicate rules",
+                subtitle = if (alexaVoiceControlEnabled) "Alexa active • Channel rules" else "Channel monitoring & duplicate rules",
                 isExpanded = expandedAutomation,
                 onToggleExpand = { expandedAutomation = !expandedAutomation }
             ) {
@@ -1506,6 +1509,182 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         viewModel.updateChannelAutomation(autoScanNewContent, replaceSameQuality, it)
                     }
                 )
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(Color(0xFF22242D)))
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Alexa Voice Control
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { showAlexaInfo = !showAlexaInfo }
+                                .padding(vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "Alexa Voice Control",
+                                color = TextPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = "Alexa Setup Guide",
+                                tint = if (showAlexaInfo) Color.White else TextTertiary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                        Text(
+                            text = if (alexaVoiceControlEnabled)
+                                "Zero-cloud local WeMo emulation. Turn server on or off via Echo."
+                            else
+                                "Turn streaming server on and off with Echo voice commands over local Wi-Fi.",
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp
+                        )
+                    }
+
+                    UiverseSwitch(
+                        checked = alexaVoiceControlEnabled,
+                        onCheckedChange = {
+                            alexaVoiceControlEnabled = it
+                            viewModel.updateAlexaVoiceControl(it, alexaDeviceNameInput)
+                        }
+                    )
+                }
+
+                // Expandable info box for Alexa
+                AnimatedVisibility(
+                    visible = showAlexaInfo,
+                    enter = fadeIn(tween(150)) + expandVertically(),
+                    exit = fadeOut(tween(120)) + shrinkVertically()
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF161820))
+                            .border(1.dp, Color(0xFF242732), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 12.dp, vertical = 10.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = "HOW TO CONNECT WITH AMAZON ECHO",
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.5.sp
+                            )
+                            Text(
+                                text = "1. Connect this phone and your Amazon Echo to the same Wi-Fi network.\n" +
+                                       "2. Turn on the Alexa toggle above.\n" +
+                                       "3. Say \"Alexa, discover devices\" (or tap Discover in the Alexa app).\n" +
+                                       "4. Echo discovers NoxMedia as a local smart plug. No Amazon skill, no AWS account, and zero cloud required!",
+                                color = Color(0xFFA0A3B0),
+                                fontSize = 11.5.sp,
+                                lineHeight = 16.sp
+                            )
+                        }
+                    }
+                }
+
+                AnimatedVisibility(
+                    visible = alexaVoiceControlEnabled,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // Device Name input
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Echo Device Name",
+                                color = TextSecondary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            NothingDotBadge(
+                                text = "ECHO READY",
+                                dotColor = StatusGreen,
+                                textColor = TextPrimary
+                            )
+                        }
+
+                        NothingTextField(
+                            value = alexaDeviceNameInput,
+                            onValueChange = {
+                                alexaDeviceNameInput = it
+                                viewModel.updateAlexaVoiceControl(alexaVoiceControlEnabled, it)
+                            },
+                            placeholder = "NoxMedia (or Server)",
+                            singleLine = true,
+                            trailingIcon = if (alexaDeviceNameInput.isNotBlank()) {
+                                {
+                                    IconButton(
+                                        onClick = {
+                                            alexaDeviceNameInput = ""
+                                            viewModel.updateAlexaVoiceControl(alexaVoiceControlEnabled, "")
+                                        },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Clear",
+                                            tint = TextTertiary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            } else null
+                        )
+
+                        // Voice commands cheat sheet
+                        val spokenName = alexaDeviceNameInput.trim().ifBlank { "NoxMedia" }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF101217))
+                                .border(1.dp, Color(0xFF1F222B), RoundedCornerShape(8.dp))
+                                .padding(10.dp)
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    text = "SPOKEN COMMANDS",
+                                    color = TextTertiary,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.5.sp
+                                )
+                                Text(
+                                    text = "• \"Alexa, turn on $spokenName\"\n• \"Alexa, turn off $spokenName\"\n• \"Alexa, is $spokenName on?\"",
+                                    color = Color(0xFF86EFAC),
+                                    fontSize = 12.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    lineHeight = 18.sp
+                                )
+                            }
+                        }
+                    }
+                }
             }
 
             // ==================== 8. BACKUP ====================
