@@ -736,7 +736,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         if (cleanTmdb.isNotEmpty()) {
             try {
                 val req = Request.Builder()
-                    .url("https://api.themoviedb.org/3/authentication?api_key=$cleanTmdb")
+                    .url("https://api.themoviedb.org/3/movie/550?api_key=$cleanTmdb")
                     .get()
                     .build()
                 client.newCall(req).execute().use { resp ->

@@ -31,12 +31,14 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.tgserver.streamer.R
 import com.tgserver.streamer.theme.*
 import com.tgserver.streamer.ui.MainAppViewModel
 import com.tgserver.streamer.ui.components.*
@@ -44,6 +46,9 @@ import com.tgserver.streamer.update.UpdateUiState
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Locale
+
+private val NdotFont = FontFamily(Font(R.font.ndot))
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -76,6 +81,8 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
 
     // Key verification state
     var isVerifyingKeys by remember { mutableStateOf(false) }
+    var isEditingTmdb by remember { mutableStateOf(false) }
+    var isEditingTvdb by remember { mutableStateOf(false) }
     var tmdbKeyError by remember { mutableStateOf<String?>(null) }
     var tvdbKeyError by remember { mutableStateOf<String?>(null) }
 
@@ -135,50 +142,36 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             // ==================== HEADER ====================
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp, bottom = 2.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
             ) {
-                NothingDotBadge(
-                    text = "NOXMEDIA",
-                    dotColor = AccentApple,
-                    backgroundColor = Color(0x1AFFFFFF),
-                    textColor = TextPrimary
-                )
-                NothingDotBadge(
-                    text = "SETTINGS",
-                    dotColor = AccentSilver,
-                    backgroundColor = Color(0x12FFFFFF),
-                    textColor = TextSecondary
-                )
-            }
-
-            Column(modifier = Modifier.padding(top = 2.dp, bottom = 4.dp)) {
                 Text(
                     text = "Settings",
-                    color = TextPrimary,
+                    color = Color.White,
+                    fontFamily = NdotFont,
                     fontSize = 28.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = (-0.5).sp
+                    letterSpacing = 0.5.sp
                 )
-                Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = "Preferences & Engine",
-                    color = TextSecondary,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Normal
+                    text = "NoxMedia • Preferences",
+                    color = Color(0xFF6B7280),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 10.5.sp,
+                    letterSpacing = 0.2.sp
                 )
             }
 
-            // ==================== 1. ACCOUNT ====================
+            // ==================== 1. ACCOUNT (Apple Inset Profile Card) ====================
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .border(BorderStroke(1.dp, Color(0xFF22242D)), RoundedCornerShape(18.dp)),
-                shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF12141A))
+                    .clip(RoundedCornerShape(20.dp))
+                    .border(BorderStroke(1.dp, Color(0xFF22242D)), RoundedCornerShape(20.dp)),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF14151B))
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Row(
@@ -191,17 +184,17 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
                             modifier = Modifier.weight(1f)
                         ) {
-                            // Avatar Squircle
+                            // Avatar Circle
                             Box(
                                 contentAlignment = Alignment.Center,
                                 modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(RoundedCornerShape(14.dp))
+                                    .size(52.dp)
+                                    .clip(CircleShape)
                                     .background(Color(0xFF1B1D25))
-                                    .border(1.dp, Color(0xFF2D303B), RoundedCornerShape(14.dp))
+                                    .border(1.dp, Color(0xFF2E313D), CircleShape)
                             ) {
                                 val avatarBitmap = remember(session.avatarUrl) {
                                     val path = session.avatarUrl?.removePrefix("file://")
@@ -227,101 +220,130 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                                 } else {
                                     Text(
                                         text = session.initials,
-                                        color = TextPrimary,
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.Bold
+                                        color = Color.White,
+                                        fontSize = 17.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 0.5.sp
                                     )
                                 }
                             }
 
                             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text(
-                                    text = session.firstName.ifBlank { "Telegram User" },
-                                    color = TextPrimary,
-                                    fontSize = 15.sp,
+                                    text = session.firstName.ifBlank { "User Account" },
+                                    color = Color.White,
+                                    fontSize = 17.sp,
                                     fontWeight = FontWeight.SemiBold,
+                                    letterSpacing = (-0.3).sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = if (session.username.isNotBlank()) "@${session.username}" else "Telegram Account",
-                                    color = TextSecondary,
-                                    fontSize = 12.sp,
+                                    text = if (session.username.isNotBlank()) "@${session.username} • Account info & session"
+                                           else "Account info, session and settings",
+                                    color = Color(0xFF8E909B),
+                                    fontSize = 12.5.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
 
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            NothingPillButton(
-                                text = "Logout",
-                                onClick = { showLogoutDialog = true },
-                                variant = NothingButtonVariant.Ghost,
-                                height = 32.dp,
-                                modifier = Modifier.wrapContentWidth()
-                            )
-
-                            val rotation by animateFloatAsState(
-                                targetValue = if (expandedAccount) 180f else 0f,
-                                label = "account_rot"
-                            )
-                            Box(
-                                contentAlignment = Alignment.Center,
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF1B1D25))
-                                    .rotate(rotation)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.KeyboardArrowDown,
-                                    contentDescription = null,
-                                    tint = Color(0xFFA0A3B0),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
+                        val chevronRotation by animateFloatAsState(
+                            targetValue = if (expandedAccount) 90f else 0f,
+                            animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                            label = "apple_profile_chevron"
+                        )
+                        Icon(
+                            imageVector = Icons.Default.ChevronRight,
+                            contentDescription = if (expandedAccount) "Collapse" else "Expand",
+                            tint = Color(0xFF6B7280),
+                            modifier = Modifier
+                                .size(20.dp)
+                                .rotate(chevronRotation)
+                        )
                     }
 
                     AnimatedVisibility(
                         visible = expandedAccount,
-                        enter = fadeIn(tween(180)) + expandVertically(),
-                        exit = fadeOut(tween(140)) + shrinkVertically()
+                        enter = fadeIn(tween(180)) + expandVertically(spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow)),
+                        exit = fadeOut(tween(140)) + shrinkVertically(spring(stiffness = Spring.StiffnessMediumLow))
                     ) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
+                                .padding(start = 16.dp, end = 16.dp, bottom = 14.dp)
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(0.5.dp)
-                                    .background(Color(0xFF22242D))
+                            HorizontalDivider(
+                                color = Color(0xFF22242D),
+                                thickness = 0.5.dp,
+                                modifier = Modifier.padding(bottom = 12.dp)
                             )
-                            Spacer(modifier = Modifier.height(12.dp))
 
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text("USER ID", color = TextTertiary, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                                    Text(if (session.userId > 0) "${session.userId}" else "—", color = TextPrimary, fontSize = 13.sp)
-                                }
-                                Column(verticalArrangement = Arrangement.spacedBy(4.dp), horizontalAlignment = Alignment.End) {
-                                    Text("STATUS", color = TextTertiary, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                                    Text(
-                                        text = if (session.isLoggedIn) "Connected" else "Disconnected",
-                                        color = if (session.isLoggedIn) StatusGreen else StatusRed,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Medium
+                            // Apple-style item rows
+                            AccountDetailRow(
+                                label = "Name",
+                                value = session.firstName.ifBlank { "—" }
+                            )
+                            AccountDetailRow(
+                                label = "Username",
+                                value = if (session.username.isNotBlank()) "@${session.username}" else "—"
+                            )
+                            AccountDetailRow(
+                                label = "Telegram ID",
+                                value = if (session.userId > 0) "${session.userId}" else "—",
+                                onCopy = if (session.userId > 0) {
+                                    {
+                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        clipboard.setPrimaryClip(ClipData.newPlainText("Telegram ID", "${session.userId}"))
+                                        Toast.makeText(context, "Copied ID", Toast.LENGTH_SHORT).show()
+                                    }
+                                } else null
+                            )
+                            AccountDetailRow(
+                                label = "Phone",
+                                value = session.phoneNumber.ifBlank { "—" }
+                            )
+                            AccountDetailRow(
+                                label = "Status",
+                                customValue = {
+                                    NothingDotBadge(
+                                        text = if (session.isLoggedIn) "CONNECTED" else "OFFLINE",
+                                        dotColor = if (session.isLoggedIn) StatusGreen else StatusRed,
+                                        backgroundColor = if (session.isLoggedIn) Color(0x1F34C759) else Color(0x1FFF453A),
+                                        textColor = if (session.isLoggedIn) StatusGreen else StatusRed
                                     )
                                 }
+                            )
+
+                            HorizontalDivider(
+                                color = Color(0xFF22242D),
+                                thickness = 0.5.dp,
+                                modifier = Modifier.padding(vertical = 10.dp)
+                            )
+
+                            // Clean Log Out Action
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { showLogoutDialog = true }
+                                    .padding(vertical = 8.dp, horizontal = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ExitToApp,
+                                    contentDescription = "Log Out",
+                                    tint = StatusRed,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = "Log Out of Telegram Account",
+                                    color = StatusRed,
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
                             }
                         }
                     }
@@ -412,37 +434,183 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 )
                 Spacer(modifier = Modifier.height(12.dp))
 
-                NothingTextField(
-                    value = tmdbKeyInput,
-                    onValueChange = {
-                        tmdbKeyInput = it
-                        tmdbKeyError = null
-                    },
-                    label = "TMDB KEY (V3)",
-                    badgeText = "MOVIES & SHOWS",
-                    placeholder = "Paste your TMDB API Key...",
-                    isMonospace = true,
-                    singleLine = true,
-                    isError = tmdbKeyError != null,
-                    errorMessage = tmdbKeyError
-                )
+                if (config.tmdbApiKey.isNotBlank() && !isEditingTmdb) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color(0xFF161820))
+                            .border(1.dp, Color(0xFF242732), RoundedCornerShape(14.dp))
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "TMDB API KEY",
+                                    color = Color(0xFFA0A3B0),
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontFamily = FontFamily.Monospace,
+                                    letterSpacing = 0.5.sp
+                                )
+                                NothingDotBadge(
+                                    text = "VERIFIED ✓",
+                                    dotColor = StatusGreen,
+                                    textColor = StatusGreen,
+                                    backgroundColor = Color(0x1F34C759)
+                                )
+                            }
+
+                            NothingPillButton(
+                                text = "Change",
+                                onClick = {
+                                    isEditingTmdb = true
+                                    tmdbKeyInput = config.tmdbApiKey
+                                },
+                                variant = NothingButtonVariant.Ghost,
+                                height = 28.dp
+                            )
+                        }
+
+                        val maskedTmdb = "••••••••••••••••" + if (config.tmdbApiKey.length >= 4) config.tmdbApiKey.takeLast(4) else "••••"
+                        Text(
+                            text = maskedTmdb,
+                            color = Color.White,
+                            fontSize = 13.5.sp,
+                            fontFamily = FontFamily.Monospace,
+                            letterSpacing = 1.sp
+                        )
+                    }
+                } else {
+                    NothingTextField(
+                        value = tmdbKeyInput,
+                        onValueChange = {
+                            tmdbKeyInput = it
+                            tmdbKeyError = null
+                        },
+                        label = "TMDB KEY (V3)",
+                        badgeText = "MOVIES & SHOWS",
+                        placeholder = "Paste your TMDB API Key...",
+                        isMonospace = true,
+                        singleLine = true,
+                        isError = tmdbKeyError != null,
+                        errorMessage = tmdbKeyError,
+                        trailingIcon = if (isEditingTmdb) {
+                            {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Cancel Edit",
+                                    tint = TextTertiary,
+                                    modifier = Modifier
+                                        .size(16.dp)
+                                        .clickable {
+                                            isEditingTmdb = false
+                                            tmdbKeyInput = config.tmdbApiKey
+                                            tmdbKeyError = null
+                                        }
+                                )
+                            }
+                        } else null
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                NothingTextField(
-                    value = tvdbKeyInput,
-                    onValueChange = {
-                        tvdbKeyInput = it
-                        tvdbKeyError = null
-                    },
-                    label = "TVDB KEY (V4)",
-                    badgeText = "SERIES & ANIME",
-                    placeholder = "Paste your TVDB API Key...",
-                    isMonospace = true,
-                    singleLine = true,
-                    isError = tvdbKeyError != null,
-                    errorMessage = tvdbKeyError
-                )
+                if (config.tvdbApiKey.isNotBlank() && !isEditingTvdb) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color(0xFF161820))
+                            .border(1.dp, Color(0xFF242732), RoundedCornerShape(14.dp))
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "TVDB API KEY",
+                                    color = Color(0xFFA0A3B0),
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontFamily = FontFamily.Monospace,
+                                    letterSpacing = 0.5.sp
+                                )
+                                NothingDotBadge(
+                                    text = "VERIFIED ✓",
+                                    dotColor = StatusGreen,
+                                    textColor = StatusGreen,
+                                    backgroundColor = Color(0x1F34C759)
+                                )
+                            }
+
+                            NothingPillButton(
+                                text = "Change",
+                                onClick = {
+                                    isEditingTvdb = true
+                                    tvdbKeyInput = config.tvdbApiKey
+                                },
+                                variant = NothingButtonVariant.Ghost,
+                                height = 28.dp
+                            )
+                        }
+
+                        val maskedTvdb = "••••••••••••••••" + if (config.tvdbApiKey.length >= 4) config.tvdbApiKey.takeLast(4) else "••••"
+                        Text(
+                            text = maskedTvdb,
+                            color = Color.White,
+                            fontSize = 13.5.sp,
+                            fontFamily = FontFamily.Monospace,
+                            letterSpacing = 1.sp
+                        )
+                    }
+                } else {
+                    NothingTextField(
+                        value = tvdbKeyInput,
+                        onValueChange = {
+                            tvdbKeyInput = it
+                            tvdbKeyError = null
+                        },
+                        label = "TVDB KEY (V4)",
+                        badgeText = "SERIES & ANIME",
+                        placeholder = "Paste your TVDB API Key...",
+                        isMonospace = true,
+                        singleLine = true,
+                        isError = tvdbKeyError != null,
+                        errorMessage = tvdbKeyError,
+                        trailingIcon = if (isEditingTvdb) {
+                            {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Cancel Edit",
+                                    tint = TextTertiary,
+                                    modifier = Modifier
+                                        .size(16.dp)
+                                        .clickable {
+                                            isEditingTvdb = false
+                                            tvdbKeyInput = config.tvdbApiKey
+                                            tvdbKeyError = null
+                                        }
+                                )
+                            }
+                        } else null
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(12.dp))
 
@@ -476,7 +644,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 Spacer(modifier = Modifier.height(14.dp))
 
                 NothingPillButton(
-                    text = if (isVerifyingKeys) "Verifying..." else "Save & Verify Provider Keys →",
+                    text = if (isVerifyingKeys) "Verifying..." else if (isEditingTmdb || isEditingTvdb || config.tmdbApiKey.isBlank() || config.tvdbApiKey.isBlank()) "Save & Verify Provider Keys →" else "Re-verify Provider Keys →",
                     isLoading = isVerifyingKeys,
                     onClick = {
                         coroutineScope.launch {
@@ -486,11 +654,13 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                             val (success, msg) = viewModel.verifyAndSaveMetadataKeys(tmdbKeyInput, tvdbKeyInput)
                             isVerifyingKeys = false
                             if (success) {
+                                isEditingTmdb = false
+                                isEditingTvdb = false
                                 Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                             } else {
-                                if (msg.contains("TMDB")) {
+                                if (msg.contains("TMDB", ignoreCase = true)) {
                                     tmdbKeyError = msg
-                                } else if (msg.contains("TVDB")) {
+                                } else if (msg.contains("TVDB", ignoreCase = true)) {
                                     tvdbKeyError = msg
                                 } else {
                                     Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
@@ -1487,6 +1657,55 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 }
             }
 
+            // ==================== FOOTER ====================
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp, bottom = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable {
+                            try {
+                                val intent = Intent(
+                                    Intent.ACTION_VIEW,
+                                    Uri.parse("https://www.instagram.com/theaceofficials")
+                                )
+                                context.startActivity(intent)
+                            } catch (_: Exception) {
+                                Toast.makeText(context, "Could not open Instagram link", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text = "Designed by",
+                        color = Color(0xFF6B7280),
+                        fontSize = 11.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 0.2.sp
+                    )
+                    Text(
+                        text = "The Ace",
+                        color = Color.White,
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = NdotFont,
+                        letterSpacing = 0.5.sp
+                    )
+                    Icon(
+                        imageVector = Icons.Default.OpenInNew,
+                        contentDescription = "Instagram link",
+                        tint = Color(0xFFE50914),
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+            }
+
             Spacer(modifier = Modifier.height(36.dp))
         }
     }
@@ -1912,3 +2131,51 @@ private fun formatBytes(bytes: Long): String {
     val digitGroups = (Math.log10(bytes.toDouble()) / Math.log10(1024.0)).toInt().coerceIn(0, units.size - 1)
     return String.format(java.util.Locale.US, "%.1f %s", bytes / Math.pow(1024.0, digitGroups.toDouble()), units[digitGroups])
 }
+
+@Composable
+private fun AccountDetailRow(
+    label: String,
+    value: String = "",
+    onCopy: (() -> Unit)? = null,
+    customValue: (@Composable () -> Unit)? = null
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 5.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            color = Color(0xFF8E909B),
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Normal
+        )
+        if (customValue != null) {
+            customValue()
+        } else {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = if (onCopy != null) Modifier.clickable { onCopy() } else Modifier
+            ) {
+                Text(
+                    text = value,
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                if (onCopy != null) {
+                    Icon(
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = "Copy",
+                        tint = Color(0xFF6B7280),
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
