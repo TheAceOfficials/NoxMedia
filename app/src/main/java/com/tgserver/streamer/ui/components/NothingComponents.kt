@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
@@ -522,7 +523,6 @@ fun AdaptiveScreenContainer(
 }
 
 /**
-/**
  * Sleek Pill Toggle Switch (Inspired by Uiverse.io SelfMadeSystem design).
  * Elongated aspect ratio (212.5 / 84.5 ~ 2.51), smooth 0.5s ease-out transitions,
  * outer halo border, sliding thumb, and animated flipping vector glyph with haptic feedback.
@@ -616,7 +616,7 @@ fun NothingSwitch(
             Canvas(
                 modifier = Modifier
                     .size(10.dp)
-                    .scale(scaleX = 1f, scaleY = scaleYAnim)
+                    .graphicsLayer { scaleY = scaleYAnim }
             ) {
                 val strokeWidthPx = 1.8.dp.toPx()
                 val glyphColor = if (checked) activeColor else Color(0xFF4A4D5C)

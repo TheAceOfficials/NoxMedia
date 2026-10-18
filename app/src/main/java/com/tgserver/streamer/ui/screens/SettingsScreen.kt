@@ -18,7 +18,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -250,12 +250,12 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         }
 
                         val chevronRotation by animateFloatAsState(
-                            targetValue = if (expandedAccount) 90f else 0f,
+                            targetValue = if (expandedAccount) 0f else -90f,
                             animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
                             label = "apple_profile_chevron"
                         )
                         Icon(
-                            imageVector = Icons.Default.ChevronRight,
+                            imageVector = Icons.Default.KeyboardArrowDown,
                             contentDescription = if (expandedAccount) "Collapse" else "Expand",
                             tint = Color(0xFF6B7280),
                             modifier = Modifier
@@ -1698,7 +1698,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         letterSpacing = 0.5.sp
                     )
                     Icon(
-                        imageVector = Icons.Default.OpenInNew,
+                        imageVector = Icons.AutoMirrored.Filled.OpenInNew,
                         contentDescription = "Instagram link",
                         tint = Color(0xFFE50914),
                         modifier = Modifier.size(13.dp)
