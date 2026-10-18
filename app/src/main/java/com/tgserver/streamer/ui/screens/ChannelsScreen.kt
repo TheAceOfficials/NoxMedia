@@ -8,6 +8,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -74,6 +75,7 @@ fun ChannelsScreen(viewModel: MainAppViewModel) {
 
     var channelInput by remember { mutableStateOf("") }
     var isAnimeChannel by remember { mutableStateOf(false) }
+    var showAnimeInfo by remember { mutableStateOf(false) }
     var showUnmatchedSheet by remember { mutableStateOf(false) }
 
     LazyColumn(
@@ -178,40 +180,55 @@ fun ChannelsScreen(viewModel: MainAppViewModel) {
                         }
                     }
 
-                    // Options & Action Row (Mark as Anime Channel radio dot + Add pill button)
+                    // Options & Action Row (Mark as Anime Channel radio dot + info icon + Add pill button)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Radio dot toggle
+                        // Radio dot toggle + Info icon
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .clickable {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    isAnimeChannel = !isAnimeChannel
-                                }
-                                .padding(vertical = 4.dp, horizontal = 2.dp)
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Box(
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier
-                                    .size(12.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        isAnimeChannel = !isAnimeChannel
+                                    }
+                                    .padding(vertical = 4.dp, horizontal = 2.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(13.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isAnimeChannel) Color(0xFF10B981) else Color.Transparent)
+                                        .border(
+                                            1.5.dp,
+                                            if (isAnimeChannel) Color(0xFF10B981) else Color(0xFF4B5563),
+                                            CircleShape
+                                        )
+                                )
+                                Text(
+                                    text = "Mark as Anime Channel",
+                                    color = if (isAnimeChannel) Color.White else Color(0xFF9CA3AF),
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Normal
+                                )
+                            }
+
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = "Anime Parser Details",
+                                tint = if (showAnimeInfo) Color.White else Color(0xFF6B7280),
+                                modifier = Modifier
+                                    .size(15.dp)
                                     .clip(CircleShape)
-                                    .background(if (isAnimeChannel) Color(0xFF10B981) else Color.Transparent)
-                                    .border(
-                                        1.5.dp,
-                                        if (isAnimeChannel) Color(0xFF10B981) else Color(0xFF4B5563),
-                                        CircleShape
-                                    )
-                            )
-                            Text(
-                                text = "Mark as Anime Channel",
-                                color = if (isAnimeChannel) Color.White else Color(0xFF9CA3AF),
-                                fontFamily = NdotFont,
-                                fontSize = 10.sp
+                                    .clickable { showAnimeInfo = !showAnimeInfo }
                             )
                         }
 
@@ -259,32 +276,44 @@ fun ChannelsScreen(viewModel: MainAppViewModel) {
                                     Text(
                                         text = "Adding..",
                                         color = Color.White,
-                                        fontFamily = NdotFont,
-                                        fontSize = 9.sp
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium
                                     )
                                 } else {
                                     Text(
                                         text = "Add",
                                         color = if (channelInput.isNotBlank()) Color.White else Color(0xFF6B7280),
-                                        fontFamily = NdotFont,
-                                        fontSize = 9.5.sp
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium
                                     )
                                 }
                             }
                         }
                     }
 
-                    // Explanatory footnote
-                    Text(
-                        text = "* Anime channels use Kitsu database sorted by absolute episode number wise for ex: (One Piece 1131)",
-                        color = Color(0xFF6B7280),
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 8.5.sp,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 2.dp)
-                    )
+                    // Expandable Info Box (same design language as Settings)
+                    AnimatedVisibility(
+                        visible = showAnimeInfo,
+                        enter = fadeIn(tween(150)) + expandVertically(),
+                        exit = fadeOut(tween(120)) + shrinkVertically()
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF161820))
+                                .border(1.dp, Color(0xFF242732), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 10.dp, vertical = 8.dp)
+                        ) {
+                            Text(
+                                text = "Anime channels use the Kitsu database sorted by absolute episode numbering (e.g. One Piece 1131) instead of standard Season/Episode format.",
+                                color = Color(0xFFA0A3B0),
+                                fontSize = 11.5.sp,
+                                lineHeight = 16.sp
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -604,11 +633,20 @@ private fun ChannelItemCard(
 
     val statsText = remember(movieCount, showCount, episodeCount, channel.videoCount) {
         when {
-            movieCount > 0 && showCount > 0 -> "$movieCount Movies | ${showCount.toString().padStart(2, '0')} Shows - $episodeCount Episodes"
-            movieCount > 0 -> "$movieCount Movies"
-            showCount > 0 -> "${showCount.toString().padStart(2, '0')} Shows - $episodeCount Episodes"
+            movieCount > 0 && showCount > 0 -> {
+                val movieStr = if (movieCount == 1) "1 Movie" else "$movieCount Movies"
+                val showStr = if (showCount == 1) "1 Show" else "$showCount Shows"
+                val epStr = if (episodeCount == 1) "1 Episode" else "$episodeCount Episodes"
+                "$movieStr  •  $showStr  •  $epStr"
+            }
+            movieCount > 0 -> if (movieCount == 1) "1 Movie" else "$movieCount Movies"
+            showCount > 0 -> {
+                val showStr = if (showCount == 1) "1 Show" else "$showCount Shows"
+                val epStr = if (episodeCount == 1) "1 Episode" else "$episodeCount Episodes"
+                "$showStr  •  $epStr"
+            }
             channel.videoCount > 0 -> "${channel.videoCount} Media Files"
-            else -> "0 Shows - 0 Episodes"
+            else -> "0 Media Files"
         }
     }
 
@@ -852,65 +890,73 @@ private fun ChannelItemCard(
                     }
                 }
 
-                // BOTTOM ROW: Movies | Shows - Episodes + Last Scan + Scan Button
+                // STATS ROW: Movies • Shows • Episodes (Full width, never truncated)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = statsText,
+                        color = Color(0xFF9CA3AF),
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Normal
+                    )
+                }
+
+                // BOTTOM ACTION ROW: Synced status on Left, Scan Button on Right
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = statsText,
-                        color = Color(0xFF888888),
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 9.5.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text(
-                            text = relativeScanTime,
-                            color = Color(0xFF6B7280),
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 9.sp
-                        )
-
-                        // Scan / Scanning Button
                         Box(
                             modifier = Modifier
-                                .height(24.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(if (isScanning) Color(0xFF15261C) else Color(0xFF14151A))
-                                .border(
-                                    1.dp,
-                                    if (isScanning) Color(0xFF10B981) else Color(0xFF2E303D),
-                                    RoundedCornerShape(12.dp)
-                                )
-                                .clickable {
-                                    if (isScanning) onStopScan() else onScan()
-                                }
-                                .padding(horizontal = 10.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (isScanning) {
-                                Text(
-                                    text = "Scanning..",
-                                    color = Color(0xFF10B981),
-                                    fontFamily = NdotFont,
-                                    fontSize = 8.5.sp
-                                )
-                            } else {
-                                Text(
-                                    text = "Scan",
-                                    color = Color(0xFFD1D5DB),
-                                    fontFamily = NdotFont,
-                                    fontSize = 9.sp
-                                )
+                                .size(5.dp)
+                                .background(if (isScanning) Color(0xFF10B981) else Color(0xFF6B7280), CircleShape)
+                        )
+                        Text(
+                            text = if (isScanning) "Scanning library..." else if (relativeScanTime == "Never") "Never synced" else "Synced $relativeScanTime",
+                            color = if (isScanning) Color(0xFF10B981) else Color(0xFF9CA3AF),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Normal
+                        )
+                    }
+
+                    // Scan / Scanning Button
+                    Box(
+                        modifier = Modifier
+                            .height(28.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(if (isScanning) Color(0xFF15261C) else Color(0xFF22242D))
+                            .border(
+                                1.dp,
+                                if (isScanning) Color(0xFF10B981) else Color(0xFF353846),
+                                RoundedCornerShape(14.dp)
+                            )
+                            .clickable {
+                                if (isScanning) onStopScan() else onScan()
                             }
+                            .padding(horizontal = 14.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isScanning) {
+                            Text(
+                                text = "Scanning..",
+                                color = Color(0xFF10B981),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        } else {
+                            Text(
+                                text = "Scan",
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
                         }
                     }
                 }
@@ -1007,12 +1053,12 @@ private fun formatRelativeScanTime(lastSyncTime: Long): String {
     if (lastSyncTime <= 0L) return "Never"
     val diffSec = (System.currentTimeMillis() - lastSyncTime) / 1000
     return when {
-        diffSec < 60 -> "Just now"
+        diffSec < 60 -> "just now"
         diffSec < 3600 -> "${diffSec / 60}m ago"
-        diffSec < 7200 -> "1 Hour ago"
-        diffSec < 86400 -> "${diffSec / 3600} Hours ago"
-        diffSec < 172800 -> "Last Scan • Yesterday"
-        else -> "Last Scan • ${diffSec / 86400}d ago"
+        diffSec < 7200 -> "1h ago"
+        diffSec < 86400 -> "${diffSec / 3600}h ago"
+        diffSec < 172800 -> "yesterday"
+        else -> "${diffSec / 86400}d ago"
     }
 }
 
