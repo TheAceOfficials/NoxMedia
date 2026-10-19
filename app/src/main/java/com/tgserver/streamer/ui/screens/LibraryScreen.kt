@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -212,6 +213,7 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
     val telemetry by viewModel.telemetry.collectAsState()
     val navGroupKey by viewModel.selectedMediaGroupKey.collectAsState()
     val haptic = LocalHapticFeedback.current
+    val gridState = rememberLazyGridState()
 
     // Group raw files into distinct titles (Movies and Series entities)
     val mediaGroups = remember(allMedia) {
@@ -304,6 +306,13 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                 compareByDescending<MediaGroup> { it.rating }
                     .thenBy { it.title.lowercase() }
             )
+        }
+    }
+
+    // Scroll to top only when user switches category or types a new search query
+    LaunchedEffect(selectedCategory, searchQuery) {
+        if (filteredGroups.isNotEmpty()) {
+            gridState.scrollToItem(0)
         }
     }
 
@@ -637,6 +646,7 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                     } else {
                         LazyVerticalGrid(
                             columns = GridCells.Fixed(2),
+                            state = gridState,
                             horizontalArrangement = Arrangement.spacedBy(14.dp),
                             verticalArrangement = Arrangement.spacedBy(18.dp),
                             modifier = Modifier.fillMaxSize(),
