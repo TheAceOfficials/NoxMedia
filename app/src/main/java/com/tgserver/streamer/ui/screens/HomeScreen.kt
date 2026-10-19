@@ -22,8 +22,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -486,88 +490,127 @@ fun HomeScreen(viewModel: MainAppViewModel) {
             }
         }
 
-        // LIBRARY CARD (Deep Cosmic Purple with Lower Shelf)
-        Card(
+        // 3D COSMIC PURPLE LIBRARY WIDGET (Siri Waveform & Apple 3D Vibe)
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
-                .clip(RoundedCornerShape(20.dp))
+                .clip(RoundedCornerShape(30.dp))
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(
+                            Color(0xFF8B5CF6), // Luminous lilac violet at top-left
+                            Color(0xFF6D28D9), // Vibrant purple
+                            Color(0xFF4C1D95), // Deep royal violet
+                            Color(0xFF2E1065)  // Cosmic dark plum at bottom-right
+                        ),
+                        start = Offset(0f, 0f),
+                        end = Offset.Infinite
+                    )
+                )
                 .border(
-                    BorderStroke(1.dp, Color(0xFF3C1460)),
-                    shape = RoundedCornerShape(20.dp)
+                    BorderStroke(
+                        1.dp,
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0x66E9D5FF), // Glass edge highlight
+                                Color(0x33A855F7), // Mid violet
+                                Color(0x153B0764)  // Subtle base shadow
+                            )
+                        )
+                    ),
+                    shape = RoundedCornerShape(30.dp)
                 )
                 .clickable {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     viewModel.selectTab(AppTab.LIBRARY)
-                },
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF18072B))
+                }
+                .padding(horizontal = 22.dp, vertical = 20.dp)
         ) {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                // Upper Section: "Library" + 4 Stats
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 16.dp, bottom = 18.dp)
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Top Row: "Library" title + Chevron Arrow
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "Library",
-                        color = Color(0xFFC084FC),
-                        fontFamily = NdotFont,
-                        fontSize = 13.5.sp,
-                        modifier = Modifier.padding(horizontal = 18.dp)
+                        color = Color(0xFFF3E8FF),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        letterSpacing = 0.3.sp
                     )
 
-                    Spacer(modifier = Modifier.height(18.dp))
-
-                    // 4 Stats Columns in a single balanced row
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        LibraryStatItem(
-                            value = "$moviesCount",
-                            label = "Movies",
-                            modifier = Modifier.weight(1f)
-                        )
-                        LibraryStatItem(
-                            value = "$showsCount",
-                            label = "Shows",
-                            modifier = Modifier.weight(1f)
-                        )
-                        LibraryStatItem(
-                            value = "$episodesCount",
-                            label = "Episodes",
-                            modifier = Modifier.weight(1.05f)
-                        )
-                        LibraryStatItem(
-                            value = "$contentFilesCount",
-                            label = "Content Files",
-                            modifier = Modifier.weight(1.35f)
-                        )
-                    }
+                    Text(
+                        text = "›",
+                        color = Color(0xCCE9D5FF),
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Light
+                    )
                 }
 
-                // Lower Shelf: Total Server Size
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color(0xFF0F031C))
-                        .border(
-                            width = 1.dp,
-                            color = Color(0xFF2C0D48),
-                            shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp)
+                // Middle Row: Big Dot-Matrix Content Count + Animated Siri Waveform
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.Bottom,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "$contentFilesCount",
+                            color = Color.White,
+                            fontFamily = NdotFont,
+                            fontSize = 32.sp,
+                            lineHeight = 32.sp
                         )
-                        .padding(horizontal = 18.dp, vertical = 12.dp)
+                        Text(
+                            text = "files",
+                            color = Color(0xFFE9D5FF),
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.Normal,
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                    }
+
+                    // Smooth Siri Harmonic Waveform (Low-overhead Canvas animation)
+                    SiriWaveform(
+                        modifier = Modifier
+                            .width(115.dp)
+                            .height(42.dp)
+                    )
+                }
+
+                // Bottom Row: Detailed Category Breakdown + Total Storage Size
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Total Server Size: $totalServerSizeFormatted",
-                        color = Color(0xFFA855F7),
+                        text = "$moviesCount Movies  •  $showsCount Shows  •  $episodesCount Ep",
+                        color = Color(0xFFDDD6FE),
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Normal,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 8.dp)
+                    )
+
+                    Text(
+                        text = totalServerSizeFormatted,
+                        color = Color.White,
                         fontFamily = NdotFont,
-                        fontSize = 11.5.sp
+                        fontSize = 12.sp,
+                        maxLines = 1
                     )
                 }
             }
@@ -822,32 +865,64 @@ private fun ProfileAvatar(
 }
 
 @Composable
-private fun LibraryStatItem(
-    value: String,
-    label: String,
+private fun SiriWaveform(
     modifier: Modifier = Modifier
 ) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = modifier
-    ) {
-        Text(
-            text = value,
-            color = Color.White,
-            fontFamily = NdotFont,
-            fontSize = 20.sp,
-            maxLines = 1
+    val infiniteTransition = rememberInfiniteTransition(label = "siri_wave_anim")
+    val phase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2 * Math.PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 3500, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "siri_phase"
+    )
+
+    Canvas(modifier = modifier) {
+        val width = size.width
+        val height = size.height
+        val centerY = height / 2f
+        val maxAmplitude = height * 0.42f
+
+        // 3 harmonic waves with smooth gaussian/sine envelope for seamless end tapering
+        val waveConfigs = listOf(
+            Triple(1.0f, 0.0f, Color(0xEEFFFFFF) to 1.6f),
+            Triple(1.3f, 1.2f, Color(0xB3E9D5FF) to 1.2f),
+            Triple(0.8f, 2.5f, Color(0x80C084FC) to 1.0f)
         )
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-            text = label,
-            color = Color(0xFFC084FC),
-            fontFamily = NdotFont,
-            fontSize = 10.sp,
-            maxLines = 1,
-            softWrap = false,
-            textAlign = TextAlign.Center
-        )
+
+        for ((freqMult, phaseOffset, style) in waveConfigs) {
+            val (color, strokeWidthDp) = style
+            val strokeWidthPx = strokeWidthDp.dp.toPx()
+            val path = Path()
+            val steps = 36
+            val dx = width / steps
+
+            for (i in 0..steps) {
+                val x = i * dx
+                val normX = x / width
+                val envelope = kotlin.math.sin(kotlin.math.PI * normX).toFloat()
+                val angle = (normX * 2.2f * 2 * kotlin.math.PI * freqMult + phase + phaseOffset).toFloat()
+                val y = centerY + kotlin.math.sin(angle) * maxAmplitude * envelope
+
+                if (i == 0) {
+                    path.moveTo(x, y)
+                } else {
+                    path.lineTo(x, y)
+                }
+            }
+
+            drawPath(
+                path = path,
+                color = color,
+                style = Stroke(
+                    width = strokeWidthPx,
+                    cap = StrokeCap.Round,
+                    join = StrokeJoin.Round
+                )
+            )
+        }
     }
 }
 
