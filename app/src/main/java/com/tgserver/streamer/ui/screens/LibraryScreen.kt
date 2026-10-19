@@ -9,12 +9,13 @@ import android.net.Uri
 import android.util.LruCache
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -66,6 +67,7 @@ import com.tgserver.streamer.metadata.EnrichedMetadata
 import com.tgserver.streamer.theme.*
 import com.tgserver.streamer.ui.MainAppViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -211,6 +213,39 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
     val mediaGroups = remember(allMedia) {
         allMedia.toMediaGroups()
     }
+
+    // Dynamic animated search placeholders from user library & popular titles
+    val searchPlaceholders = remember(mediaGroups) {
+        val libraryTitles = mediaGroups.map { it.title.trim() }.filter { it.isNotBlank() }.distinct()
+        val defaultExamples = listOf(
+            "Naruto",
+            "One Piece",
+            "Spider-Man: Brand New Day",
+            "Loki",
+            "Peacemaker",
+            "Demon Slayer",
+            "Breaking Bad",
+            "Jujutsu Kaisen"
+        )
+        if (libraryTitles.size >= 3) {
+            libraryTitles.shuffled()
+        } else {
+            (libraryTitles + defaultExamples).distinct()
+        }
+    }
+
+    var placeholderIndex by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(searchPlaceholders) {
+        if (searchPlaceholders.isNotEmpty()) {
+            while (true) {
+                delay(3200)
+                placeholderIndex = (placeholderIndex + 1) % searchPlaceholders.size
+            }
+        }
+    }
+
+    val currentPlaceholderTitle = searchPlaceholders.getOrElse(placeholderIndex) { "Naruto" }
 
     var selectedGroupKey by remember(navGroupKey) { mutableStateOf(navGroupKey) }
     val selectedGroup = mediaGroups.find { it.key == selectedGroupKey }
@@ -361,16 +396,19 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                         }
                     }
 
-                    // MINIMAL & COMPACT SEARCH BAR (42dp height, sleek border)
+                    // DYNAMIC ANIMATED SEARCH BAR (Sleek Capsule Pill with Rotating Library Titles)
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 20.dp)
-                            .height(42.dp)
-                            .clip(RoundedCornerShape(12.dp))
+                            .height(44.dp)
+                            .clip(RoundedCornerShape(999.dp))
                             .background(Color(0xFF14151B))
-                            .border(1.dp, Color(0xFF25262F), RoundedCornerShape(12.dp))
-                            .padding(horizontal = 12.dp),
+                            .border(
+                                BorderStroke(1.dp, if (searchQuery.isNotBlank()) Color(0xFFA855F7) else Color(0xFF25262F)),
+                                shape = RoundedCornerShape(999.dp)
+                            )
+                            .padding(horizontal = 14.dp),
                         contentAlignment = Alignment.CenterStart
                     ) {
                         Row(
@@ -381,17 +419,28 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                             Icon(
                                 imageVector = Icons.Default.Search,
                                 contentDescription = "Search",
-                                tint = Color(0xFF888B98),
+                                tint = if (searchQuery.isNotBlank()) Color(0xFFA855F7) else Color(0xFF888B98),
                                 modifier = Modifier.size(16.dp)
                             )
-                            Box(modifier = Modifier.weight(1f)) {
+                            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                                 if (searchQuery.isEmpty()) {
-                                    Text(
-                                        text = "Search title, IMDb, resolution...",
-                                        color = Color(0xFF6B6E7B),
-                                        fontSize = 12.sp,
-                                        fontFamily = FontFamily.Default
-                                    )
+                                    AnimatedContent(
+                                        targetState = currentPlaceholderTitle,
+                                        transitionSpec = {
+                                            (slideInVertically(animationSpec = tween(360)) { height -> height / 2 } + fadeIn(tween(360))) togetherWith
+                                                    (slideOutVertically(animationSpec = tween(280)) { height -> -height / 2 } + fadeOut(tween(280)))
+                                        },
+                                        label = "search_placeholder_anim"
+                                    ) { title ->
+                                        Text(
+                                            text = "Search \"$title\"...",
+                                            color = Color(0xFF6B6E7B),
+                                            fontSize = 12.5.sp,
+                                            fontFamily = FontFamily.Default,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
                                 }
                                 BasicTextField(
                                     value = searchQuery,
@@ -419,43 +468,88 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                         }
                     }
 
-                    // CATEGORY CHIPS (Edge-to-Edge full width carousel)
+                    // IOS GLASS SEGMENTED CONTROL TABS (Inspired by cc-ios-tabs)
                     val categories = listOf(
                         "all" to "ALL",
                         "movies" to "MOVIES",
                         "series" to "SERIES",
                         "anime" to "ANIME",
-                        "4k" to "4K UHD"
+                        "4k" to "4K"
                     )
-                    LazyRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        contentPadding = PaddingValues(horizontal = 20.dp)
+
+                    BoxWithConstraints(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp)
+                            .height(44.dp)
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(Color(0xFF13141B))
+                            .border(
+                                BorderStroke(1.dp, Color(0xFF242632)),
+                                shape = RoundedCornerShape(999.dp)
+                            )
+                            .padding(4.dp)
                     ) {
-                        items(categories) { (id, label) ->
-                            val isSelected = selectedCategory == id
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(if (isSelected) Color(0xFFA855F7) else Color(0xFF15161D))
-                                    .border(
-                                        1.dp,
-                                        if (isSelected) Color(0xFFA855F7) else Color(0xFF262832),
-                                        RoundedCornerShape(12.dp)
+                        val tabWidth = maxWidth / categories.size
+                        val selectedIndex = categories.indexOfFirst { it.first == selectedCategory }.coerceAtLeast(0)
+                        val indicatorOffset by animateDpAsState(
+                            targetValue = tabWidth * selectedIndex,
+                            animationSpec = spring(
+                                dampingRatio = 0.82f,
+                                stiffness = 380f
+                            ),
+                            label = "ios_tab_thumb_offset"
+                        )
+
+                        // Sliding Thumb Indicator (.cc-ios-tabs__thumb)
+                        Box(
+                            modifier = Modifier
+                                .offset(x = indicatorOffset)
+                                .width(tabWidth)
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(
+                                    Brush.horizontalGradient(
+                                        listOf(Color(0xFF8B5CF6), Color(0xFFA855F7))
                                     )
-                                    .clickable {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        viewModel.setSelectedCategory(id)
-                                    }
-                                    .padding(horizontal = 14.dp, vertical = 6.dp)
-                            ) {
-                                Text(
-                                    text = label,
-                                    color = if (isSelected) Color.White else Color(0xFF8E909A),
-                                    fontSize = 11.sp,
-                                    fontFamily = NdotFont,
-                                    letterSpacing = 0.5.sp
                                 )
+                                .border(
+                                    BorderStroke(1.dp, Color(0x44FFFFFF)),
+                                    shape = RoundedCornerShape(999.dp)
+                                )
+                        )
+
+                        // Tab Item Labels (.cc-ios-tabs__item)
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            categories.forEach { (id, label) ->
+                                val isSelected = selectedCategory == id
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight()
+                                        .clip(RoundedCornerShape(999.dp))
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null
+                                        ) {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            viewModel.setSelectedCategory(id)
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = label,
+                                        color = if (isSelected) Color.White else Color(0xFF888B98),
+                                        fontSize = 11.5.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        fontFamily = NdotFont,
+                                        letterSpacing = 0.4.sp,
+                                        maxLines = 1
+                                    )
+                                }
                             }
                         }
                     }
