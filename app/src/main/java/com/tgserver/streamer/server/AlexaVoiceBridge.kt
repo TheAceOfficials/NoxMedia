@@ -42,17 +42,18 @@ class AlexaVoiceBridge(
     private var ssdpSocket: MulticastSocket? = null
     private val coroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    // Unique serial per device
+    // Unique serial per device (Belkin standard 14-char format e.g. 221517K...)
     private val serialNumber: String by lazy {
         try {
             val androidId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
             if (!androidId.isNullOrBlank()) {
-                "NOX" + androidId.takeLast(8).uppercase()
+                val clean = androidId.filter { it.isLetterOrDigit() }.takeLast(7).uppercase()
+                "221517K$clean".padEnd(14, '0')
             } else {
-                "NOX7788A1B2"
+                "221517K0101763"
             }
         } catch (_: Exception) {
-            "NOX7788A1B2"
+            "221517K0101763"
         }
     }
 
@@ -61,7 +62,9 @@ class AlexaVoiceBridge(
     }
 
     private val hueMac: String by lazy {
-        serialNumber.takeLast(12).lowercase().padEnd(12, '0')
+        // Philips Hue MACs strictly start with Philips OUI (00:17:88)
+        val suffix = serialNumber.filter { it.isLetterOrDigit() }.takeLast(6).lowercase()
+        "001788$suffix".padEnd(12, '0')
     }
 
     private val hueBridgeId: String by lazy {
@@ -258,9 +261,17 @@ class AlexaVoiceBridge(
                 st.contains("urn:Belkin:service:basicevent:1", ignoreCase = true) ||
                 st.equals("upnp:rootdevice", ignoreCase = true)
 
-        val isHueSearch = st.equals("ssdp:all", ignoreCase = true) ||
-                st.equals("upnp:rootdevice", ignoreCase = true) ||
-                st.contains("urn:schemas-upnp-org:device:basic:1", ignoreCase = true)
+        // Echo Dot (especially 2nd Gen) strictly requires Port 80 for Philips Hue discovery.
+        // When running on non-80 port (e.g. 7790), advertising Hue on generic ssdp:all or upnp:rootdevice
+        // causes Echo Dot to classify the IP as an invalid Hue bridge and discard discovery entirely.
+        // Therefore, only advertise Hue on generic queries if bound to port 80.
+        val isHueSearch = if (actualHttpPort == 80) {
+            st.equals("ssdp:all", ignoreCase = true) ||
+                    st.equals("upnp:rootdevice", ignoreCase = true) ||
+                    st.contains("urn:schemas-upnp-org:device:basic:1", ignoreCase = true)
+        } else {
+            st.contains("urn:schemas-upnp-org:device:basic:1", ignoreCase = true)
+        }
 
         if (!isWeMoSearch && !isHueSearch) return
 
@@ -303,9 +314,8 @@ class AlexaVoiceBridge(
                         "EXT:\r\n" +
                         "LOCATION: http://$localIp:$actualHttpPort/setup.xml\r\n" +
                         "OPT: \"http://schemas.upnp.org/upnp/1/0/\"; ns=01\r\n" +
-                        "01-NLS: $serialNumber\r\n" +
+                        "01-NLS: 1\r\n" +
                         "SERVER: Unspecified, UPnP/1.0, Unspecified\r\n" +
-                        "X-User-Agent: redsonic\r\n" +
                         "ST: $tSt\r\n" +
                         "USN: $tUsn\r\n\r\n"
 
@@ -316,14 +326,25 @@ class AlexaVoiceBridge(
 
         // 2. Respond with Philips Hue Bridge if matching
         if (isHueSearch) {
+            val hueSt = if (st.equals("upnp:rootdevice", ignoreCase = true)) {
+                "upnp:rootdevice"
+            } else {
+                "urn:schemas-upnp-org:device:basic:1"
+            }
+            val hueUsn = if (st.equals("upnp:rootdevice", ignoreCase = true)) {
+                "uuid:2f402f80-da50-11e1-9b23-$hueMac::upnp:rootdevice"
+            } else {
+                "uuid:2f402f80-da50-11e1-9b23-$hueMac::urn:schemas-upnp-org:device:basic:1"
+            }
+
             val hueResponse = "HTTP/1.1 200 OK\r\n" +
                     "CACHE-CONTROL: max-age=100\r\n" +
                     "EXT:\r\n" +
                     "LOCATION: http://$localIp:$actualHttpPort/description.xml\r\n" +
                     "SERVER: Linux/3.14.0 UPnP/1.0 IpBridge/1.24.0\r\n" +
                     "hue-bridgeid: $hueBridgeId\r\n" +
-                    "ST: urn:schemas-upnp-org:device:basic:1\r\n" +
-                    "USN: uuid:2f402f80-da50-11e1-9b23-$hueMac::urn:schemas-upnp-org:device:basic:1\r\n\r\n"
+                    "ST: $hueSt\r\n" +
+                    "USN: $hueUsn\r\n\r\n"
 
             sendUdpResponse(hueResponse.toByteArray(Charsets.UTF_8), remoteAddress, remotePort, socket)
             StreamLog.i(TAG, "Sent Hue SSDP (LOCATION: http://$localIp:$actualHttpPort/description.xml) to ${remoteAddress.hostAddress}:$remotePort")
@@ -337,16 +358,24 @@ class AlexaVoiceBridge(
         multicastSocket: MulticastSocket
     ) {
         val packet = DatagramPacket(bytes, bytes.size, remoteAddress, remotePort)
+        var sentViaMulticast = false
         try {
             multicastSocket.send(packet)
-        } catch (_: Exception) {}
+            sentViaMulticast = true
+        } catch (e: Exception) {
+            StreamLog.w(TAG, "MulticastSocket send error: ${e.message}")
+        }
 
-        // Ephemeral DatagramSocket guarantees unicast packet dispatch across Android OS network filters
-        try {
-            DatagramSocket().use { unicastSocket ->
-                unicastSocket.send(packet)
+        // Ephemeral socket fallback only if multicast send failed
+        if (!sentViaMulticast) {
+            try {
+                DatagramSocket().use { unicastSocket ->
+                    unicastSocket.send(packet)
+                }
+            } catch (e: Exception) {
+                StreamLog.w(TAG, "UnicastSocket fallback send error: ${e.message}")
             }
-        } catch (_: Exception) {}
+        }
     }
 
     /**
@@ -410,7 +439,7 @@ class AlexaVoiceBridge(
   <device>
     <deviceType>urn:Belkin:device:controllee:1</deviceType>
     <friendlyName>$friendlyName</friendlyName>
-    <manufacturer>Belkin</manufacturer>
+    <manufacturer>Belkin International Inc.</manufacturer>
     <manufacturerURL>http://www.belkin.com</manufacturerURL>
     <modelDescription>Belkin Plugin Socket 1.0</modelDescription>
     <modelName>Socket</modelName>
