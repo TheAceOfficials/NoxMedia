@@ -979,17 +979,37 @@ class JellyfinBridge(
     private fun handleImageRedirect(itemId: String, imageType: String): Response {
         val item = findMedia(itemId)
         val config = configProvider()
+
+        // Fast resolution for series, anime, seasons, or episodes: inherit poster from show
+        val showPoster = if (item != null && (isSeries(item) || isAnime(item))) {
+            tgClient.getAllMedia().firstOrNull {
+                it.title.equals(item.title, ignoreCase = true) && !it.posterUrl.isNullOrBlank()
+            }?.posterUrl
+        } else null
+
         val poster = if (imageType.equals("Backdrop", ignoreCase = true)) {
-            item?.backdropUrl ?: item?.posterUrl
+            item?.backdropUrl ?: item?.posterUrl ?: showPoster
         } else {
-            item?.posterUrl ?: if (item != null) {
-                posterService.resolvePoster(item.title, config.customPosterUrl, config.customPosterApiKey)
+            item?.posterUrl ?: showPoster ?: if (item != null) {
+                val resolved = posterService.resolvePoster(
+                    item.title,
+                    config.customPosterUrl,
+                    config.customPosterApiKey,
+                    config.tmdbApiKey,
+                    config.tvdbApiKey
+                )
+                if (resolved != null) {
+                    item.posterUrl = resolved
+                    posterService.cachePoster(item.title, resolved)
+                }
+                resolved
             } else null
         }
 
         val targetUrl = poster ?: "https://images.metahub.space/poster/medium/placeholder/img"
         val resp = NanoHTTPD.newFixedLengthResponse(Response.Status.REDIRECT, "text/plain", "")
         resp.addHeader("Location", targetUrl)
+        resp.addHeader("Cache-Control", "public, max-age=86400, immutable")
         return resp
     }
 
@@ -1017,11 +1037,22 @@ class JellyfinBridge(
     private fun findMedia(id: String): MediaItem? {
         val rawId = fromHexId(id.removeSuffix(".mkv"))
         val all = tgClient.getAllMedia()
-        return all.firstOrNull { it.id == rawId }
+        val direct = all.firstOrNull { it.id == rawId }
             ?: all.firstOrNull { it.id == id }
             ?: all.firstOrNull { it.id.endsWith(rawId) }
             ?: all.firstOrNull { it.id.endsWith(id) }
             ?: all.firstOrNull { it.imdbId != null && it.imdbId.equals(rawId, ignoreCase = true) }
+        if (direct != null) return direct
+
+        // Support virtual series and season IDs (e.g. series_breaking_bad or series_breaking_bad_s1)
+        if (rawId.startsWith("series_")) {
+            val seriesSlug = rawId.removePrefix("series_").substringBefore("_s")
+            return all.firstOrNull {
+                val slug = it.title.lowercase().replace(Regex("[^a-z0-9]"), "_").trim('_')
+                slug == seriesSlug
+            }
+        }
+        return null
     }
 
     private fun getSeriesId(item: MediaItem): String {
@@ -1067,6 +1098,15 @@ class JellyfinBridge(
         val durationTicks = if (item.durationSeconds > 0) item.durationSeconds.toLong() * 10_000_000L else 3600L * 10_000_000L
         val yearInt = item.year?.toIntOrNull() ?: 2024
         val ext = rawFileName.substringAfterLast(".", "mkv").lowercase()
+
+        if (item.posterUrl.isNullOrBlank() && (isSer || isAni)) {
+            val showPoster = tgClient.getAllMedia().firstOrNull {
+                it.title.equals(item.title, ignoreCase = true) && !it.posterUrl.isNullOrBlank()
+            }?.posterUrl
+            if (showPoster != null) {
+                item.posterUrl = showPoster
+            }
+        }
 
         val displayName = when {
             (isSer || isAni) && isSeriesOverview -> item.title

@@ -3,8 +3,10 @@ package com.tgserver.streamer.metadata
 import android.util.Log
 import com.google.gson.JsonParser
 import com.tgserver.streamer.data.model.MediaItem
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -284,7 +286,24 @@ class MetadataEnricher {
             result = tryKitsu(queryTitle)
         }
 
-        // 2. TMDB Pipeline (if API key configured)
+        // 2. TVDB Pipeline (if API key configured and series/anime)
+        if (tvdbKey.isNotBlank() && (item.type == "series" || item.type == "anime" || isAnimeChannel)) {
+            val tvdbRes = tryTvdb(queryTitle, item.type, tvdbKey)
+            if (tvdbRes != null) {
+                result = if (result != null) {
+                    result.copy(
+                        title = tvdbRes.title ?: result.title,
+                        posterUrl = tvdbRes.posterUrl ?: result.posterUrl,
+                        overview = if (result.overview.isNullOrBlank()) tvdbRes.overview else result.overview,
+                        year = tvdbRes.year ?: result.year
+                    )
+                } else {
+                    tvdbRes
+                }
+            }
+        }
+
+        // 3. TMDB Pipeline (if API key configured)
         if (tmdbKey.isNotBlank()) {
             val tmdbRes = tryTmdb(queryTitle, item.type, item.season, item.episode, tmdbKey)
             if (tmdbRes != null) {
@@ -305,7 +324,7 @@ class MetadataEnricher {
             }
         }
 
-        // 3. Cinemeta Fallback & IMDb ID Resolver (Free, no key needed)
+        // 4. Cinemeta Fallback & IMDb ID Resolver (Free, no key needed)
         if (result == null || result.imdbId.isNullOrBlank()) {
             val cinemetaRes = tryCinemeta(queryTitle, item.type)
             if (cinemetaRes != null) {
@@ -498,8 +517,121 @@ class MetadataEnricher {
         }
     }
 
+    // --- TheTVDB (TVDB v4) API ---
+    private var tvdbToken: String? = null
+    private var tvdbTokenExpiry: Long = 0L
+
+    private fun getTvdbAuthToken(apiKey: String): String? {
+        val now = System.currentTimeMillis()
+        if (!tvdbToken.isNullOrBlank() && now < tvdbTokenExpiry) {
+            return tvdbToken
+        }
+        try {
+            val jsonBody = """{"apikey":"$apiKey"}"""
+            val body = jsonBody.toRequestBody("application/json".toMediaType())
+            val req = Request.Builder()
+                .url("https://api4.thetvdb.com/v4/login")
+                .post(body)
+                .build()
+            httpClient.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val respStr = resp.body?.string()
+                    if (!respStr.isNullOrBlank()) {
+                        val root = JsonParser.parseString(respStr).asJsonObject
+                        val token = root.getAsJsonObject("data")?.get("token")?.asString
+                        if (!token.isNullOrBlank()) {
+                            tvdbToken = token
+                            tvdbTokenExpiry = now + 24 * 3600 * 1000L
+                            return token
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "TVDB login failed: ${e.message}")
+        }
+        return null
+    }
+
+    private fun tryTvdb(title: String, type: String, apiKey: String): EnrichedMetadata? {
+        val token = getTvdbAuthToken(apiKey) ?: return null
+        try {
+            val enc = URLEncoder.encode(title, "UTF-8")
+            val url = "https://api4.thetvdb.com/v4/search?query=$enc"
+            val req = Request.Builder()
+                .url(url)
+                .addHeader("Authorization", "Bearer $token")
+                .build()
+
+            httpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return null
+                val body = resp.body?.string() ?: return null
+                val root = JsonParser.parseString(body).asJsonObject
+                val data = root.getAsJsonArray("data") ?: return null
+                if (data.size() == 0) return null
+
+                var bestCandidate: EnrichedMetadata? = null
+                var bestScore = 0.0
+
+                for (i in 0 until minOf(data.size(), 8)) {
+                    val cand = data[i].asJsonObject
+                    val name = cand.get("name")?.asString ?: continue
+                    val score = calculateSimilarity(title, name)
+                    if (score > bestScore) {
+                        bestScore = score
+                        val year = cand.get("year")?.asString
+                        val overview = cand.get("overview")?.asString
+                        val imageUrl = cand.get("image_url")?.asString
+
+                        bestCandidate = EnrichedMetadata(
+                            title = name,
+                            year = year,
+                            overview = overview,
+                            posterUrl = imageUrl,
+                            backdropUrl = null
+                        )
+                    }
+                }
+
+                if (bestScore >= 0.60) {
+                    return bestCandidate
+                }
+                return null
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "TVDB lookup skipped: ${e.message}")
+            return null
+        }
+    }
+
     // --- TMDB API ---
     private fun tryTmdb(
+        title: String,
+        type: String,
+        season: Int?,
+        episode: Int?,
+        apiKey: String
+    ): EnrichedMetadata? {
+        val direct = searchTmdbInternal(title, type, season, episode, apiKey)
+        if (direct != null) return direct
+
+        // Cross-type fallback: if movie was requested, try series, and vice-versa
+        val altType = if (type == "movie") "series" else "movie"
+        val altRes = searchTmdbInternal(title, altType, season, episode, apiKey)
+        if (altRes != null) return altRes
+
+        // Strip trailing year (e.g. "Bleach 2004" -> "Bleach")
+        val noYear = title.replace(Regex("\\s+(19|20)\\d{2}$"), "").trim()
+        if (noYear.isNotBlank() && noYear != title) {
+            val noYearRes = searchTmdbInternal(noYear, type, season, episode, apiKey)
+                ?: searchTmdbInternal(noYear, altType, season, episode, apiKey)
+            if (noYearRes != null) return noYearRes
+        }
+
+        return null
+    }
+
+    private fun searchTmdbInternal(
         title: String,
         type: String,
         season: Int?,
@@ -753,48 +885,7 @@ class MetadataEnricher {
             } catch (_: Exception) {}
         }
 
-        // 2. Cinemeta catalog search
-        try {
-            val enc = URLEncoder.encode(cleanQuery, "UTF-8")
-            val url = "https://v3-cinemeta.strem.io/catalog/$cType/top/search=$enc.json"
-            val req = Request.Builder().url(url).header("User-Agent", "NoxMedia/1.0").build()
-            httpClient.newCall(req).execute().use { resp ->
-                if (resp.isSuccessful) {
-                    val body = resp.body?.string()
-                    if (!body.isNullOrBlank()) {
-                        val root = JsonParser.parseString(body).asJsonObject
-                        val metas = root.getAsJsonArray("metas")
-                        if (metas != null) {
-                            for (i in 0 until minOf(metas.size(), 12)) {
-                                val obj = metas[i].asJsonObject
-                                val name = obj.get("name")?.asString ?: continue
-                                val rawYear = obj.get("year")?.asString ?: obj.get("releaseInfo")?.asString
-                                val year = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(rawYear ?: "")?.groupValues?.get(1) ?: rawYear
-                                val poster = obj.get("poster")?.asString
-                                val bg = obj.get("background")?.asString
-                                val desc = obj.get("description")?.asString
-                                val imdbId = obj.get("imdb_id")?.asString ?: obj.get("id")?.asString
-                                if (imdbId != null && !seenImdb.add(imdbId.lowercase())) {
-                                    continue
-                                }
-                                results.add(
-                                    EnrichedMetadata(
-                                        title = name,
-                                        year = year,
-                                        overview = desc,
-                                        posterUrl = poster,
-                                        backdropUrl = bg,
-                                        imdbId = imdbId
-                                    )
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (_: Exception) {}
-
-        // 3. TMDB search if api key available
+        // 2. High-speed TMDB search if api key available (Priority 1 ~50ms)
         if (tmdbKey.isNotBlank()) {
             try {
                 val enc = URLEncoder.encode(cleanQuery, "UTF-8")
@@ -839,6 +930,47 @@ class MetadataEnricher {
                 }
             } catch (_: Exception) {}
         }
+
+        // 3. Cinemeta catalog search (Fallback)
+        try {
+            val enc = URLEncoder.encode(cleanQuery, "UTF-8")
+            val url = "https://v3-cinemeta.strem.io/catalog/$cType/top/search=$enc.json"
+            val req = Request.Builder().url(url).header("User-Agent", "NoxMedia/1.0").build()
+            httpClient.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string()
+                    if (!body.isNullOrBlank()) {
+                        val root = JsonParser.parseString(body).asJsonObject
+                        val metas = root.getAsJsonArray("metas")
+                        if (metas != null) {
+                            for (i in 0 until minOf(metas.size(), 12)) {
+                                val obj = metas[i].asJsonObject
+                                val name = obj.get("name")?.asString ?: continue
+                                val rawYear = obj.get("year")?.asString ?: obj.get("releaseInfo")?.asString
+                                val year = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(rawYear ?: "")?.groupValues?.get(1) ?: rawYear
+                                val poster = obj.get("poster")?.asString
+                                val bg = obj.get("background")?.asString
+                                val desc = obj.get("description")?.asString
+                                val imdbId = obj.get("imdb_id")?.asString ?: obj.get("id")?.asString
+                                if (imdbId != null && !seenImdb.add(imdbId.lowercase())) {
+                                    continue
+                                }
+                                results.add(
+                                    EnrichedMetadata(
+                                        title = name,
+                                        year = year,
+                                        overview = desc,
+                                        posterUrl = poster,
+                                        backdropUrl = bg,
+                                        imdbId = imdbId
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
 
         results.sortByDescending { calculateSimilarity(cleanQuery, it.title ?: "") }
         return results

@@ -802,6 +802,8 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             tvdbApiKey = tvdb.trim()
         )
         saveStoredConfig(updated)
+        // Immediately kick off fast parallel enrichment for all indexed media missing posters
+        tgClient.autoEnrichMissingMetadata(forceRecheckNoPoster = true)
     }
 
     fun updatePosterSettings(url: String) {

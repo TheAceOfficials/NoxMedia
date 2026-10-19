@@ -17,6 +17,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -913,27 +915,35 @@ class TelegramClientManager(private val context: Context) {
         return freed
     }
 
-    private fun autoEnrichMissingMetadata() {
-        val itemsToEnrich = mediaIndex.values.filter { it.imdbId.isNullOrBlank() && it.kitsuId == null }
+    fun autoEnrichMissingMetadata(forceRecheckNoPoster: Boolean = false) {
+        val itemsToEnrich = mediaIndex.values.filter {
+            (it.imdbId.isNullOrBlank() && it.kitsuId == null) || (forceRecheckNoPoster && it.posterUrl.isNullOrBlank())
+        }
         if (itemsToEnrich.isEmpty()) return
 
-        CoroutineScope(Dispatchers.IO).launch {
+        managerScope.launch {
             val tmdbKey = prefs.getString("tmdb_api_key", "") ?: ""
             val tvdbKey = prefs.getString("tvdb_api_key", "") ?: ""
             var changed = false
-            for (item in itemsToEnrich) {
-                val ch = channels[item.channelId]
-                val isAnime = ch?.isAnime ?: false
-                metadataEnricher.enrich(
-                    item = item,
-                    isAnimeChannel = isAnime,
-                    tmdbKey = tmdbKey,
-                    tvdbKey = tvdbKey
-                )
-                changed = true
-            }
-            if (changed) {
-                saveMediaIndex()
+            itemsToEnrich.chunked(8).forEach { chunk ->
+                chunk.map { item ->
+                    async(Dispatchers.IO) {
+                        val ch = channels[item.channelId]
+                        val isAnime = ch?.isAnime ?: false
+                        metadataEnricher.enrich(
+                            item = item,
+                            isAnimeChannel = isAnime,
+                            tmdbKey = tmdbKey,
+                            tvdbKey = tvdbKey
+                        )
+                        if (!item.posterUrl.isNullOrBlank()) {
+                            changed = true
+                        }
+                    }
+                }.awaitAll()
+                if (changed) {
+                    saveMediaIndex()
+                }
             }
         }
     }
@@ -1713,10 +1723,18 @@ class TelegramClientManager(private val context: Context) {
 
     suspend fun enrichExistingMedia(itemId: String): MediaItem? = withContext(Dispatchers.IO) {
         val existing = mediaIndex[itemId] ?: return@withContext null
-        val enriched = com.tgserver.streamer.metadata.MetadataEnricher.enrich(existing)
-        mediaIndex[itemId] = enriched
+        val tmdbKey = prefs.getString("tmdb_api_key", "") ?: ""
+        val tvdbKey = prefs.getString("tvdb_api_key", "") ?: ""
+        val ch = channels[existing.channelId]
+        metadataEnricher.enrich(
+            item = existing,
+            isAnimeChannel = ch?.isAnime ?: false,
+            tmdbKey = tmdbKey,
+            tvdbKey = tvdbKey
+        )
+        mediaIndex[itemId] = existing
         saveMediaIndex()
-        enriched
+        existing
     }
 
     fun stopChannelScan(channelId: Long) {

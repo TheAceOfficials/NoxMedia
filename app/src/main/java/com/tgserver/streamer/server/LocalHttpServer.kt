@@ -234,8 +234,12 @@ class LocalHttpServer(
             val poster = item.posterUrl ?: posterService.resolvePoster(
                 item.title,
                 config.customPosterUrl,
-                config.customPosterApiKey
-            )
+                config.customPosterApiKey,
+                config.tmdbApiKey,
+                config.tvdbApiKey
+            )?.also { resolved ->
+                item.posterUrl = resolved
+            }
             val desc = item.overview ?: "${item.qualityBadge} • ${item.formattedSize}"
             val stremioType = if (isSeries || isAnime) "series" else "movie"
             val metaId = if (!item.imdbId.isNullOrBlank()) item.imdbId else item.id
@@ -272,8 +276,12 @@ class LocalHttpServer(
         val poster = item.posterUrl ?: posterService.resolvePoster(
             item.title,
             config.customPosterUrl,
-            config.customPosterApiKey
-        )
+            config.customPosterApiKey,
+            config.tmdbApiKey,
+            config.tvdbApiKey
+        )?.also { resolved ->
+            item.posterUrl = resolved
+        }
 
         val isSeries = item.type == "series" || item.type == "anime" || (item.season != null && item.episode != null)
 

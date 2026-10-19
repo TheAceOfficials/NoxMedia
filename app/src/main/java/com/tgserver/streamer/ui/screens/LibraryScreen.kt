@@ -2,7 +2,9 @@ package com.tgserver.streamer.ui.screens
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import java.io.File
 import android.net.Uri
 import android.util.LruCache
 import androidx.activity.compose.BackHandler
@@ -77,7 +79,7 @@ private val NdotFont = FontFamily(Font(R.font.ndot))
 
 // In-memory poster and backdrop cache
 object ImageMemoryCache {
-    private val cache = LruCache<String, ImageBitmap>(120)
+    private val cache = LruCache<String, ImageBitmap>(250)
     fun get(url: String): ImageBitmap? = cache.get(url)
     fun put(url: String, bmp: ImageBitmap) {
         cache.put(url, bmp)
@@ -87,11 +89,22 @@ object ImageMemoryCache {
     }
 }
 
-private val imageHttpClient by lazy {
-    OkHttpClient.Builder()
-        .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
-        .build()
+private var diskCachedHttpClient: OkHttpClient? = null
+
+fun getImageHttpClient(context: Context): OkHttpClient {
+    return diskCachedHttpClient ?: synchronized(ImageMemoryCache) {
+        diskCachedHttpClient ?: run {
+            val cacheDir = File(context.cacheDir, "nox_poster_disk_cache")
+            val cache = okhttp3.Cache(cacheDir, 120L * 1024 * 1024)
+            val client = OkHttpClient.Builder()
+                .cache(cache)
+                .connectTimeout(5, TimeUnit.SECONDS)
+                .readTimeout(8, TimeUnit.SECONDS)
+                .build()
+            diskCachedHttpClient = client
+            client
+        }
+    }
 }
 
 @Composable
@@ -102,6 +115,8 @@ fun RemoteImage(
     contentScale: ContentScale = ContentScale.Crop,
     isSeries: Boolean = false
 ) {
+    val context = LocalContext.current.applicationContext
+    val client = remember(context) { getImageHttpClient(context) }
     var bitmap by remember(url) { mutableStateOf<ImageBitmap?>(null) }
     var isLoading by remember(url) { mutableStateOf(false) }
 
@@ -122,10 +137,13 @@ fun RemoteImage(
                     .url(url)
                     .header("User-Agent", "NoxMedia/1.0 (Android)")
                     .build()
-                imageHttpClient.newCall(req).execute().use { resp ->
+                client.newCall(req).execute().use { resp ->
                     if (resp.isSuccessful) {
                         resp.body?.byteStream()?.use { stream ->
-                            val decoded = BitmapFactory.decodeStream(stream)
+                            val options = BitmapFactory.Options().apply {
+                                inPreferredConfig = Bitmap.Config.RGB_565
+                            }
+                            val decoded = BitmapFactory.decodeStream(stream, null, options)
                             if (decoded != null) {
                                 val imgBmp = decoded.asImageBitmap()
                                 ImageMemoryCache.put(url, imgBmp)
