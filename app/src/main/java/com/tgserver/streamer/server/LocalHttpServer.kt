@@ -95,7 +95,11 @@ class LocalHttpServer(
             return response
         }
 
-        val normUri = if (uri.startsWith("/stremio")) uri.removePrefix("/stremio") else uri
+        val normUri = when {
+            uri.startsWith("/stremio") -> uri.removePrefix("/stremio")
+            uri.startsWith("/emby") -> uri.removePrefix("/emby")
+            else -> uri
+        }
 
         val response = try {
             when {
@@ -111,6 +115,7 @@ class LocalHttpServer(
 
                 // 3. Jellyfin & Emby API Emulation Endpoints (Infuse, Jellyfin TV, Swiftfin, Findroid)
                 jellyfinBridge.isJellyfinUri(normUri) -> jellyfinBridge.handle(session, normUri, method, headers)
+                jellyfinBridge.isJellyfinUri(uri) -> jellyfinBridge.handle(session, uri, method, headers)
 
                 // 4. Management REST APIs for Stitch UI
                 uri == "/api/status" -> handleGetStatus()
