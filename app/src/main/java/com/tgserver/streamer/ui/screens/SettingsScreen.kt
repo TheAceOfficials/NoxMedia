@@ -1858,13 +1858,36 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    NothingDotBadge(text = "NEW BUILD", dotColor = StatusGreen, textColor = StatusGreen)
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = Color(0x1F22C55E),
+                                        border = BorderStroke(0.5.dp, Color(0x4022C55E))
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(5.dp)
+                                                    .background(Color(0xFF22C55E), CircleShape)
+                                            )
+                                            Text(
+                                                text = "Update",
+                                                color = Color(0xFF4ADE80),
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                letterSpacing = 0.2.sp
+                                            )
+                                        }
+                                    }
                                     Text(
                                         text = state.info.versionTag,
                                         color = TextPrimary,
-                                        fontSize = 13.sp,
+                                        fontSize = 13.5.sp,
                                         fontWeight = FontWeight.Bold
                                     )
                                 }

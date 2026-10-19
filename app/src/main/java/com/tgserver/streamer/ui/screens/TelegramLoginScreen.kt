@@ -37,7 +37,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -45,9 +49,12 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import androidx.compose.ui.unit.sp
+import com.tgserver.streamer.R
 import com.tgserver.streamer.theme.*
 import com.tgserver.streamer.ui.MainAppViewModel
 import com.tgserver.streamer.ui.components.*
+
+private val NdotFont = FontFamily(Font(R.font.ndot))
 
 @Composable
 fun TelegramLoginScreen(viewModel: MainAppViewModel) {
@@ -122,12 +129,25 @@ fun TelegramLoginScreen(viewModel: MainAppViewModel) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                NothingDotBadge(
-                    text = "NOXMEDIA",
-                    dotColor = AccentApple,
-                    backgroundColor = Color(0x1FFFFFFF),
-                    textColor = TextPrimary
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Image(
+                        painter = painterResource(id = R.drawable.noxmedia_icon_trans),
+                        contentDescription = "NoxMedia Logo",
+                        modifier = Modifier.size(24.dp),
+                        contentScale = ContentScale.Fit
+                    )
+
+                    Text(
+                        text = "NoxMedia",
+                        color = Color.White,
+                        fontSize = 20.sp,
+                        fontFamily = NdotFont,
+                        letterSpacing = 0.8.sp
+                    )
+                }
 
                 NothingDotBadge(
                     text = "STEP 02/02",

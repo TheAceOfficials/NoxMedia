@@ -644,23 +644,46 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                             }
                         }
                     } else {
-                        LazyVerticalGrid(
-                            columns = GridCells.Fixed(2),
-                            state = gridState,
-                            horizontalArrangement = Arrangement.spacedBy(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(18.dp),
-                            modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 84.dp)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
                         ) {
-                            items(filteredGroups, key = { it.key }) { group ->
-                                PosterCard(
-                                    group = group,
-                                    onClick = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        selectedGroupKey = group.key
-                                    }
-                                )
+                            LazyVerticalGrid(
+                                columns = GridCells.Fixed(2),
+                                state = gridState,
+                                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(18.dp),
+                                modifier = Modifier.fillMaxSize(),
+                                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 84.dp)
+                            ) {
+                                items(filteredGroups, key = { it.key }) { group ->
+                                    PosterCard(
+                                        group = group,
+                                        onClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            selectedGroupKey = group.key
+                                        }
+                                    )
+                                }
                             }
+
+                            // Smooth Top Fader Effect (Soft Gradient Fade-out for Posters on Scroll)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(24.dp)
+                                    .align(Alignment.TopCenter)
+                                    .background(
+                                        Brush.verticalGradient(
+                                            colors = listOf(
+                                                BackgroundOled,
+                                                BackgroundOled.copy(alpha = 0.65f),
+                                                Color.Transparent
+                                            )
+                                        )
+                                    )
+                            )
                         }
                     }
                 }
@@ -1459,10 +1482,10 @@ private fun EpisodeGroupAccordionRow(
     var isExpanded by remember { mutableStateOf(false) }
     val primary = epItems.first()
     val candidateTitle = epItems.firstOrNull { !it.episodeTitle.isNullOrBlank() }?.episodeTitle?.trim()
-    val epTitle = if (!candidateTitle.isNullOrBlank() && !candidateTitle.equals(showTitle, ignoreCase = true)) {
+    val epTitle = if (!candidateTitle.isNullOrBlank() && !isGarbageEpisodeTitle(candidateTitle, showTitle)) {
         candidateTitle
     } else {
-        extractCleanEpisodeTitle(primary.fileName, epNum)
+        extractCleanEpisodeTitle(primary.fileName, epNum, showTitle)
     }
 
     val allHidden = epItems.all { it.isHidden }
@@ -2229,10 +2252,65 @@ private fun detectAudioTracks(textSources: List<String>): List<String> {
     return listOf("Unknown")
 }
 
+private val EPISODE_GARBAGE_TOKENS = setOf(
+    "japanese", "japan", "jpn", "jap", "hindi", "hin", "english", "eng", "tamil", "tam",
+    "telugu", "tel", "korean", "kor", "chinese", "chi", "french", "fre", "fra",
+    "german", "ger", "deu", "spanish", "spa", "esp", "italian", "ita", "russian", "rus",
+    "malayalam", "mal", "kannada", "kan", "bengali", "ben", "marathi", "mar", "punjabi", "pun",
+    "gujarati", "urdu", "thai", "vietnamese", "indonesian", "arabic", "ara", "portuguese", "por",
+    "multi", "multiaudio", "dual", "dualaudio", "dub", "dubbed", "sub", "subbed", "subs",
+    "esub", "esubs", "softsub", "hardsub", "raw", "vostfr", "clean", "audio",
+    "1080p", "720p", "2160p", "4k", "uhd", "fhd", "hd", "sd", "480p", "360p",
+    "hevc", "x264", "x265", "h264", "h265", "avc", "av1", "10bit", "8bit",
+    "hdr", "hdr10", "hdr10+", "dv", "dovi", "dolby", "vision", "atmos",
+    "aac", "aac2", "aac20", "ac3", "eac3", "ddp", "ddp51", "dts", "flac", "opus",
+    "mp4", "mkv", "avi", "remux", "proper", "repack", "unrated", "extended",
+    "web", "webdl", "web-dl", "webrip", "bluray", "blu-ray", "bdrip", "brrip", "dvdrip", "hdrip", "hdtv",
+    "nf", "netflix", "amzn", "prime", "cr", "crunchyroll", "dsnp", "disney", "hotstar",
+    "atvp", "apple", "max", "hbo", "zee5", "sonyliv", "jiocinema", "hulu", "peacock"
+)
+
+private fun isGarbageEpisodeTitle(candidate: String, showTitle: String? = null): Boolean {
+    val trimmed = candidate.trim()
+    if (trimmed.isBlank()) return true
+    if (trimmed.length < 3) return true
+    if (trimmed.all { it.isDigit() || it == '.' || it == '-' || it == '_' || it == ' ' }) return true
+
+    // Check if it's identical or redundant with show title
+    if (!showTitle.isNullOrBlank()) {
+        val normShow = showTitle.lowercase().replace(Regex("[^a-z0-9]"), "")
+        val normCandidate = trimmed.lowercase().replace(Regex("[^a-z0-9]"), "")
+        if (normCandidate == normShow ||
+            (normShow.length >= 4 && normCandidate.contains(normShow)) ||
+            (normCandidate.length >= 4 && normShow.contains(normCandidate))
+        ) {
+            return true
+        }
+    }
+
+    // Check if regex matches pure episode notation like "Episode 1", "Ep 01", "S01E01", "E01"
+    if (trimmed.matches(Regex("""(?i)^(?:s\d{1,2})?\s*(?:ep?|episode)?\s*\.?\s*\d{1,4}$"""))) {
+        return true
+    }
+
+    // Tokenize candidate by non-alphanumeric characters
+    val words = trimmed.lowercase().split(Regex("[^a-z0-9]+")).filter { it.isNotBlank() }
+    if (words.isEmpty()) return true
+
+    // If all words are blacklisted garbage / language / codec / source tokens
+    val garbageWordsCount = words.count { EPISODE_GARBAGE_TOKENS.contains(it) || it.all { ch -> ch.isDigit() } }
+    if (garbageWordsCount == words.size) return true
+
+    // If candidate has only 1 or 2 words and ANY word is in the garbage list
+    if (words.size <= 2 && words.any { EPISODE_GARBAGE_TOKENS.contains(it) }) return true
+
+    return false
+}
+
 /**
- * Extracts clean episode title from filename without repeating series name
+ * Extracts clean episode title from filename without repeating series name or release tags
  */
-private fun extractCleanEpisodeTitle(fileName: String, epNum: Int): String {
+private fun extractCleanEpisodeTitle(fileName: String, epNum: Int, showTitle: String? = null): String {
     if (fileName.isBlank()) return "Episode $epNum"
     val base = fileName.substringBeforeLast('.')
 
@@ -2245,7 +2323,7 @@ private fun extractCleanEpisodeTitle(fileName: String, epNum: Int): String {
         if (match != null) {
             val raw = match.groupValues[1].replace('.', ' ').replace('_', ' ').trim()
             val cleaned = raw.replace(Regex("""(?i)\b(1080p|720p|4k|2160p|web-?dl|hevc|x264|x265|aac)\b"""), "").trim()
-            if (cleaned.length > 2 && !cleaned.all { it.isDigit() }) {
+            if (!isGarbageEpisodeTitle(cleaned, showTitle)) {
                 return cleaned
             }
         }
@@ -2499,20 +2577,17 @@ private fun MediaVersionsSection(
                     fontSize = 12.sp,
                     letterSpacing = 0.8.sp
                 )
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Color(0xFF28103F))
-                        .border(1.dp, Color(0xFF4C1D7C), RoundedCornerShape(6.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
-                    contentAlignment = Alignment.Center
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = Color(0x1FFFFFFF),
+                    border = BorderStroke(0.5.dp, Color(0x33FFFFFF))
                 ) {
                     Text(
                         text = "${versions.size}",
-                        color = Color(0xFFC084FC),
-                        fontFamily = NdotFont,
+                        color = Color(0xFFD1D5DB),
                         fontSize = 10.5.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 1.5.dp)
                     )
                 }
             }
