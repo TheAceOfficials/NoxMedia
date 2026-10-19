@@ -128,9 +128,9 @@ fun AppUpdateBanner(
                 ),
                 shape = RoundedCornerShape(16.dp)
             )
-            .padding(14.dp)
+            .padding(16.dp)
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -203,7 +203,7 @@ fun AppUpdateBanner(
 
             // Download Progress Bar if downloading
             if (state is UpdateUiState.Downloading) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     LinearProgressIndicator(
                         progress = { state.progress },
                         modifier = Modifier
@@ -239,26 +239,25 @@ fun AppUpdateBanner(
                     Text(
                         text = "Optimized for your device architecture",
                         color = Color(0xFF6B7280),
-                        fontSize = 11.sp,
+                        fontSize = 11.5.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 12.dp)
                     )
 
-                    Button(
+                    Surface(
                         onClick = onActionClick,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (state is UpdateUiState.ReadyToInstall) Color(0xFF34C759) else Color.White,
-                            contentColor = Color.Black
-                        ),
-                        shape = RoundedCornerShape(20.dp),
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                        modifier = Modifier.height(34.dp)
+                        color = if (state is UpdateUiState.ReadyToInstall) Color(0xFF34C759) else Color.White,
+                        contentColor = Color.Black,
+                        shape = RoundedCornerShape(100.dp)
                     ) {
                         Text(
                             text = if (state is UpdateUiState.ReadyToInstall) "Install Now" else "Update",
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Bold
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp)
                         )
                     }
                 }

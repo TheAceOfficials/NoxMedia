@@ -48,7 +48,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import com.tgserver.streamer.ui.components.AppUpdateBanner
 import com.tgserver.streamer.ui.components.AppUpdateDialog
-import com.tgserver.streamer.ui.components.TopBarUpdateBadge
 import com.tgserver.streamer.update.AppReleaseInfo
 import com.tgserver.streamer.update.UpdateUiState
 import kotlinx.coroutines.Dispatchers
@@ -173,59 +172,67 @@ fun HomeScreen(viewModel: MainAppViewModel) {
             .padding(top = 10.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(22.dp)
     ) {
-        // TOP APP BAR (Nothing OS / Dot-Matrix Minimalist with Professional Status Bar Clearance)
-        Row(
+        // TOP BRANDING HEADER (Matched with user design: Logo + NoxMedia Title with Divider & Aligned Subtitle)
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            // Top Row: Logo + NoxMedia Title
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // Sleek, proportional NoxMedia logo icon (26dp)
                 Image(
                     painter = painterResource(id = R.drawable.noxmedia_icon_trans),
                     contentDescription = "NoxMedia Logo",
-                    modifier = Modifier.size(26.dp),
+                    modifier = Modifier.size(36.dp),
                     contentScale = ContentScale.Fit
                 )
 
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        text = "NoxMedia",
-                        color = Color.White,
-                        fontSize = 24.sp,
-                        fontFamily = NdotFont,
-                        letterSpacing = 1.sp
-                    )
-
-                    val displayName = if (session.firstName.isNotBlank()) session.firstName else "Name"
-                    val usernameDisplay = if (session.username.isNotBlank()) "@${session.username}" else "@USERNAME"
-                    Text(
-                        text = "$displayName . $usernameDisplay",
-                        color = Color(0xFF7E8088),
-                        fontSize = 11.5.sp,
-                        fontFamily = NdotFont,
-                        letterSpacing = 0.5.sp
-                    )
-                }
+                Text(
+                    text = "NoxMedia",
+                    color = Color.White,
+                    fontSize = 28.sp,
+                    fontFamily = NdotFont,
+                    letterSpacing = 1.sp
+                )
             }
 
-            // Top Bar Right Action: Update Badge only when update is available (avatar removed as requested)
-            val updateInfo = when (val s = updateState) {
-                is UpdateUiState.Available -> s.info
-                is UpdateUiState.Downloading -> AppReleaseInfo(s.fileName, "", "", "", "", s.fileName, s.totalBytes, "", true)
-                is UpdateUiState.ReadyToInstall -> s.info
-                else -> null
-            }
+            // Sleek Minimalist Divider Line
+            HorizontalDivider(
+                color = Color(0xFF282A31),
+                thickness = 1.dp,
+                modifier = Modifier.fillMaxWidth()
+            )
 
-            if (updateInfo != null) {
-                TopBarUpdateBadge(
-                    versionTag = updateInfo.versionTag.ifBlank { "NEW" },
-                    onClick = { showUpdateDialog = true }
+            // User Info Row: Perfectly Aligned with the 'N' of NoxMedia (36dp icon + 14dp gap = 50dp)
+            val displayName = if (session.firstName.isNotBlank()) session.firstName else "Name"
+            val usernameDisplay = if (session.username.isNotBlank()) "@${session.username}" else "@USERNAME"
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.padding(start = 50.dp)
+            ) {
+                Text(
+                    text = displayName,
+                    color = Color(0xFFE5E7EB),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 0.3.sp
+                )
+                Text(
+                    text = "•",
+                    color = Color(0xFF6B7280),
+                    fontSize = 12.sp
+                )
+                Text(
+                    text = usernameDisplay,
+                    color = Color(0xFF9CA3AF),
+                    fontSize = 13.sp,
+                    letterSpacing = 0.3.sp
                 )
             }
         }
