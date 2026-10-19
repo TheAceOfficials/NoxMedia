@@ -42,21 +42,22 @@ class JellyfinBridge(
      * Determines whether an incoming HTTP request URI belongs to the Jellyfin API namespace.
      */
     fun isJellyfinUri(uri: String): Boolean {
-        val u = uri.trimEnd('/')
-        return u.startsWith("/System") ||
-                u.startsWith("/Users") ||
-                u.startsWith("/UserViews") ||
-                u.startsWith("/Items") ||
-                u.startsWith("/Shows") ||
-                u.startsWith("/Videos") ||
-                u.startsWith("/Sessions") ||
-                u.startsWith("/DisplayPreferences") ||
-                u.startsWith("/Localization") ||
-                u.startsWith("/QuickConnect") ||
-                u.startsWith("/Branding") ||
-                u.startsWith("/LiveTv") ||
-                u.startsWith("/ScheduledTasks") ||
-                u.startsWith("/Playback")
+        val u = uri.trimEnd('/').lowercase()
+        return u.startsWith("/system") ||
+                u.startsWith("/users") ||
+                u.startsWith("/userviews") ||
+                u.startsWith("/items") ||
+                u.startsWith("/shows") ||
+                u.startsWith("/videos") ||
+                u.startsWith("/sessions") ||
+                u.startsWith("/displaypreferences") ||
+                u.startsWith("/localization") ||
+                u.startsWith("/quickconnect") ||
+                u.startsWith("/branding") ||
+                u.startsWith("/livetv") ||
+                u.startsWith("/scheduledtasks") ||
+                u.startsWith("/playback") ||
+                u.startsWith("/infusesync")
     }
 
     /**
@@ -69,6 +70,7 @@ class JellyfinBridge(
         headers: Map<String, String>
     ): Response {
         val cleanUri = uri.trimEnd('/')
+        val lowerUri = cleanUri.lowercase()
         val params = session.parameters.mapValues { it.value.firstOrNull() ?: "" }
         val localIp = localIpProvider()
         val config = configProvider()
@@ -77,84 +79,86 @@ class JellyfinBridge(
 
         return when {
             // ================= 1. Handshake & System Info =================
-            cleanUri == "/System/Info/Public" || cleanUri == "/System/Info" -> {
+            lowerUri == "/system/info/public" || lowerUri == "/system/info" -> {
                 handleSystemInfo(localIp, config.port)
             }
-            cleanUri == "/System/Configuration" -> {
+            lowerUri == "/system/configuration" -> {
                 jsonResponse(mapOf<String, Any?>())
             }
 
             // ================= 2. Authentication & User Management =================
-            cleanUri == "/Users/Public" -> {
+            lowerUri == "/users/public" -> {
                 handleUsersPublic()
             }
-            cleanUri == "/Users/AuthenticateByName" && method == Method.POST -> {
-                handleAuthenticateByName()
+            lowerUri == "/users/authenticatebyname" && method == Method.POST -> {
+                handleAuthenticateByName(session)
             }
-            cleanUri == "/Users/Me" || cleanUri == "/Users/$defaultUserId" -> {
+            lowerUri == "/users/me" || lowerUri.matches(Regex("/users/[^/]+")) && !lowerUri.contains("/views") && !lowerUri.contains("/items") -> {
                 handleGetUser()
             }
 
             // ================= 3. Library Views (Home Folders) =================
-            cleanUri.endsWith("/Views") || cleanUri == "/UserViews" -> {
+            lowerUri.endsWith("/views") || lowerUri == "/userviews" -> {
                 handleViews()
             }
-            cleanUri == "/Items/Counts" -> {
+            lowerUri == "/items/counts" -> {
                 handleItemCounts()
             }
 
             // ================= 4. Items & Library Catalog =================
-            cleanUri.endsWith("/Items/Resume") -> {
+            lowerUri.endsWith("/items/resume") -> {
                 jsonResponse(mapOf("Items" to emptyList<Any>(), "TotalRecordCount" to 0))
             }
-            cleanUri.endsWith("/Items/Latest") -> {
+            lowerUri.endsWith("/items/latest") -> {
                 handleLatestItems(localIp, config.port)
             }
-            cleanUri.startsWith("/Shows/") && cleanUri.endsWith("/Seasons") -> {
-                val seriesId = cleanUri.removePrefix("/Shows/").removeSuffix("/Seasons")
+            lowerUri.startsWith("/shows/") && lowerUri.endsWith("/seasons") -> {
+                val seriesId = cleanUri.substringAfter("/Shows/").substringBefore("/Seasons")
                 handleShowSeasons(seriesId, localIp, config.port)
             }
-            cleanUri.startsWith("/Shows/") && cleanUri.endsWith("/Episodes") -> {
-                val seriesId = cleanUri.removePrefix("/Shows/").removeSuffix("/Episodes")
+            lowerUri.startsWith("/shows/") && lowerUri.endsWith("/episodes") -> {
+                val seriesId = cleanUri.substringAfter("/Shows/").substringBefore("/Episodes")
                 val seasonNum = params["season"]?.toIntOrNull() ?: params["seasonId"]?.substringAfterLast("_s")?.toIntOrNull()
                 handleShowEpisodes(seriesId, seasonNum, localIp, config.port)
             }
-            cleanUri == "/Items" || cleanUri.matches(Regex("/Users/[^/]+/Items")) -> {
+            lowerUri == "/items" || lowerUri.matches(Regex("/users/[^/]+/items")) -> {
                 handleQueryItems(params, localIp, config.port)
             }
 
             // ================= 5. Single Item Metadata & Playback Info =================
-            cleanUri.matches(Regex("/Items/[^/]+/PlaybackInfo.*")) ||
-                    cleanUri.matches(Regex("/Videos/[^/]+/PlaybackInfo.*")) -> {
+            lowerUri.contains("/playbackinfo") -> {
                 val itemId = cleanUri.substringAfter("/Items/").substringAfter("/Videos/").substringBefore("/PlaybackInfo")
                 handlePlaybackInfo(itemId, localIp, config.port)
             }
-            cleanUri.matches(Regex("/Items/[^/]+")) && !cleanUri.contains("/Images") -> {
+            lowerUri.matches(Regex("/items/[^/]+")) && !lowerUri.contains("/images") -> {
                 val itemId = cleanUri.substringAfterLast("/")
                 handleGetSingleItem(itemId, localIp, config.port)
             }
 
             // ================= 6. Video Direct Stream Redirect =================
-            cleanUri.startsWith("/Videos/") && cleanUri.contains("/stream") -> {
-                val itemId = cleanUri.removePrefix("/Videos/").substringBefore("/stream").removeSuffix(".mkv")
+            lowerUri.startsWith("/videos/") && lowerUri.contains("/stream") -> {
+                val itemId = cleanUri.substringAfter("/Videos/").substringBefore("/stream").removeSuffix(".mkv")
                 handleVideoStreamRedirect(itemId, localIp, config.port)
             }
 
             // ================= 7. Poster & Image Handling =================
-            cleanUri.contains("/Images/") -> {
+            lowerUri.contains("/images/") -> {
                 val itemId = cleanUri.substringAfter("/Items/").substringBefore("/Images")
                 val imageType = cleanUri.substringAfter("/Images/").substringBefore("/")
                 handleImageRedirect(itemId, imageType)
             }
 
             // ================= 8. Session, Telemetry, Display Prefs & Stubs =================
-            cleanUri.startsWith("/Sessions/Playing") -> {
+            lowerUri.startsWith("/infusesync") -> {
+                jsonResponse(mapOf("Items" to emptyList<Any>(), "TotalRecordCount" to 0))
+            }
+            lowerUri.startsWith("/sessions/playing") -> {
                 noContentResponse()
             }
-            cleanUri.startsWith("/Sessions/Capabilities") -> {
+            lowerUri.startsWith("/sessions/capabilities") -> {
                 noContentResponse()
             }
-            cleanUri.startsWith("/DisplayPreferences") -> {
+            lowerUri.startsWith("/displaypreferences") -> {
                 jsonResponse(
                     mapOf(
                         "Id" to "usersettings",
@@ -164,22 +168,22 @@ class JellyfinBridge(
                     )
                 )
             }
-            cleanUri.startsWith("/Localization") -> {
+            lowerUri.startsWith("/localization") -> {
                 jsonResponse(emptyList<Any>())
             }
-            cleanUri == "/QuickConnect/Enabled" -> {
+            lowerUri == "/quickconnect/enabled" -> {
                 jsonResponse(false)
             }
-            cleanUri.startsWith("/Branding") -> {
+            lowerUri.startsWith("/branding") -> {
                 jsonResponse(mapOf<String, Any?>())
             }
-            cleanUri == "/LiveTv/Channels" -> {
+            lowerUri == "/livetv/channels" -> {
                 jsonResponse(mapOf("Items" to emptyList<Any>(), "TotalRecordCount" to 0))
             }
-            cleanUri == "/ScheduledTasks" -> {
+            lowerUri == "/scheduledtasks" -> {
                 jsonResponse(emptyList<Any>())
             }
-            cleanUri == "/Playback/BitrateTest" -> {
+            lowerUri == "/playback/bitratetest" -> {
                 NanoHTTPD.newFixedLengthResponse(Response.Status.OK, "text/plain", "")
             }
 
@@ -195,7 +199,7 @@ class JellyfinBridge(
         val info = mapOf(
             "LocalAddress" to "http://$localIp:$port",
             "ServerName" to "NoxMedia",
-            "Version" to "10.8.13",
+            "Version" to "10.10.3",
             "ProductName" to "Jellyfin Server",
             "OperatingSystem" to "Linux",
             "Id" to serverId,
@@ -219,26 +223,51 @@ class JellyfinBridge(
                 "Policy" to mapOf(
                     "IsAdministrator" to true,
                     "IsHidden" to false,
-                    "EnableContentDownloading" to true
+                    "EnableContentDownloading" to true,
+                    "EnableMediaPlayback" to true
                 )
             )
         )
         return jsonResponse(users)
     }
 
-    private fun handleAuthenticateByName(): Response {
+    private fun handleAuthenticateByName(session: IHTTPSession): Response {
+        var requestedUsername = defaultUserName
+        try {
+            val map = HashMap<String, String>()
+            session.parseBody(map)
+            val postData = map["postData"] ?: ""
+            if (postData.isNotBlank()) {
+                val json = com.google.gson.JsonParser.parseString(postData).asJsonObject
+                val u = json.get("Username")?.asString
+                if (!u.isNullOrBlank()) requestedUsername = u
+            }
+        } catch (_: Exception) {}
+
         val userObj = mapOf(
-            "Name" to defaultUserName,
+            "Name" to requestedUsername,
             "ServerId" to serverId,
             "Id" to defaultUserId,
             "HasPassword" to false,
+            "HasConfiguredPassword" to false,
+            "HasConfiguredEasyPassword" to false,
             "EnableAutoLogin" to true,
             "Policy" to mapOf(
                 "IsAdministrator" to true,
-                "EnableContentDownloading" to true
+                "IsHidden" to false,
+                "IsDisabled" to false,
+                "EnableContentDownloading" to true,
+                "EnableMediaPlayback" to true,
+                "EnableAudioPlaybackTranscoding" to true,
+                "EnableVideoPlaybackTranscoding" to true,
+                "EnablePlaybackRemuxing" to true,
+                "EnableAllFolders" to true,
+                "EnableAllDevices" to true,
+                "EnableAllChannels" to true
             ),
             "Configuration" to mapOf(
-                "PlayDefaultAudioTrack" to true
+                "PlayDefaultAudioTrack" to true,
+                "SubtitleMode" to "Default"
             )
         )
         val authResult = mapOf(
@@ -246,7 +275,9 @@ class JellyfinBridge(
             "SessionInfo" to mapOf(
                 "Id" to "session_nox_1",
                 "UserId" to defaultUserId,
-                "ServerId" to serverId
+                "UserName" to requestedUsername,
+                "ServerId" to serverId,
+                "IsActive" to true
             ),
             "AccessToken" to accessToken,
             "ServerId" to serverId
