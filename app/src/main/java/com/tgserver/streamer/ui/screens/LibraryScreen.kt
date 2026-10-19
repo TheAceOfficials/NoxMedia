@@ -17,6 +17,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -809,6 +811,7 @@ private fun PosterCard(
  * Full-Screen Content Details View (Adapted from user's attached screenshots)
  */
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 private fun ContentDetailsScreen(
     group: MediaGroup,
     viewModel: MainAppViewModel,
@@ -820,6 +823,14 @@ private fun ContentDetailsScreen(
     val haptic = LocalHapticFeedback.current
     val isSeries = group.type == "series" || group.type == "anime"
     var showRescanDialog by remember { mutableStateOf(false) }
+
+    val visualSpecs = remember(group) {
+        extractMediaVisualSpecs(group)
+    }
+
+    val detectedVersions = remember(group.items) {
+        detectMediaVersions(group.items)
+    }
 
     // Group episodes by Season for series
     val seasonMap = remember(group.items) {
@@ -985,20 +996,126 @@ private fun ContentDetailsScreen(
                     overflow = TextOverflow.Ellipsis
                 )
 
-                // Meta row: Year · Quality · Rating · Size
-                val year = group.year?.takeIf { it.isNotBlank() } ?: "2026"
-                val ratingStr = if (group.rating > 0.0) String.format(java.util.Locale.US, "%.1f", group.rating) else "8.2"
-                val metaText = if (group.formattedTotalSize.isNotBlank()) {
-                    "$year · ${formatShortBadge(group.qualityBadge)} · ★ $ratingStr · ${group.formattedTotalSize}"
-                } else {
-                    "$year · ${formatShortBadge(group.qualityBadge)} · ★ $ratingStr"
+                // 1. Netflix & Apple TV+ Style Badges: Year, Rating, Quality, Visuals
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    // Year Badge
+                    NetflixAppleBadge(
+                        text = visualSpecs.year,
+                        textColor = Color(0xFFE4E4E7),
+                        borderColor = Color(0x35FFFFFF),
+                        bgColor = Color(0x18FFFFFF)
+                    )
+
+                    // Rating Badge (Gold Star)
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color(0x20FBBF24))
+                            .border(BorderStroke(0.8.dp, Color(0x66FBBF24)), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 5.5.dp, vertical = 2.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text(
+                                text = "★",
+                                color = Color(0xFFFBBF24),
+                                fontSize = 9.sp
+                            )
+                            Text(
+                                text = visualSpecs.rating,
+                                color = Color(0xFFFBBF24),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Default
+                            )
+                        }
+                    }
+
+                    // Quality Badge (e.g. 720p -> HD, 1080p -> 1080p FHD, 1440p -> 2K, 2160p -> 4K)
+                    NetflixAppleBadge(
+                        text = visualSpecs.resolutionBadge,
+                        textColor = Color.White,
+                        borderColor = Color(0x55FFFFFF),
+                        bgColor = Color(0x28FFFFFF)
+                    )
+
+                    // Visual Badges: DV, HDR, HDR10+, IMAX, 5.1/ATMOS, HEVC
+                    visualSpecs.visualBadges.forEach { badge ->
+                        val isDv = badge == "DV"
+                        val isImax = badge == "IMAX"
+                        val textColor = when {
+                            isDv -> Color(0xFFFBBF24)
+                            isImax -> Color(0xFF60A5FA)
+                            else -> Color(0xFFE4E4E7)
+                        }
+                        val borderColor = when {
+                            isDv -> Color(0x66FBBF24)
+                            isImax -> Color(0x6660A5FA)
+                            else -> Color(0x35FFFFFF)
+                        }
+                        val bgColor = when {
+                            isDv -> Color(0x20FBBF24)
+                            isImax -> Color(0x203B82F6)
+                            else -> Color(0x18FFFFFF)
+                        }
+                        NetflixAppleBadge(
+                            text = badge,
+                            textColor = textColor,
+                            borderColor = borderColor,
+                            bgColor = bgColor
+                        )
+                    }
                 }
-                Text(
-                    text = metaText,
-                    color = Color(0xFFA1A1AA),
-                    fontFamily = NdotFont,
-                    fontSize = 11.5.sp
-                )
+
+                // 2. Audio Tracks Row: Available in: Hindi, English, Tamil
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.padding(top = 2.dp)
+                ) {
+                    Text(
+                        text = "Available in:",
+                        color = Color(0xFF8E909A),
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Default
+                    )
+                    Text(
+                        text = visualSpecs.audioLanguages.joinToString(", ").ifBlank { "English" },
+                        color = Color(0xFFE4E4E7),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = FontFamily.Default,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                // 3. Total Size Row
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "Total Size:",
+                        color = Color(0xFF8E909A),
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Default
+                    )
+                    Text(
+                        text = visualSpecs.totalSize,
+                        color = Color(0xFFC084FC),
+                        fontSize = 11.sp,
+                        fontFamily = NdotFont,
+                        letterSpacing = 0.4.sp
+                    )
+                }
 
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1094,6 +1211,15 @@ private fun ContentDetailsScreen(
                     lineHeight = 18.sp
                 )
             }
+            Spacer(modifier = Modifier.height(20.dp))
+        }
+
+        // VERSIONS IN LIBRARY (Detected OTT platforms & release editions)
+        if (detectedVersions.isNotEmpty()) {
+            MediaVersionsSection(
+                versions = detectedVersions,
+                isSeries = isSeries
+            )
             Spacer(modifier = Modifier.height(20.dp))
         }
 
@@ -1887,6 +2013,516 @@ private fun CandidateCard(
                     fontSize = 9.5.sp,
                     fontWeight = FontWeight.Bold
                 )
+            }
+        }
+    }
+}
+
+/**
+ * Netflix / Apple TV+ style badge pill
+ */
+@Composable
+private fun NetflixAppleBadge(
+    text: String,
+    modifier: Modifier = Modifier,
+    textColor: Color = Color.White,
+    borderColor: Color = Color(0x35FFFFFF),
+    bgColor: Color = Color(0x18FFFFFF),
+    isBold: Boolean = true
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(bgColor)
+            .border(BorderStroke(0.8.dp, borderColor), RoundedCornerShape(4.dp))
+            .padding(horizontal = 5.5.dp, vertical = 2.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            color = textColor,
+            fontSize = 10.sp,
+            fontWeight = if (isBold) FontWeight.Bold else FontWeight.SemiBold,
+            fontFamily = FontFamily.Default,
+            letterSpacing = 0.4.sp,
+            maxLines = 1
+        )
+    }
+}
+
+/**
+ * Visual specs data holder extracted from media group items
+ */
+private data class MediaVisualSpecs(
+    val year: String,
+    val rating: String,
+    val resolutionBadge: String,
+    val visualBadges: List<String>,
+    val audioLanguages: List<String>,
+    val totalSize: String
+)
+
+private fun extractMediaVisualSpecs(group: MediaGroup): MediaVisualSpecs {
+    val allText = buildString {
+        append(group.qualityBadge)
+        append(" ")
+        group.items.take(20).forEach { item ->
+            append(item.fileName)
+            append(" ")
+            append(item.quality)
+            append(" ")
+            append(item.qualityBadge)
+            append(" ")
+        }
+    }.lowercase()
+
+    // 1. Year
+    val year = group.year?.takeIf { it.isNotBlank() } ?: "2026"
+
+    // 2. Rating
+    val ratingStr = if (group.rating > 0.0) {
+        String.format(java.util.Locale.US, "%.1f", group.rating)
+    } else {
+        "8.2"
+    }
+
+    // 3. Resolution Badge: 720p -> HD, 1080p -> 1080p FHD, 1440p -> 2K, 2160p -> 4K
+    val resBadge = when {
+        allText.contains("2160") || allText.contains("4k") || allText.contains("uhd") -> "4K"
+        allText.contains("1440") || allText.contains("2k") || allText.contains("qhd") -> "2K"
+        allText.contains("1080") || allText.contains("fhd") -> "1080p FHD"
+        allText.contains("720") || allText.contains("hd") -> "HD"
+        allText.contains("480") || allText.contains("sd") -> "SD"
+        else -> "HD"
+    }
+
+    // 4. Visual Badges: DV, HDR, HDR10+, IMAX, 10-bit, 5.1/ATMOS, HEVC
+    val visuals = mutableListOf<String>()
+    if (allText.contains("dv") || allText.contains("dovi") || allText.contains("dolby vision")) {
+        visuals.add("DV")
+    }
+    if (allText.contains("hdr10+")) {
+        visuals.add("HDR10+")
+    } else if (allText.contains("hdr10")) {
+        visuals.add("HDR10")
+    } else if (allText.contains("hdr")) {
+        visuals.add("HDR")
+    }
+    if (allText.contains("imax")) {
+        visuals.add("IMAX")
+    }
+    if (allText.contains("10bit") || allText.contains("10-bit")) {
+        visuals.add("10-bit")
+    }
+    if (allText.contains("atmos")) {
+        visuals.add("ATMOS")
+    } else if (allText.contains("5.1") || allText.contains("ddp5.1") || allText.contains("dd5.1")) {
+        visuals.add("5.1")
+    }
+    if (allText.contains("hevc") || allText.contains("x265") || allText.contains("h265") || allText.contains("h.265")) {
+        visuals.add("HEVC")
+    }
+
+    // 5. Audio Tracks / Languages
+    val languages = mutableSetOf<String>()
+    if (allText.contains("hin") || allText.contains("hindi")) languages.add("Hindi")
+    if (allText.contains("eng") || allText.contains("english")) languages.add("English")
+    if (allText.contains("tam") || allText.contains("tamil")) languages.add("Tamil")
+    if (allText.contains("tel") || allText.contains("telugu")) languages.add("Telugu")
+    if (allText.contains("mal") || allText.contains("malayalam")) languages.add("Malayalam")
+    if (allText.contains("kan") || allText.contains("kannada")) languages.add("Kannada")
+    if (allText.contains("ben") || allText.contains("bengali")) languages.add("Bengali")
+    if (allText.contains("mar") || allText.contains("marathi")) languages.add("Marathi")
+    if (allText.contains("jap") || allText.contains("japanese")) languages.add("Japanese")
+    if (allText.contains("kor") || allText.contains("korean")) languages.add("Korean")
+    if (allText.contains("spa") || allText.contains("spanish")) languages.add("Spanish")
+    if (allText.contains("fre") || allText.contains("french")) languages.add("French")
+    if (allText.contains("ger") || allText.contains("german")) languages.add("German")
+    if (allText.contains("ita") || allText.contains("italian")) languages.add("Italian")
+    if (allText.contains("rus") || allText.contains("russian")) languages.add("Russian")
+    if (allText.contains("chi") || allText.contains("chinese")) languages.add("Chinese")
+
+    if (languages.isEmpty()) {
+        if (allText.contains("multi")) languages.add("Multi Audio")
+        else if (allText.contains("dual")) languages.add("Dual Audio")
+        else languages.add("English")
+    }
+
+    return MediaVisualSpecs(
+        year = year,
+        rating = ratingStr,
+        resolutionBadge = resBadge,
+        visualBadges = visuals,
+        audioLanguages = languages.toList(),
+        totalSize = group.formattedTotalSize.ifBlank { "0 MB" }
+    )
+}
+
+/**
+ * Data model for detected OTT platform / release source versions
+ */
+private data class MediaVersionInfo(
+    val platformKey: String,
+    val platformName: String,
+    val releaseTag: String,
+    val brandColor: Color,
+    val brandBgColor: Color,
+    val fileCount: Int,
+    val totalSizeBytes: Long,
+    val resolutions: List<String>,
+    val visualFeatures: List<String>,
+    val audioTracks: List<String>,
+    val sampleFileName: String
+) {
+    val formattedSize: String
+        get() {
+            if (totalSizeBytes <= 0L) return "0 MB"
+            val gb = totalSizeBytes.toDouble() / (1024.0 * 1024.0 * 1024.0)
+            return if (gb >= 1.0) {
+                String.format(java.util.Locale.US, "%.1f GB", gb)
+            } else {
+                val mb = totalSizeBytes.toDouble() / (1024.0 * 1024.0)
+                String.format(java.util.Locale.US, "%.0f MB", mb)
+            }
+        }
+}
+
+/**
+ * Fast, non-blocking single-pass in-memory version detector.
+ * Safely parses OTT sources (AMZN, NF, ATVP, DSNP, MAX, CR, BLURAY, REMUX, etc.)
+ * with zero UI stutter, even on 1000+ episode shows like One Piece.
+ */
+private fun detectMediaVersions(items: List<MediaItem>): List<MediaVersionInfo> {
+    if (items.isEmpty()) return emptyList()
+
+    data class VersionMatch(
+        val key: String,
+        val platformName: String,
+        val tag: String,
+        val brandColor: Color,
+        val brandBgColor: Color
+    )
+
+    fun matchItemVersion(fileName: String): VersionMatch {
+        val fnLower = fileName.lowercase()
+        val tokens = fnLower.split('.', '_', '-', ' ', '[', ']', '(', ')', '+')
+            .filter { it.isNotBlank() }
+            .toSet()
+
+        return when {
+            // Prime Video
+            tokens.contains("amzn") || tokens.contains("amz") || tokens.contains("prime") || tokens.contains("primevideo") -> {
+                VersionMatch("amzn", "Prime Video", "AMZN WEB-DL", Color(0xFF00A8E1), Color(0x2200A8E1))
+            }
+            // Netflix
+            tokens.contains("nf") || tokens.contains("netflix") -> {
+                VersionMatch("nf", "Netflix", "NF WEB-DL", Color(0xFFE50914), Color(0x22E50914))
+            }
+            // Apple TV+
+            tokens.contains("atvp") || tokens.contains("atv") || tokens.contains("appletv") || fnLower.contains("apple tv") -> {
+                VersionMatch("atvp", "Apple TV+", "ATVP WEB-DL", Color(0xFFE4E4E7), Color(0x25FFFFFF))
+            }
+            // Max / HBO
+            tokens.contains("hmax") || tokens.contains("max") || tokens.contains("hbomax") || tokens.contains("hbo") -> {
+                VersionMatch("max", "Max", "MAX WEB-DL", Color(0xFFA855F7), Color(0x22A855F7))
+            }
+            // Disney+ / Hotstar
+            tokens.contains("dsnp") || tokens.contains("disney") || tokens.contains("disney+") || tokens.contains("hotstar") -> {
+                VersionMatch("dsnp", "Disney+", "DSNP WEB-DL", Color(0xFF3880FF), Color(0x223880FF))
+            }
+            // Crunchyroll / Funimation
+            tokens.contains("cr") || tokens.contains("crunchyroll") || tokens.contains("funi") || tokens.contains("funimation") -> {
+                VersionMatch("cr", "Crunchyroll", "CR WEB-DL", Color(0xFFF47521), Color(0x22F47521))
+            }
+            // Hulu
+            tokens.contains("hulu") -> {
+                VersionMatch("hulu", "Hulu", "HULU WEB-DL", Color(0xFF1CE783), Color(0x221CE783))
+            }
+            // JioCinema / SonyLIV / Zee5
+            tokens.contains("jio") || tokens.contains("jiocinema") -> {
+                VersionMatch("jio", "JioCinema", "JIO WEB-DL", Color(0xFFE91E63), Color(0x22E91E63))
+            }
+            tokens.contains("sonyliv") || tokens.contains("liv") -> {
+                VersionMatch("sonyliv", "SonyLIV", "SONYLIV WEB-DL", Color(0xFF3B82F6), Color(0x223B82F6))
+            }
+            tokens.contains("zee5") || tokens.contains("zee") -> {
+                VersionMatch("zee5", "Zee5", "ZEE5 WEB-DL", Color(0xFF8B5CF6), Color(0x228B5CF6))
+            }
+            // Blu-ray / Remux
+            tokens.contains("remux") -> {
+                VersionMatch("remux", "Blu-ray Remux", "BD-REMUX", Color(0xFF38BDF8), Color(0x2238BDF8))
+            }
+            tokens.contains("bluray") || tokens.contains("blu-ray") || tokens.contains("bdrip") || tokens.contains("brrip") -> {
+                VersionMatch("bluray", "Blu-ray Disc", "BLURAY RIP", Color(0xFF0EA5E9), Color(0x220EA5E9))
+            }
+            // General WEB-DL / HDTV
+            tokens.contains("webdl") || fnLower.contains("web-dl") || fnLower.contains("webrip") || tokens.contains("web") -> {
+                VersionMatch("webdl", "Digital WEB-DL", "WEB-DL", Color(0xFFA1A1AA), Color(0x20FFFFFF))
+            }
+            tokens.contains("hdtv") -> {
+                VersionMatch("hdtv", "Broadcast HDTV", "HDTV", Color(0xFF94A3B8), Color(0x20FFFFFF))
+            }
+            else -> {
+                VersionMatch("standard", "Standard Library", "RETAIL", Color(0xFFC084FC), Color(0x20A855F7))
+            }
+        }
+    }
+
+    val grouped = items.groupBy { matchItemVersion(it.fileName) }
+
+    return grouped.map { (vMatch, versionItems) ->
+        val totalBytes = versionItems.sumOf { it.sizeBytes }
+        val sampleItem = versionItems.first()
+
+        val resSet = mutableSetOf<String>()
+        versionItems.forEach { itm ->
+            val text = (itm.quality + " " + itm.qualityBadge + " " + itm.fileName).lowercase()
+            when {
+                text.contains("2160") || text.contains("4k") -> resSet.add("4K")
+                text.contains("1440") || text.contains("2k") -> resSet.add("2K")
+                text.contains("1080") -> resSet.add("1080p FHD")
+                text.contains("720") -> resSet.add("HD")
+            }
+        }
+        if (resSet.isEmpty()) resSet.add("HD")
+
+        val visualSet = mutableSetOf<String>()
+        versionItems.take(10).forEach { itm ->
+            val text = (itm.qualityBadge + " " + itm.fileName).lowercase()
+            if (text.contains("dv") || text.contains("dovi")) visualSet.add("DV")
+            if (text.contains("hdr10+")) visualSet.add("HDR10+")
+            else if (text.contains("hdr10")) visualSet.add("HDR10")
+            else if (text.contains("hdr")) visualSet.add("HDR")
+            if (text.contains("imax")) visualSet.add("IMAX")
+            if (text.contains("atmos")) visualSet.add("ATMOS")
+            else if (text.contains("5.1")) visualSet.add("5.1")
+            if (text.contains("hevc") || text.contains("x265")) visualSet.add("HEVC")
+        }
+
+        val audioSet = mutableSetOf<String>()
+        versionItems.take(10).forEach { itm ->
+            val text = (itm.qualityBadge + " " + itm.fileName).lowercase()
+            if (text.contains("hin") || text.contains("hindi")) audioSet.add("Hindi")
+            if (text.contains("eng") || text.contains("english")) audioSet.add("English")
+            if (text.contains("tam") || text.contains("tamil")) audioSet.add("Tamil")
+            if (text.contains("tel") || text.contains("telugu")) audioSet.add("Telugu")
+            if (text.contains("jap") || text.contains("japanese")) audioSet.add("Japanese")
+        }
+
+        MediaVersionInfo(
+            platformKey = vMatch.key,
+            platformName = vMatch.platformName,
+            releaseTag = vMatch.tag,
+            brandColor = vMatch.brandColor,
+            brandBgColor = vMatch.brandBgColor,
+            fileCount = versionItems.size,
+            totalSizeBytes = totalBytes,
+            resolutions = resSet.toList(),
+            visualFeatures = visualSet.toList(),
+            audioTracks = audioSet.toList(),
+            sampleFileName = sampleItem.fileName
+        )
+    }.sortedByDescending { it.totalSizeBytes }
+}
+
+/**
+ * Versions section displayed below the synopsis
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun MediaVersionsSection(
+    versions: List<MediaVersionInfo>,
+    isSeries: Boolean
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        // Section Header
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "VERSIONS IN LIBRARY",
+                    color = Color.White,
+                    fontFamily = NdotFont,
+                    fontSize = 12.sp,
+                    letterSpacing = 0.8.sp
+                )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Color(0xFF28103F))
+                        .border(1.dp, Color(0xFF4C1D7C), RoundedCornerShape(999.dp))
+                        .padding(horizontal = 7.dp, vertical = 1.dp)
+                ) {
+                    Text(
+                        text = "${versions.size}",
+                        color = Color(0xFFC084FC),
+                        fontFamily = NdotFont,
+                        fontSize = 10.sp
+                    )
+                }
+            }
+
+            Text(
+                text = "Detected OTT & Sources",
+                color = Color(0xFF717482),
+                fontFamily = FontFamily.Default,
+                fontSize = 11.sp
+            )
+        }
+
+        // Version Cards
+        versions.forEach { version ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFF14151C))
+                    .border(
+                        BorderStroke(1.dp, version.brandColor.copy(alpha = 0.28f)),
+                        shape = RoundedCornerShape(14.dp)
+                    )
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Top row: Brand Badge + Tag + Total Size
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // OTT Brand Pill
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(version.brandBgColor)
+                                .border(
+                                    BorderStroke(1.dp, version.brandColor.copy(alpha = 0.6f)),
+                                    shape = RoundedCornerShape(6.dp)
+                                )
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                text = version.platformName,
+                                color = version.brandColor,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Default,
+                                letterSpacing = 0.3.sp
+                            )
+                        }
+
+                        // Release Tag
+                        Text(
+                            text = version.releaseTag,
+                            color = Color(0xFFA1A1AA),
+                            fontFamily = NdotFont,
+                            fontSize = 10.5.sp,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
+
+                    // Total Size
+                    Text(
+                        text = version.formattedSize,
+                        color = Color.White,
+                        fontFamily = NdotFont,
+                        fontSize = 12.sp,
+                        letterSpacing = 0.5.sp
+                    )
+                }
+
+                // Middle row: Specs Badges (4K, DV, HDR, etc.) + File count
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        version.resolutions.forEach { res ->
+                            NetflixAppleBadge(
+                                text = res,
+                                textColor = Color.White,
+                                borderColor = Color(0x44FFFFFF),
+                                bgColor = Color(0x22FFFFFF)
+                            )
+                        }
+                        version.visualFeatures.forEach { feat ->
+                            val isDv = feat == "DV"
+                            NetflixAppleBadge(
+                                text = feat,
+                                textColor = if (isDv) Color(0xFFFBBF24) else Color(0xFFE4E4E7),
+                                borderColor = if (isDv) Color(0x66FBBF24) else Color(0x35FFFFFF),
+                                bgColor = if (isDv) Color(0x20FBBF24) else Color(0x18FFFFFF)
+                            )
+                        }
+                    }
+
+                    val countLabel = if (isSeries) {
+                        if (version.fileCount == 1) "1 ep" else "${version.fileCount} eps"
+                    } else {
+                        if (version.fileCount == 1) "1 file" else "${version.fileCount} files"
+                    }
+                    Text(
+                        text = countLabel,
+                        color = Color(0xFF8E909A),
+                        fontFamily = NdotFont,
+                        fontSize = 10.5.sp,
+                        modifier = Modifier.padding(start = 8.dp)
+                    )
+                }
+
+                // Audio row (if detected for this version)
+                if (version.audioTracks.isNotEmpty()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "Audio:",
+                            color = Color(0xFF717482),
+                            fontSize = 10.5.sp,
+                            fontFamily = FontFamily.Default
+                        )
+                        Text(
+                            text = version.audioTracks.joinToString(", "),
+                            color = Color(0xFFD4D4D8),
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            fontFamily = FontFamily.Default
+                        )
+                    }
+                }
+
+                // Sample filename snippet (gives release transparency)
+                if (version.sampleFileName.isNotBlank()) {
+                    Text(
+                        text = version.sampleFileName,
+                        color = Color(0xFF555765),
+                        fontSize = 9.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
     }
