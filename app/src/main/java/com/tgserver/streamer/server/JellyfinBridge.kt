@@ -299,13 +299,64 @@ class JellyfinBridge(
                     handleGetSingleItem(seriesId, localIp, config.port)
                 }
 
-                // ================= 6. Single Item Metadata =================
+                // ================= 6. Similar Items & Recommendations =================
+                lowerUri.endsWith("/similar") -> {
+                    handleSimilarItems(cleanUri, params, localIp, config.port)
+                }
+
+                // ================= 7. Special Features, Themes & Extras =================
+                lowerUri.endsWith("/thememedia") -> {
+                    jsonResponse(
+                        mapOf(
+                            "ThemeVideosResult" to mapOf("Items" to emptyList<Any>(), "TotalRecordCount" to 0),
+                            "ThemeSongsResult" to mapOf("Items" to emptyList<Any>(), "TotalRecordCount" to 0),
+                            "SoundtrackSongsResult" to mapOf("Items" to emptyList<Any>(), "TotalRecordCount" to 0)
+                        )
+                    )
+                }
+                lowerUri.endsWith("/themesongs") || lowerUri.endsWith("/themevideos") || lowerUri.endsWith("/intros") -> {
+                    jsonResponse(mapOf("Items" to emptyList<Any>(), "TotalRecordCount" to 0, "StartIndex" to 0))
+                }
+                lowerUri.endsWith("/specialfeatures") || lowerUri.endsWith("/ancestors") || lowerUri.endsWith("/externalidinfos") -> {
+                    jsonResponse(emptyList<Any>())
+                }
+                lowerUri.endsWith("/filters") || lowerUri.endsWith("/filters2") -> {
+                    jsonResponse(
+                        mapOf(
+                            "Genres" to emptyList<String>(),
+                            "Tags" to emptyList<String>(),
+                            "Years" to emptyList<Int>(),
+                            "OfficialRatings" to emptyList<String>()
+                        )
+                    )
+                }
+                lowerUri.contains("/additionalparts") -> {
+                    jsonResponse(mapOf("Items" to emptyList<Any>(), "TotalRecordCount" to 0, "StartIndex" to 0))
+                }
+                lowerUri.contains("/favoriteitems/") || lowerUri.contains("/rating") -> {
+                    jsonResponse(mapOf("IsFavorite" to true))
+                }
+                lowerUri.contains("/playeditems/") -> {
+                    jsonResponse(mapOf("Played" to true, "PlayCount" to 1, "PlaybackPositionTicks" to 0L))
+                }
+
+                // ================= 8. Single Item Metadata =================
                 // Matches /Items/{itemId} or /Users/{userId}/Items/{itemId}
                 cleanUri.contains("/items/", ignoreCase = true)
                         && !lowerUri.contains("/images")
                         && !lowerUri.endsWith("/latest")
                         && !lowerUri.endsWith("/resume")
                         && !lowerUri.endsWith("/counts")
+                        && !lowerUri.endsWith("/similar")
+                        && !lowerUri.endsWith("/thememedia")
+                        && !lowerUri.endsWith("/themesongs")
+                        && !lowerUri.endsWith("/themevideos")
+                        && !lowerUri.endsWith("/specialfeatures")
+                        && !lowerUri.endsWith("/intros")
+                        && !lowerUri.endsWith("/ancestors")
+                        && !lowerUri.endsWith("/externalidinfos")
+                        && !lowerUri.endsWith("/filters")
+                        && !lowerUri.endsWith("/filters2")
                         && !cleanUri.substringAfterLast("/").equals("items", ignoreCase = true) -> {
                     val itemId = cleanUri.substringAfterLast("/")
                     handleGetSingleItem(itemId, localIp, config.port)
@@ -989,6 +1040,38 @@ class JellyfinBridge(
         }
 
         return jsonResponse(mapOf<String, Any?>())
+    }
+
+    private fun handleSimilarItems(cleanUri: String, params: Map<String, String>, localIp: String, port: Int): Response {
+        val itemId = extractSegmentBetween(cleanUri, "items/", "/similar")
+            .ifBlank { extractSegmentBetween(cleanUri, "shows/", "/similar") }
+            .ifBlank { cleanUri.substringBeforeLast("/").substringAfterLast("/") }
+        val target = findMedia(itemId)
+        val limit = getParam(params, "Limit", "limit").toIntOrNull() ?: 12
+        val all = tgClient.getAllMedia().filter { !it.isHidden }
+
+        val isTargetSeries = target != null && (isSeries(target) || isAnime(target))
+        val targetTitle = target?.title ?: ""
+
+        val similarItems = if (isTargetSeries) {
+            all.filter { (isSeries(it) || isAnime(it)) && !it.title.equals(targetTitle, ignoreCase = true) }
+                .distinctBy { it.title.lowercase().trim() }
+                .take(limit)
+                .map { toJellyfinItem(it, localIp, port, isSeriesOverview = true) }
+        } else {
+            all.filter { isMovie(it) && it.id != target?.id }
+                .distinctBy { it.title.lowercase().trim() }
+                .take(limit)
+                .map { toJellyfinItem(it, localIp, port, isSeriesOverview = false) }
+        }
+
+        return jsonResponse(
+            mapOf(
+                "Items" to similarItems,
+                "TotalRecordCount" to similarItems.size,
+                "StartIndex" to 0
+            )
+        )
     }
 
     private fun handlePlaybackInfo(itemId: String, localIp: String, port: Int): Response {
