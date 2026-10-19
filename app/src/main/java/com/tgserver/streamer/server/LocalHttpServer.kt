@@ -36,6 +36,16 @@ class LocalHttpServer(
         .readTimeout(3, TimeUnit.SECONDS)
         .build()
 
+    private val jellyfinBridge by lazy {
+        JellyfinBridge(
+            context = context,
+            tgClient = tgClient,
+            posterService = posterService,
+            configProvider = { config },
+            localIpProvider = { getLocalIpAddress() }
+        )
+    }
+
     fun getLocalIpAddress(): String = Companion.getLocalIpAddress()
 
     companion object {
@@ -99,7 +109,10 @@ class LocalHttpServer(
                 normUri.startsWith("/stream/video/") -> handleVideoStream(session, normUri, headers)
                 uri.startsWith("/stream/video/") -> handleVideoStream(session, uri, headers)
 
-                // 3. Management REST APIs for Stitch UI
+                // 3. Jellyfin & Emby API Emulation Endpoints (Infuse, Jellyfin TV, Swiftfin, Findroid)
+                jellyfinBridge.isJellyfinUri(normUri) -> jellyfinBridge.handle(session, normUri, method, headers)
+
+                // 4. Management REST APIs for Stitch UI
                 uri == "/api/status" -> handleGetStatus()
                 uri == "/api/logs" -> handleGetLogs()
                 uri == "/api/server/toggle" && method == Method.POST -> handleToggleServer()
@@ -1114,6 +1127,7 @@ class LocalHttpServer(
             addProperty("port", config.port)
             addProperty("localIp", localIp)
             addProperty("manifestUrl", "http://$localIp:${config.port}/manifest.json")
+            addProperty("jellyfinUrl", "http://$localIp:${config.port}")
             addProperty("uptimeSeconds", uptimeSeconds)
             addProperty("uptimeFormatted", formatUptime(uptimeSeconds))
             addProperty("memoryUsedMb", usedMem)
