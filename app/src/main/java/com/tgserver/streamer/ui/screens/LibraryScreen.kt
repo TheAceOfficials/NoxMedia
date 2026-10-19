@@ -63,6 +63,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.tgserver.streamer.R
 import com.tgserver.streamer.data.model.*
 import com.tgserver.streamer.metadata.EnrichedMetadata
@@ -313,7 +315,7 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
             .background(BackgroundOled)
     ) {
         AnimatedContent(
-            targetState = selectedGroup,
+            targetState = selectedGroupKey,
             transitionSpec = {
                 if (targetState != null) {
                     (fadeIn(tween(260)) + slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Start, tween(260))) togetherWith
@@ -324,7 +326,8 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                 }
             },
             label = "library_screen_transition"
-        ) { currentGroup ->
+        ) { currentGroupKey ->
+            val currentGroup = mediaGroups.find { it.key == currentGroupKey }
             if (currentGroup != null) {
                 // FULL SCREEN CONTENT DETAILS VIEW
                 ContentDetailsScreen(
@@ -823,6 +826,7 @@ private fun ContentDetailsScreen(
     val haptic = LocalHapticFeedback.current
     val isSeries = group.type == "series" || group.type == "anime"
     var showRescanDialog by remember { mutableStateOf(false) }
+    var showPosterZoomDialog by remember { mutableStateOf(false) }
 
     val visualSpecs = remember(group) {
         extractMediaVisualSpecs(group)
@@ -850,6 +854,81 @@ private fun ContentDetailsScreen(
                 showRescanDialog = false
             }
         )
+    }
+
+    // Full-Screen High-Res Poster Zoom Popup Window
+    if (showPosterZoomDialog) {
+        Dialog(
+            onDismissRequest = { showPosterZoomDialog = false },
+            properties = DialogProperties(
+                usePlatformDefaultWidth = false,
+                dismissOnBackPress = true,
+                dismissOnClickOutside = true
+            )
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.94f))
+                    .clickable { showPosterZoomDialog = false },
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    modifier = Modifier
+                        .padding(horizontal = 22.dp, vertical = 24.dp)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { /* Avoid closing when tapping directly on image area */ }
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = group.title,
+                            color = Color.White,
+                            fontFamily = FontFamily.Default,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 17.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f).padding(end = 10.dp)
+                        )
+
+                        IconButton(
+                            onClick = { showPosterZoomDialog = false },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(Color(0x33FFFFFF))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close",
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    RemoteImage(
+                        url = group.posterUrl,
+                        contentDescription = group.title,
+                        isSeries = isSeries,
+                        modifier = Modifier
+                            .fillMaxWidth(0.92f)
+                            .aspectRatio(2f / 3f)
+                            .clip(RoundedCornerShape(16.dp))
+                            .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(16.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+            }
+        }
     }
 
     Column(
@@ -968,17 +1047,25 @@ private fun ContentDetailsScreen(
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalAlignment = Alignment.Top
         ) {
-            // Poster thumbnail
-            RemoteImage(
-                url = group.posterUrl,
-                contentDescription = group.title,
-                isSeries = isSeries,
+            // Poster thumbnail (Clickable to open high-res zoom popup)
+            Box(
                 modifier = Modifier
                     .width(96.dp)
                     .height(142.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .border(1.dp, Color(0xFF38155E), RoundedCornerShape(12.dp))
-            )
+                    .clickable {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        showPosterZoomDialog = true
+                    }
+            ) {
+                RemoteImage(
+                    url = group.posterUrl,
+                    contentDescription = group.title,
+                    isSeries = isSeries,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
 
             // Title & Meta Info
             Column(
@@ -996,11 +1083,10 @@ private fun ContentDetailsScreen(
                     overflow = TextOverflow.Ellipsis
                 )
 
-                // 1. Netflix & Apple TV+ Style Badges: Year, Rating, Quality, Visuals
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier.fillMaxWidth()
+                // 1. Release Info: Year & Rating on Line 1
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     // Year Badge
                     NetflixAppleBadge(
@@ -1016,12 +1102,12 @@ private fun ContentDetailsScreen(
                             .clip(RoundedCornerShape(4.dp))
                             .background(Color(0x20FBBF24))
                             .border(BorderStroke(0.8.dp, Color(0x66FBBF24)), RoundedCornerShape(4.dp))
-                            .padding(horizontal = 5.5.dp, vertical = 2.dp),
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
                         ) {
                             Text(
                                 text = "★",
@@ -1037,8 +1123,15 @@ private fun ContentDetailsScreen(
                             )
                         }
                     }
+                }
 
-                    // Quality Badge (e.g. 720p -> HD, 1080p -> 1080p FHD, 1440p -> 2K, 2160p -> 4K)
+                // 2. Technical Quality & Visual Badges on Line 2
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    // Quality Badge (e.g. 720p -> HD, 1080p -> FHD, 1440p -> 2K, 2160p -> 4K)
                     NetflixAppleBadge(
                         text = visualSpecs.resolutionBadge,
                         textColor = Color.White,
@@ -1046,7 +1139,7 @@ private fun ContentDetailsScreen(
                         bgColor = Color(0x28FFFFFF)
                     )
 
-                    // Visual Badges: DV, HDR, HDR10+, IMAX, 5.1/ATMOS, HEVC
+                    // Visual Badges: DV, HDR, HDR10+, IMAX, 10-bit, 5.1/ATMOS, HEVC
                     visualSpecs.visualBadges.forEach { badge ->
                         val isDv = badge == "DV"
                         val isImax = badge == "IMAX"
@@ -1074,9 +1167,9 @@ private fun ContentDetailsScreen(
                     }
                 }
 
-                // 2. Audio Tracks Row: Available in: Hindi, English, Tamil
+                // 3. Audio Tracks Row: Available in: Hindi, English, Tamil
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
+                    verticalAlignment = Alignment.Top,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     modifier = Modifier.padding(top = 2.dp)
                 ) {
@@ -1087,17 +1180,17 @@ private fun ContentDetailsScreen(
                         fontFamily = FontFamily.Default
                     )
                     Text(
-                        text = visualSpecs.audioLanguages.joinToString(", ").ifBlank { "English" },
+                        text = visualSpecs.audioLanguages.joinToString(", ").ifBlank { "Unknown" },
                         color = Color(0xFFE4E4E7),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         fontFamily = FontFamily.Default,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
 
-                // 3. Total Size Row
+                // 4. Total Size Row
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -1319,6 +1412,7 @@ private fun ContentDetailsScreen(
                             EpisodeGroupAccordionRow(
                                 epNum = epNum,
                                 epItems = epItems,
+                                showTitle = group.title,
                                 onToggleHide = { item ->
                                     viewModel.toggleHideMedia(item.id)
                                 },
@@ -1347,19 +1441,20 @@ private fun ContentDetailsScreen(
 private fun EpisodeGroupAccordionRow(
     epNum: Int,
     epItems: List<MediaItem>,
+    showTitle: String,
     streamBaseUrl: String,
     onToggleHide: (MediaItem) -> Unit,
     onCopyStream: (String) -> Unit
 ) {
     var isExpanded by remember { mutableStateOf(false) }
     val primary = epItems.first()
-    val epTitle = epItems.firstOrNull { !it.episodeTitle.isNullOrBlank() }?.episodeTitle
-        ?.ifBlank { primary.title } ?: primary.title
-
-    // Distinct available qualities: e.g. ["1080p", "4K 2160p"]
-    val qualities = remember(epItems) {
-        epItems.map { it.quality.ifBlank { "1080p" } }.distinct()
+    val candidateTitle = epItems.firstOrNull { !it.episodeTitle.isNullOrBlank() }?.episodeTitle?.trim()
+    val epTitle = if (!candidateTitle.isNullOrBlank() && !candidateTitle.equals(showTitle, ignoreCase = true)) {
+        candidateTitle
+    } else {
+        extractCleanEpisodeTitle(primary.fileName, epNum)
     }
+
     val allHidden = epItems.all { it.isHidden }
     val anyHidden = epItems.any { it.isHidden }
 
@@ -1405,7 +1500,7 @@ private fun EpisodeGroupAccordionRow(
                     )
                 }
 
-                // Episode Title and Qualities stacked vertically so title has full row width and never truncates
+                // Episode Title and Qualities stacked vertically
                 Column(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(3.dp)
@@ -1421,28 +1516,32 @@ private fun EpisodeGroupAccordionRow(
                         overflow = TextOverflow.Ellipsis
                     )
 
-                    // Available Qualities Pills (e.g. 1080p | 4K)
+                    // Available Qualities in Netflix / Apple TV+ Badge Style
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(5.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        qualities.forEach { q ->
-                            val is4k = q.contains("4K", ignoreCase = true) || q.contains("2160", ignoreCase = true)
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(if (is4k) Color(0xFF38155E) else Color(0xFF1E212E))
-                                    .border(1.dp, if (is4k) Color(0xFF7C3AED) else Color(0xFF3B3E52), RoundedCornerShape(4.dp))
-                                    .padding(horizontal = 5.dp, vertical = 1.dp)
-                            ) {
-                                Text(
-                                    text = q,
-                                    color = if (is4k) Color(0xFFE9D5FF) else Color(0xFFCBD5E1),
-                                    fontSize = 9.sp,
-                                    fontFamily = NdotFont,
-                                    fontWeight = FontWeight.Medium
-                                )
-                            }
+                        val distinctResolutions = remember(epItems) {
+                            epItems.map { detectItemResolution(it) }.distinct()
+                        }
+                        distinctResolutions.forEach { res ->
+                            val is4k = res == "4K"
+                            NetflixAppleBadge(
+                                text = res,
+                                textColor = if (is4k) Color.White else Color(0xFFE4E4E7),
+                                borderColor = if (is4k) Color(0x55FFFFFF) else Color(0x35FFFFFF),
+                                bgColor = if (is4k) Color(0x28FFFFFF) else Color(0x18FFFFFF)
+                            )
+                        }
+
+                        val hasDv = epItems.any { (it.qualityBadge + " " + it.fileName).contains("dv", ignoreCase = true) }
+                        if (hasDv) {
+                            NetflixAppleBadge(
+                                text = "DV",
+                                textColor = Color(0xFFFBBF24),
+                                borderColor = Color(0x66FBBF24),
+                                bgColor = Color(0x20FBBF24)
+                            )
                         }
                     }
                 }
@@ -2051,6 +2150,100 @@ private fun NetflixAppleBadge(
 }
 
 /**
+ * Helper to accurately detect resolution of an item using canonical quality + word boundary regex
+ */
+private fun detectItemResolution(item: MediaItem): String {
+    val q = item.quality.lowercase()
+    if (q.contains("2160") || q.contains("4k") || q.contains("uhd")) return "4K"
+    if (q.contains("1440") || q.contains("2k") || q.contains("qhd")) return "2K"
+    if (q.contains("1080") || q.contains("fhd")) return "FHD"
+    if (q.contains("720") || q.contains("hd")) return "HD"
+    if (q.contains("480") || q.contains("sd")) return "SD"
+
+    val qb = item.qualityBadge.lowercase()
+    if (Regex("""\b(2160p?|4k|uhd)\b""").containsMatchIn(qb)) return "4K"
+    if (Regex("""\b(1440p?|2k|qhd)\b""").containsMatchIn(qb)) return "2K"
+    if (Regex("""\b(1080p?|fhd)\b""").containsMatchIn(qb)) return "FHD"
+    if (Regex("""\b(720p?|hd)\b""").containsMatchIn(qb)) return "HD"
+
+    val fn = item.fileName.lowercase()
+    if (Regex("""\b(2160p?|4k|uhd)\b""").containsMatchIn(fn)) return "4K"
+    if (Regex("""\b(1440p?|2k|qhd)\b""").containsMatchIn(fn)) return "2K"
+    if (Regex("""\b(1080p?|fhd)\b""").containsMatchIn(fn)) return "FHD"
+    if (Regex("""\b(720p?|hd)\b""").containsMatchIn(fn)) return "HD"
+
+    return "FHD"
+}
+
+/**
+ * Token-based audio track detector without false positives (avoids substring matching issues)
+ */
+private fun detectAudioTracks(textSources: List<String>): List<String> {
+    val languages = mutableSetOf<String>()
+    val combinedLower = textSources.joinToString(" ").lowercase()
+    val tokens = combinedLower.split('.', '_', '-', ' ', '[', ']', '(', ')', '+', '/', ':', ',')
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .toSet()
+
+    // Explicit language tokens
+    if (tokens.contains("hindi") || tokens.contains("hin")) languages.add("Hindi")
+    if (tokens.contains("english") || tokens.contains("eng")) languages.add("English")
+    if (tokens.contains("tamil") || tokens.contains("tam")) languages.add("Tamil")
+    if (tokens.contains("telugu") || tokens.contains("tel")) languages.add("Telugu")
+    if (tokens.contains("malayalam") || tokens.contains("mal")) languages.add("Malayalam")
+    if (tokens.contains("kannada") || tokens.contains("kan")) languages.add("Kannada")
+    if (tokens.contains("bengali") || tokens.contains("ben")) languages.add("Bengali")
+    if (tokens.contains("marathi") || tokens.contains("mar")) languages.add("Marathi")
+    if (tokens.contains("japanese") || tokens.contains("jap") || tokens.contains("jpn")) languages.add("Japanese")
+    if (tokens.contains("korean") || tokens.contains("kor")) languages.add("Korean")
+    if (tokens.contains("spanish") || tokens.contains("spa") || tokens.contains("espanol")) languages.add("Spanish")
+    if (tokens.contains("french") || tokens.contains("fre") || tokens.contains("fra")) languages.add("French")
+    if (tokens.contains("german") || tokens.contains("ger") || tokens.contains("deu")) languages.add("German")
+    if (tokens.contains("italian") || tokens.contains("ita")) languages.add("Italian")
+    if (tokens.contains("russian") || tokens.contains("rus")) languages.add("Russian")
+    if (tokens.contains("chinese") || tokens.contains("chi") || tokens.contains("zho")) languages.add("Chinese")
+
+    if (languages.isNotEmpty()) {
+        return languages.toList()
+    }
+
+    // Check Multi / Dual
+    if (tokens.contains("multi") || tokens.contains("multiaudio") || combinedLower.contains("multi audio") || combinedLower.contains("multi dub")) {
+        return listOf("Multi Dub")
+    }
+    if (tokens.contains("dual") || tokens.contains("dualaudio") || combinedLower.contains("dual audio")) {
+        return listOf("Dual Audio")
+    }
+
+    return listOf("Unknown")
+}
+
+/**
+ * Extracts clean episode title from filename without repeating series name
+ */
+private fun extractCleanEpisodeTitle(fileName: String, epNum: Int): String {
+    if (fileName.isBlank()) return "Episode $epNum"
+    val base = fileName.substringBeforeLast('.')
+
+    val patterns = listOf(
+        Regex("""(?i)(?:s\d{1,2}e\d{1,4}|e\d{1,4}|ep\s*\d{1,4})\s*[\.\-\–\_:]\s*([a-zA-Z0-9\s\.\-\–\_']+?)(?:\s*[\.\-\_\(\[]\s*(?:2160p|1080p|720p|480p|4k|uhd|web|bluray|amzn|nf|cr|dsnp|atvp|max|hevc|x264|x265|aac)|\.[a-zA-Z0-9]{2,4}|$)"""),
+        Regex("""(?i)\b\d{1,4}\s*[\-\–]\s*([a-zA-Z0-9\s\.\-\–\_']+?)(?:\s*[\.\-\_\(\[]\s*(?:2160p|1080p|720p|480p|4k)|\.[a-zA-Z0-9]{2,4}|$)""")
+    )
+    for (pat in patterns) {
+        val match = pat.find(base)
+        if (match != null) {
+            val raw = match.groupValues[1].replace('.', ' ').replace('_', ' ').trim()
+            val cleaned = raw.replace(Regex("""(?i)\b(1080p|720p|4k|2160p|web-?dl|hevc|x264|x265|aac)\b"""), "").trim()
+            if (cleaned.length > 2 && !cleaned.all { it.isDigit() }) {
+                return cleaned
+            }
+        }
+    }
+    return "Episode $epNum"
+}
+
+/**
  * Visual specs data holder extracted from media group items
  */
 private data class MediaVisualSpecs(
@@ -2063,19 +2256,6 @@ private data class MediaVisualSpecs(
 )
 
 private fun extractMediaVisualSpecs(group: MediaGroup): MediaVisualSpecs {
-    val allText = buildString {
-        append(group.qualityBadge)
-        append(" ")
-        group.items.take(20).forEach { item ->
-            append(item.fileName)
-            append(" ")
-            append(item.quality)
-            append(" ")
-            append(item.qualityBadge)
-            append(" ")
-        }
-    }.lowercase()
-
     // 1. Year
     val year = group.year?.takeIf { it.isNotBlank() } ?: "2026"
 
@@ -2086,17 +2266,19 @@ private fun extractMediaVisualSpecs(group: MediaGroup): MediaVisualSpecs {
         "8.2"
     }
 
-    // 3. Resolution Badge: 720p -> HD, 1080p -> 1080p FHD, 1440p -> 2K, 2160p -> 4K
+    // 3. Resolution Badge: uses strict item resolution detection
+    val itemResolutions = group.items.map { detectItemResolution(it) }.distinct()
     val resBadge = when {
-        allText.contains("2160") || allText.contains("4k") || allText.contains("uhd") -> "4K"
-        allText.contains("1440") || allText.contains("2k") || allText.contains("qhd") -> "2K"
-        allText.contains("1080") || allText.contains("fhd") -> "1080p FHD"
-        allText.contains("720") || allText.contains("hd") -> "HD"
-        allText.contains("480") || allText.contains("sd") -> "SD"
-        else -> "HD"
+        itemResolutions.contains("4K") -> "4K"
+        itemResolutions.contains("2K") -> "2K"
+        itemResolutions.contains("FHD") -> "FHD"
+        itemResolutions.contains("HD") -> "HD"
+        itemResolutions.contains("SD") -> "SD"
+        else -> "FHD"
     }
 
     // 4. Visual Badges: DV, HDR, HDR10+, IMAX, 10-bit, 5.1/ATMOS, HEVC
+    val allText = (group.qualityBadge + " " + group.items.take(20).joinToString(" ") { it.fileName + " " + it.qualityBadge }).lowercase()
     val visuals = mutableListOf<String>()
     if (allText.contains("dv") || allText.contains("dovi") || allText.contains("dolby vision")) {
         visuals.add("DV")
@@ -2123,37 +2305,15 @@ private fun extractMediaVisualSpecs(group: MediaGroup): MediaVisualSpecs {
         visuals.add("HEVC")
     }
 
-    // 5. Audio Tracks / Languages
-    val languages = mutableSetOf<String>()
-    if (allText.contains("hin") || allText.contains("hindi")) languages.add("Hindi")
-    if (allText.contains("eng") || allText.contains("english")) languages.add("English")
-    if (allText.contains("tam") || allText.contains("tamil")) languages.add("Tamil")
-    if (allText.contains("tel") || allText.contains("telugu")) languages.add("Telugu")
-    if (allText.contains("mal") || allText.contains("malayalam")) languages.add("Malayalam")
-    if (allText.contains("kan") || allText.contains("kannada")) languages.add("Kannada")
-    if (allText.contains("ben") || allText.contains("bengali")) languages.add("Bengali")
-    if (allText.contains("mar") || allText.contains("marathi")) languages.add("Marathi")
-    if (allText.contains("jap") || allText.contains("japanese")) languages.add("Japanese")
-    if (allText.contains("kor") || allText.contains("korean")) languages.add("Korean")
-    if (allText.contains("spa") || allText.contains("spanish")) languages.add("Spanish")
-    if (allText.contains("fre") || allText.contains("french")) languages.add("French")
-    if (allText.contains("ger") || allText.contains("german")) languages.add("German")
-    if (allText.contains("ita") || allText.contains("italian")) languages.add("Italian")
-    if (allText.contains("rus") || allText.contains("russian")) languages.add("Russian")
-    if (allText.contains("chi") || allText.contains("chinese")) languages.add("Chinese")
-
-    if (languages.isEmpty()) {
-        if (allText.contains("multi")) languages.add("Multi Audio")
-        else if (allText.contains("dual")) languages.add("Dual Audio")
-        else languages.add("English")
-    }
+    // 5. Audio Tracks
+    val audioLangs = detectAudioTracks(listOf(group.qualityBadge) + group.items.take(20).map { it.fileName + " " + it.qualityBadge })
 
     return MediaVisualSpecs(
         year = year,
         rating = ratingStr,
         resolutionBadge = resBadge,
         visualBadges = visuals,
-        audioLanguages = languages.toList(),
+        audioLanguages = audioLangs,
         totalSize = group.formattedTotalSize.ifBlank { "0 MB" }
     )
 }
@@ -2190,7 +2350,6 @@ private data class MediaVersionInfo(
 /**
  * Fast, non-blocking single-pass in-memory version detector.
  * Safely parses OTT sources (AMZN, NF, ATVP, DSNP, MAX, CR, BLURAY, REMUX, etc.)
- * with zero UI stutter, even on 1000+ episode shows like One Piece.
  */
 private fun detectMediaVersions(items: List<MediaItem>): List<MediaVersionInfo> {
     if (items.isEmpty()) return emptyList()
@@ -2210,35 +2369,27 @@ private fun detectMediaVersions(items: List<MediaItem>): List<MediaVersionInfo> 
             .toSet()
 
         return when {
-            // Prime Video
             tokens.contains("amzn") || tokens.contains("amz") || tokens.contains("prime") || tokens.contains("primevideo") -> {
                 VersionMatch("amzn", "Prime Video", "AMZN WEB-DL", Color(0xFF00A8E1), Color(0x2200A8E1))
             }
-            // Netflix
             tokens.contains("nf") || tokens.contains("netflix") -> {
                 VersionMatch("nf", "Netflix", "NF WEB-DL", Color(0xFFE50914), Color(0x22E50914))
             }
-            // Apple TV+
             tokens.contains("atvp") || tokens.contains("atv") || tokens.contains("appletv") || fnLower.contains("apple tv") -> {
                 VersionMatch("atvp", "Apple TV+", "ATVP WEB-DL", Color(0xFFE4E4E7), Color(0x25FFFFFF))
             }
-            // Max / HBO
             tokens.contains("hmax") || tokens.contains("max") || tokens.contains("hbomax") || tokens.contains("hbo") -> {
                 VersionMatch("max", "Max", "MAX WEB-DL", Color(0xFFA855F7), Color(0x22A855F7))
             }
-            // Disney+ / Hotstar
             tokens.contains("dsnp") || tokens.contains("disney") || tokens.contains("disney+") || tokens.contains("hotstar") -> {
                 VersionMatch("dsnp", "Disney+", "DSNP WEB-DL", Color(0xFF3880FF), Color(0x223880FF))
             }
-            // Crunchyroll / Funimation
             tokens.contains("cr") || tokens.contains("crunchyroll") || tokens.contains("funi") || tokens.contains("funimation") -> {
                 VersionMatch("cr", "Crunchyroll", "CR WEB-DL", Color(0xFFF47521), Color(0x22F47521))
             }
-            // Hulu
             tokens.contains("hulu") -> {
                 VersionMatch("hulu", "Hulu", "HULU WEB-DL", Color(0xFF1CE783), Color(0x221CE783))
             }
-            // JioCinema / SonyLIV / Zee5
             tokens.contains("jio") || tokens.contains("jiocinema") -> {
                 VersionMatch("jio", "JioCinema", "JIO WEB-DL", Color(0xFFE91E63), Color(0x22E91E63))
             }
@@ -2248,14 +2399,12 @@ private fun detectMediaVersions(items: List<MediaItem>): List<MediaVersionInfo> 
             tokens.contains("zee5") || tokens.contains("zee") -> {
                 VersionMatch("zee5", "Zee5", "ZEE5 WEB-DL", Color(0xFF8B5CF6), Color(0x228B5CF6))
             }
-            // Blu-ray / Remux
             tokens.contains("remux") -> {
                 VersionMatch("remux", "Blu-ray Remux", "BD-REMUX", Color(0xFF38BDF8), Color(0x2238BDF8))
             }
             tokens.contains("bluray") || tokens.contains("blu-ray") || tokens.contains("bdrip") || tokens.contains("brrip") -> {
                 VersionMatch("bluray", "Blu-ray Disc", "BLURAY RIP", Color(0xFF0EA5E9), Color(0x220EA5E9))
             }
-            // General WEB-DL / HDTV
             tokens.contains("webdl") || fnLower.contains("web-dl") || fnLower.contains("webrip") || tokens.contains("web") -> {
                 VersionMatch("webdl", "Digital WEB-DL", "WEB-DL", Color(0xFFA1A1AA), Color(0x20FFFFFF))
             }
@@ -2274,17 +2423,8 @@ private fun detectMediaVersions(items: List<MediaItem>): List<MediaVersionInfo> 
         val totalBytes = versionItems.sumOf { it.sizeBytes }
         val sampleItem = versionItems.first()
 
-        val resSet = mutableSetOf<String>()
-        versionItems.forEach { itm ->
-            val text = (itm.quality + " " + itm.qualityBadge + " " + itm.fileName).lowercase()
-            when {
-                text.contains("2160") || text.contains("4k") -> resSet.add("4K")
-                text.contains("1440") || text.contains("2k") -> resSet.add("2K")
-                text.contains("1080") -> resSet.add("1080p FHD")
-                text.contains("720") -> resSet.add("HD")
-            }
-        }
-        if (resSet.isEmpty()) resSet.add("HD")
+        // Extract resolutions strictly using detectItemResolution
+        val resSet = versionItems.map { detectItemResolution(it) }.distinct().toSet()
 
         val visualSet = mutableSetOf<String>()
         versionItems.take(10).forEach { itm ->
@@ -2299,15 +2439,7 @@ private fun detectMediaVersions(items: List<MediaItem>): List<MediaVersionInfo> 
             if (text.contains("hevc") || text.contains("x265")) visualSet.add("HEVC")
         }
 
-        val audioSet = mutableSetOf<String>()
-        versionItems.take(10).forEach { itm ->
-            val text = (itm.qualityBadge + " " + itm.fileName).lowercase()
-            if (text.contains("hin") || text.contains("hindi")) audioSet.add("Hindi")
-            if (text.contains("eng") || text.contains("english")) audioSet.add("English")
-            if (text.contains("tam") || text.contains("tamil")) audioSet.add("Tamil")
-            if (text.contains("tel") || text.contains("telugu")) audioSet.add("Telugu")
-            if (text.contains("jap") || text.contains("japanese")) audioSet.add("Japanese")
-        }
+        val audioSet = detectAudioTracks(versionItems.take(20).map { it.qualityBadge + " " + it.fileName })
 
         MediaVersionInfo(
             platformKey = vMatch.key,
@@ -2319,7 +2451,7 @@ private fun detectMediaVersions(items: List<MediaItem>): List<MediaVersionInfo> 
             totalSizeBytes = totalBytes,
             resolutions = resSet.toList(),
             visualFeatures = visualSet.toList(),
-            audioTracks = audioSet.toList(),
+            audioTracks = audioSet,
             sampleFileName = sampleItem.fileName
         )
     }.sortedByDescending { it.totalSizeBytes }
@@ -2359,16 +2491,18 @@ private fun MediaVersionsSection(
                 )
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
+                        .clip(RoundedCornerShape(6.dp))
                         .background(Color(0xFF28103F))
-                        .border(1.dp, Color(0xFF4C1D7C), RoundedCornerShape(999.dp))
-                        .padding(horizontal = 7.dp, vertical = 1.dp)
+                        .border(1.dp, Color(0xFF4C1D7C), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                    contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = "${versions.size}",
                         color = Color(0xFFC084FC),
                         fontFamily = NdotFont,
-                        fontSize = 10.sp
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
@@ -2458,11 +2592,12 @@ private fun MediaVersionsSection(
                         modifier = Modifier.weight(1f)
                     ) {
                         version.resolutions.forEach { res ->
+                            val is4k = res == "4K"
                             NetflixAppleBadge(
                                 text = res,
-                                textColor = Color.White,
-                                borderColor = Color(0x44FFFFFF),
-                                bgColor = Color(0x22FFFFFF)
+                                textColor = if (is4k) Color.White else Color(0xFFE4E4E7),
+                                borderColor = if (is4k) Color(0x55FFFFFF) else Color(0x35FFFFFF),
+                                bgColor = if (is4k) Color(0x28FFFFFF) else Color(0x18FFFFFF)
                             )
                         }
                         version.visualFeatures.forEach { feat ->
