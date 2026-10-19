@@ -172,67 +172,66 @@ fun HomeScreen(viewModel: MainAppViewModel) {
             .padding(top = 10.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(22.dp)
     ) {
-        // TOP BRANDING HEADER (Matched with user design: Logo + NoxMedia Title with Divider & Aligned Subtitle)
+        // TOP BRANDING HEADER (Compact, Premium & Flush Left-Aligned)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(horizontal = 20.dp, vertical = 2.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Top Row: Logo + NoxMedia Title
+            // Top Row: Logo + NoxMedia Title (Compact & Elegant)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Image(
                     painter = painterResource(id = R.drawable.noxmedia_icon_trans),
                     contentDescription = "NoxMedia Logo",
-                    modifier = Modifier.size(36.dp),
+                    modifier = Modifier.size(24.dp),
                     contentScale = ContentScale.Fit
                 )
 
                 Text(
                     text = "NoxMedia",
                     color = Color.White,
-                    fontSize = 28.sp,
+                    fontSize = 20.sp,
                     fontFamily = NdotFont,
-                    letterSpacing = 1.sp
+                    letterSpacing = 0.8.sp
                 )
             }
 
             // Sleek Minimalist Divider Line
             HorizontalDivider(
-                color = Color(0xFF282A31),
+                color = Color(0xFF24262E),
                 thickness = 1.dp,
                 modifier = Modifier.fillMaxWidth()
             )
 
-            // User Info Row: Perfectly Aligned with the 'N' of NoxMedia (36dp icon + 14dp gap = 50dp)
+            // User Info Row: Flush left-aligned with the exact start of the Logo
             val displayName = if (session.firstName.isNotBlank()) session.firstName else "Name"
             val usernameDisplay = if (session.username.isNotBlank()) "@${session.username}" else "@USERNAME"
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.padding(start = 50.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
                     text = displayName,
-                    color = Color(0xFFE5E7EB),
-                    fontSize = 13.sp,
+                    color = Color(0xFFD1D5DB),
+                    fontSize = 11.5.sp,
                     fontWeight = FontWeight.Medium,
-                    letterSpacing = 0.3.sp
+                    letterSpacing = 0.2.sp
                 )
                 Text(
                     text = "•",
                     color = Color(0xFF6B7280),
-                    fontSize = 12.sp
+                    fontSize = 11.sp
                 )
                 Text(
                     text = usernameDisplay,
-                    color = Color(0xFF9CA3AF),
-                    fontSize = 13.sp,
-                    letterSpacing = 0.3.sp
+                    color = Color(0xFF8B909A),
+                    fontSize = 11.5.sp,
+                    letterSpacing = 0.2.sp
                 )
             }
         }
