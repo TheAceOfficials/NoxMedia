@@ -109,6 +109,8 @@ class JellyfinBridge(
         return u.startsWith("/system") ||
                 u.startsWith("/users") ||
                 u.startsWith("/userviews") ||
+                u.startsWith("/library") ||
+                u.startsWith("/libraries") ||
                 u.startsWith("/items") ||
                 u.startsWith("/shows") ||
                 u.startsWith("/videos") ||
@@ -173,9 +175,25 @@ class JellyfinBridge(
                     handleGetUser(defaultUserName)
                 }
 
-                // ================= 3. Library Views (Home Categories) =================
+                // ================= 3. Library Views & Grouping Options =================
+                lowerUri.endsWith("/groupingoptions") -> {
+                    handleGroupingOptions()
+                }
                 lowerUri.endsWith("/views") || lowerUri == "/userviews" -> {
                     handleViews()
+                }
+                lowerUri.startsWith("/library/virtualfolders") -> {
+                    handleVirtualFolders()
+                }
+                lowerUri == "/libraries/availableoptions" -> {
+                    jsonResponse(
+                        mapOf(
+                            "MetadataFetchers" to emptyList<Any>(),
+                            "MetadataReaders" to emptyList<Any>(),
+                            "ImageFetchers" to emptyList<Any>(),
+                            "SubtitleFetchers" to emptyList<Any>()
+                        )
+                    )
                 }
                 lowerUri == "/items/counts" -> {
                     handleItemCounts()
@@ -492,6 +510,50 @@ class JellyfinBridge(
 
     private fun handleGetUser(username: String): Response {
         return jsonResponse(buildUserDto(username))
+    }
+
+    private fun handleGroupingOptions(): Response {
+        val options = listOf(
+            mapOf("Name" to "Movies", "Id" to "movies"),
+            mapOf("Name" to "TV Shows", "Id" to "shows")
+        )
+        return jsonResponse(options)
+    }
+
+    private fun handleVirtualFolders(): Response {
+        val moviesHex = toHexId("lib_movies")
+        val seriesHex = toHexId("lib_series")
+        val animeHex = toHexId("lib_anime")
+        val folders = listOf(
+            mapOf(
+                "Name" to "Movies",
+                "Locations" to listOf("/media/movies"),
+                "CollectionType" to "movies",
+                "ItemId" to moviesHex,
+                "Guid" to moviesHex,
+                "RefreshProgress" to 0,
+                "RefreshStatus" to "Idle"
+            ),
+            mapOf(
+                "Name" to "TV Shows",
+                "Locations" to listOf("/media/tvshows"),
+                "CollectionType" to "tvshows",
+                "ItemId" to seriesHex,
+                "Guid" to seriesHex,
+                "RefreshProgress" to 0,
+                "RefreshStatus" to "Idle"
+            ),
+            mapOf(
+                "Name" to "Anime",
+                "Locations" to listOf("/media/anime"),
+                "CollectionType" to "tvshows",
+                "ItemId" to animeHex,
+                "Guid" to animeHex,
+                "RefreshProgress" to 0,
+                "RefreshStatus" to "Idle"
+            )
+        )
+        return jsonResponse(folders)
     }
 
     private fun handleViews(): Response {
