@@ -10,7 +10,7 @@
   <a href="https://github.com/TheAceOfficials/NoxMedia/releases"><img src="https://img.shields.io/badge/Platform-Android%207.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white" alt="Platform"></a>
   <a href="https://kotlinlang.org"><img src="https://img.shields.io/badge/Kotlin-2.3-7F52FF?style=flat-square&logo=kotlin&logoColor=white" alt="Kotlin"></a>
   <a href="https://chaquo.com/chaquopy/"><img src="https://img.shields.io/badge/Python-3.11%20(Chaquopy)-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python"></a>
-  <a href="https://stremio.com"><img src="https://img.shields.io/badge/Stremio-Addon%20v3-7A55C7?style=flat-square&logo=stremio&logoColor=white" alt="Stremio"></a>
+  <a href="https://stremio.com"><img src="https://img.shields.io/badge/Stremio%20%2F%20Nuvio-Addon%20v3-7A55C7?style=flat-square&logo=stremio&logoColor=white" alt="Stremio / Nuvio"></a>
   <a href="https://www.patreon.com/cw/TheAceOfficials"><img src="https://img.shields.io/badge/Patreon-Support-FF424D?style=flat-square&logo=patreon&logoColor=white" alt="Patreon"></a>
   <a href="#-license"><img src="https://img.shields.io/badge/License-AGPLv3-blue.svg?style=flat-square" alt="License"></a>
 </p>
@@ -22,12 +22,12 @@
 - [What is NoxMedia?](#-what-is-noxmedia)
 - [Why NoxMedia? (Use-Cases)](#-why-noxmedia-use-cases)
 - [Key Features](#-key-features)
-- [Platform Support & iOS Limitations](#-platform-support--ios-limitations)
+- [Platform Support & iOS Limitations](#-platform-support--compatibility)
 - [Step-by-Step Setup Guide](#-step-by-step-setup-guide)
   - [Step 1: Get Telegram API Credentials](#step-1-get-telegram-api-credentials)
   - [Step 2: Authenticate Account](#step-2-authenticate-account)
   - [Step 3: Connect Monitored Channels](#step-3-connect-monitored-channels)
-  - [Step 4: Stream in Stremio](#step-4-stream-in-stremio)
+  - [Step 4: Stream in Stremio / Nuvio](#step-4-stream-in-stremio--nuvio)
 - [Remote Streaming (Tailscale & Custom Domains)](#-remote-streaming-tailscale--custom-domains)
 - [Background Streaming Best Practices](#-background-streaming-best-practices)
 - [Support & Sponsorship](#-support--sponsorship)
@@ -38,7 +38,7 @@
 
 ## 📖 What is NoxMedia?
 
-**NoxMedia** is an advanced, standalone Android application that transforms your smartphone, tablet, or Android TV box into a private, self-hosted media streaming server and **Stremio Addon**.
+**NoxMedia** is an advanced, standalone Android application that transforms your smartphone or tablet into a private, self-hosted media streaming server and **Stremio / Nuvio Addon**.
 
 By interfacing directly with Telegram's robust content delivery network via an embedded MTProto bridge, NoxMedia parses, catalogs, enriches, and serves media files stored in your monitored Telegram channels straight to modern media players—with zero-latency byte-range seeking, automatic anime episode mapping, and zero external PC or hosting requirements.
 
@@ -54,10 +54,10 @@ By interfacing directly with Telegram's robust content delivery network via an e
 Self-hosting media servers like Plex, Jellyfin, or Emby traditionally requires thousands of dollars in investment: dedicated NAS enclosures, multi-terabyte mechanical hard drives, RAID arrays, and continuous electricity bills. NoxMedia unlocks **Telegram’s virtually unlimited cloud storage** to serve as your personal media library. Upload or forward your 4K HDR movies, anime collections, and series to private channels, and NoxMedia serves them seamlessly on demand.
 
 ### 2. Zero Server Overhead & Hardware Independence
-No dedicated Linux home lab or Raspberry Pi required. An old spare Android phone or inexpensive Android TV box running NoxMedia consumes less than 5 Watts of power while operating 24/7 as an ultra-compact local streaming server on your home network.
+No dedicated Linux home lab or Raspberry Pi required. An old spare Android phone or tablet running NoxMedia consumes less than 5 Watts of power while operating 24/7 as an ultra-compact local streaming server on your home network.
 
-### 3. Native Stremio Ecosystem Integration
-Install the local addon manifest URL once into Stremio, and all indexed media appears instantly across your Smart TVs, Fire TV Sticks, laptops, PCs, or tablets with movie posters, synopsis, season groupings, and episode streams.
+### 3. Native Stremio & Nuvio Ecosystem Integration
+Install the local addon manifest URL once into **Stremio** or **Nuvio**, and all indexed media appears instantly across your devices—Smart TVs, streaming sticks, laptops, PCs, or tablets—with movie posters, synopsis, season groupings, and episode streams.
 
 ---
 
@@ -80,7 +80,7 @@ Install the local addon manifest URL once into Stremio, and all indexed media ap
 
 ### ☁️ Automated Telegram Cloud Backup & Cross-Device Restore
 - **Telegram Saved Messages Backup:** Automatically backs up all server settings, automation preferences, and monitored channels directly to your Telegram **Saved Messages** (`#NoxMediaBackup`) on a scheduled interval (1h, 2h, 6h, 12h, 24h).
-- **Silent Cross-Device Auto-Sync:** When logging into NoxMedia on a new device (e.g., setting up an Android TV box), NoxMedia silently detects and restores your channels and preferences from your Telegram cloud backup in seconds.
+- **Silent Cross-Device Auto-Sync:** When logging into NoxMedia on a new device (e.g., switching to a new phone or tablet), NoxMedia silently detects and restores your channels and preferences from your Telegram cloud backup in seconds.
 
 ### 🎙️ Alexa Smart Home Voice Control
 - **Hands-Free Control:** Built-in faux Philips Hue bridge allowing you to turn NoxMedia streaming services ON or OFF using Amazon Alexa voice commands (*"Alexa, turn on NoxMedia"*).
@@ -98,22 +98,25 @@ Install the local addon manifest URL once into Stremio, and all indexed media ap
 
 ---
 
-## 📱 Platform Support & iOS Limitations
+## 📱 Platform Support & Compatibility
 
 | Platform | Support Status | Notes |
 | :--- | :---: | :--- |
-| **Android Phones & Tablets** | ✅ **Fully Supported** | Android 7.0 (API 24) to Android 16 |
-| **Android TV / Google TV** | ✅ **Fully Supported** | Leanback UI support, remote-friendly controls |
-| **Fire TV / Firestick** | ✅ **Fully Supported** | Side-loadable APK, background service compatible |
+| **Android Phones & Tablets** | ✅ **Fully Supported** | Android 7.0 (API 24) to Android 16 (Touchscreen UI) |
+| **Android TV / Firestick** | ⚠️ **Untested / No D-Pad UI** | NoxMedia server app is built for touchscreens; no TV D-pad remote navigation yet |
 | **Apple iOS (iPhone / iPad)** | ❌ **Not Supported (Host Server)** | Technical architectural limitation (see below) |
 
-### ❓ Why isn't NoxMedia available for iOS?
+> [!TIP]
+> **Host Server vs. Playback Clients:**  
+> NoxMedia runs as the **server host** on your Android touchscreen device (phone or tablet). However, you can enjoy watching your streams on **any playback screen** (Smart TVs, Fire TV, Apple TV, PC, Mac, iPad) simply by installing **Stremio** or **Nuvio** on that device and connecting your NoxMedia manifest link!
+
+### ❓ Why isn't NoxMedia server available for iOS?
 Running a dedicated, 24/7 background media streaming server requires:
 1. Long-lived background TCP socket listeners bound to local ports.
 2. Uninterrupted background multi-connection networking.
 3. Persistent Wi-Fi CPU wake-locks that ignore screen lock states.
 
-**Apple's iOS security architecture strictly forbids long-running background socket servers.** iOS suspends and kills background network tasks within 30 seconds of the device being locked or an app being minimized. While you cannot host the NoxMedia server *on* an iOS device, **you can seamlessly watch NoxMedia streams on iOS** by opening [Stremio Web](https://web.stremio.com) on your iPhone/iPad and connecting to your Android phone's NoxMedia manifest URL!
+**Apple's iOS security architecture strictly forbids long-running background socket servers.** iOS suspends and kills background network tasks within 30 seconds of the device being locked or an app being minimized. While you cannot host the NoxMedia server *on* an iOS device, **you can seamlessly watch NoxMedia streams on iOS** by opening [Stremio Web](https://web.stremio.com) or **Nuvio** on your iPhone/iPad and connecting to your Android phone's NoxMedia manifest URL!
 
 ---
 
@@ -126,10 +129,10 @@ Running a dedicated, 24/7 background media streaming server requires:
 └────────────────────────┘      └───────────────────────────┘      └─────────────────────────┘
                                                                                 │
                                                                                 ▼
-                                                                   ┌─────────────────────────┐
-                                                                   │ 4. Install in Stremio   │
-                                                                   │    (manifest.json URL)  │
-                                                                   └─────────────────────────┘
+                                                                   ┌───────────────────────────┐
+                                                                   │ 4. Install Stremio/Nuvio  │
+                                                                   │    (manifest.json URL)    │
+                                                                   └───────────────────────────┘
 ```
 
 ### Step 1: Get Telegram API Credentials
@@ -149,18 +152,20 @@ Open NoxMedia on your Android device and enter your `API ID` and `API Hash`. You
 2. Enter the channel username (e.g., `@MyMoviesChannel`), invite link, or private channel ID (`t.me/c/...`).
 3. Tap **Connect Channel**. NoxMedia will resolve channel access and begin background media indexing immediately.
 
-### Step 4: Stream in Stremio
+### Step 4: Stream in Stremio / Nuvio
 1. On the **Home** tab, toggle the server switch to **RUNNING**.
 2. Note your local server URL (e.g., `http://192.168.1.50:7788/manifest.json`).
-3. Open **Stremio** on any TV, PC, phone, or tablet connected to the same Wi-Fi.
-4. Go to **Addons** ➔ paste your `manifest.json` URL into the search bar ➔ tap **Install**.
+3. Open **Stremio** or **Nuvio** on any TV, PC, phone, or tablet connected to the same Wi-Fi.
+4. Install the Addon:
+   - **In Stremio:** Go to **Addons** ➔ paste your `manifest.json` URL into the search bar ➔ tap **Install**.
+   - **In Nuvio:** Go to **Plugins / Addons** ➔ paste your `manifest.json` URL ➔ save & enable.
 5. Browse your movies, series, and anime with full posters, episode streams, and instant seeking!
 
 ---
 
 ## 🌐 Remote Streaming (Tailscale & Custom Domains)
 
-Want to access your Telegram Stremio library outside your house over mobile 4G/5G data?
+Want to access your Telegram media library in Stremio or Nuvio outside your house over mobile 4G/5G data?
 
 1. **Install Tailscale** on both your NoxMedia Android device and your client device (phone or laptop).
 2. NoxMedia automatically detects and displays your 100.x.x.x Tailscale IP address on the home screen.
@@ -206,7 +211,7 @@ If you love using NoxMedia or want to support future open-source projects create
 - [Telegram-Stremio](https://github.com/nabilaba/telegram-stremio) — For the visionary concept of streaming Telegram media directly to Stremio.
 - [Pyrogram](https://github.com/pyrogram/pyrogram) — Elegant, high-speed Telegram MTProto framework in Python.
 - [Chaquopy](https://chaquo.com/chaquopy/) — Python SDK for Android that brings native MTProto capabilities into Jetpack Compose.
-- [Stremio](https://stremio.com) — The ultimate modern media aggregation and streaming player.
+- [Stremio](https://stremio.com) & [Nuvio](https://nuvioapp.com) — Modern media streaming player ecosystems supporting third-party addons.
 
 ---
 
