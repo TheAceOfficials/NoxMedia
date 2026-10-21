@@ -60,8 +60,8 @@ jobs:
             echo "release_title=NoxMedia ${TAG_NAME}" >> $GITHUB_OUTPUT
           else
             # Continuous push: reads baseVersion from app/build.gradle.kts (e.g. 1.0)
-            BASE_VER=$(grep -m1 'val baseVersion =' app/build.gradle.kts | cut -d '"' -f2 || echo "1.0")
-            [ -z "$BASE_VER" ] && BASE_VER="1.0"
+            BASE_VER=$(grep -m1 'val baseVersion =' app/build.gradle.kts | cut -d '"' -f2 || echo "1.1")
+            [ -z "$BASE_VER" ] && BASE_VER="1.1"
             FULL_VER="${BASE_VER}.${{ github.run_number }}"
             echo "tag_name=v${FULL_VER}" >> $GITHUB_OUTPUT
             echo "version_name=${FULL_VER}" >> $GITHUB_OUTPUT

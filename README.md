@@ -44,7 +44,7 @@ By interfacing directly with Telegram's robust content delivery network via an e
 
 > [!NOTE]
 > **Acknowledgement & Roots:**  
-> NoxMedia is inspired by the pioneering work of [Telegram-Stremio](https://github.com/nabilaba/telegram-stremio). While honoring that open-source foundation, NoxMedia has been completely re-architected from the ground up as a native Android-first ecosystem featuring an embedded Python runtime (Chaquopy), a custom multi-part video merge pipeline, an automated Telegram cloud backup system, smart battery management, and a sleek, Nothing OS-inspired Jetpack Compose interface.
+> NoxMedia is inspired by the pioneering work of [Telegram-Stremio](https://github.com/weebzone/Telegram-Stremio). While honoring that open-source foundation, NoxMedia has been completely re-architected from the ground up as a native Android-first ecosystem featuring an embedded Python runtime (Chaquopy), a custom multi-part video merge pipeline, an automated Telegram cloud backup system, smart battery management, and a sleek, Nothing OS-inspired Jetpack Compose interface.
 
 ---
 
@@ -208,7 +208,7 @@ If you love using NoxMedia or want to support future open-source projects create
 
 ## 🤝 Acknowledgements & Inspiration
 
-- [Telegram-Stremio](https://github.com/nabilaba/telegram-stremio) — For the visionary concept of streaming Telegram media directly to Stremio.
+- [Telegram-Stremio](https://github.com/weebzone/Telegram-Stremio) — For the visionary concept of streaming Telegram media directly to Stremio.
 - [Pyrogram](https://github.com/pyrogram/pyrogram) — Elegant, high-speed Telegram MTProto framework in Python.
 - [Chaquopy](https://chaquo.com/chaquopy/) — Python SDK for Android that brings native MTProto capabilities into Jetpack Compose.
 - [Stremio](https://stremio.com) & [Nuvio](https://nuvioapp.com) — Modern media streaming player ecosystems supporting third-party addons.

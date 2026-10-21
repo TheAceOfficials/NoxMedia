@@ -46,8 +46,8 @@ data class WhatsNewRelease(
 object WhatsNewRepository {
 
     val currentRelease: WhatsNewRelease = WhatsNewRelease(
-        version = "1.0",
-        releaseTitle = "Cloud Backup & Fresh State Release",
+        version = "1.1",
+        releaseTitle = "Cloud Sync & Premium Release",
         releaseDate = "October 2026",
         items = listOf(
             WhatsNewItem(
@@ -58,7 +58,7 @@ object WhatsNewRepository {
             WhatsNewItem(
                 category = ChangeCategory.NEW,
                 title = "Cross-Device Silent Auto-Restore",
-                description = "Logging into NoxMedia on a new device (like an Android TV or tablet) automatically fetches and restores your cloud backup seamlessly."
+                description = "Logging into NoxMedia on a new phone or tablet automatically fetches and restores your cloud backup seamlessly."
             ),
             WhatsNewItem(
                 category = ChangeCategory.NEW,
@@ -69,6 +69,11 @@ object WhatsNewRepository {
                 category = ChangeCategory.NEW,
                 title = "Alexa Voice Control Bridge",
                 description = "Built-in Philips Hue emulator bridge allows Amazon Alexa to turn NoxMedia streaming ON or OFF via voice commands."
+            ),
+            WhatsNewItem(
+                category = ChangeCategory.IMPROVEMENT,
+                title = "Dynamic Stremio & Nuvio Manifest Sync",
+                description = "Addon manifest.json is now dynamically synchronized with the installed app version and updated with the tagline 'NoxMedia - Designed for Your Media'."
             ),
             WhatsNewItem(
                 category = ChangeCategory.IMPROVEMENT,
@@ -84,6 +89,11 @@ object WhatsNewRepository {
                 category = ChangeCategory.IMPROVEMENT,
                 title = "Native Tailscale Mesh Network Support",
                 description = "Auto-detects Tailscale VPN interface to generate remote streaming URLs for secure out-of-home playback."
+            ),
+            WhatsNewItem(
+                category = ChangeCategory.FIX,
+                title = "Telegram-Stremio Repository Link",
+                description = "Corrected upstream repository reference to https://github.com/weebzone/Telegram-Stremio in documentation."
             ),
             WhatsNewItem(
                 category = ChangeCategory.FIX,

@@ -158,12 +158,31 @@ class LocalHttpServer(
 
     // --- Stremio Addon Handlers ---
 
+    private fun getAppVersionForManifest(): String {
+        return try {
+            val pInfo = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                context.packageManager.getPackageInfo(context.packageName, android.content.pm.PackageManager.PackageInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.getPackageInfo(context.packageName, 0)
+            }
+            val raw = pInfo.versionName?.trim()?.removePrefix("v") ?: "1.1.0"
+            when (raw.count { it == '.' }) {
+                0 -> "$raw.0.0"
+                1 -> "$raw.0"
+                else -> raw
+            }
+        } catch (_: Exception) {
+            "1.1.0"
+        }
+    }
+
     private fun handleManifest(): Response {
         val manifest = JsonObject().apply {
             addProperty("id", "org.noxmedia.streamer")
-            addProperty("version", "1.0.0")
+            addProperty("version", getAppVersionForManifest())
             addProperty("name", "NoxMedia")
-            addProperty("description", "Direct Telegram video streamer with Stremio & Kitsu/TMDB integration")
+            addProperty("description", "NoxMedia - Designed for Your Media")
             addProperty("logo", "http://${getLocalIpAddress()}:${config.port}/logo.png")
             add("types", gson.toJsonTree(listOf("movie", "series", "anime")))
             add("catalogs", gson.toJsonTree(listOf(
