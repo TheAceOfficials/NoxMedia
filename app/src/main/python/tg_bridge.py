@@ -1725,3 +1725,162 @@ def check_dead_messages(api_id: int, api_hash: str, session_str: str, chat_id: i
         print(f"Error checking dead messages: {e}", flush=True)
         return json.dumps({"status": "error", "error": str(e), "dead_ids": [], "alive_ids": []})
 
+
+def _parse_backup_target_chat(chat_val: str):
+    c = str(chat_val).strip()
+    if not c or c.lower() in ("me", "self", "saved", "saved messages"):
+        return "me"
+    try:
+        return int(c)
+    except ValueError:
+        return c
+
+
+def upload_backup_file(api_id: int, api_hash: str, session_str: str, file_path: str, caption: str = "#NoxMediaBackup", destination: str = "me") -> str:
+    """Uploads a backup JSON file to Telegram Saved Messages or target chat, cleaning up older backup files."""
+    async def _async_upload():
+        client = await _get_connected_stream_client(int(api_id), str(api_hash), str(session_str))
+        target_chat = _parse_backup_target_chat(destination)
+        if target_chat != "me":
+            target_chat = await _ensure_channel_peer(client, target_chat)
+
+        # 1. Clean up older backup messages to keep Saved Messages tidy
+        try:
+            old_ids = []
+            async for m in client.search_messages(target_chat, query="#NoxMediaBackup", limit=10):
+                if m and getattr(m, "id", None):
+                    old_ids.append(m.id)
+            if old_ids:
+                await client.delete_messages(target_chat, old_ids)
+                _log_stream(f"Purged {len(old_ids)} older backup message(s) from {target_chat}")
+        except Exception as e:
+            _log_stream(f"Notice cleaning older backups: {e}", "W")
+
+        # 2. Send the document
+        sent = await client.send_document(
+            chat_id=target_chat,
+            document=file_path,
+            caption=caption
+        )
+        return json.dumps({
+            "status": "success",
+            "message_id": sent.id,
+            "chat": str(target_chat)
+        })
+
+    try:
+        return run_async(_async_upload(), timeout=60)
+    except Exception as e:
+        _log_stream(f"Error uploading backup to Telegram: {e}", "E")
+        return json.dumps({"status": "error", "error": str(e)})
+
+
+def fetch_latest_backup_file(api_id: int, api_hash: str, session_str: str, target_download_path: str, source: str = "me") -> str:
+    """Finds and downloads the latest #NoxMediaBackup JSON file from Saved Messages or target chat."""
+    async def _async_fetch():
+        client = await _get_connected_stream_client(int(api_id), str(api_hash), str(session_str))
+        target_chat = _parse_backup_target_chat(source)
+        if target_chat != "me":
+            target_chat = await _ensure_channel_peer(client, target_chat)
+
+        latest_msg = None
+        # 1. Try search by hashtag
+        try:
+            async for m in client.search_messages(target_chat, query="#NoxMediaBackup", limit=5):
+                if m and getattr(m, "document", None) is not None:
+                    latest_msg = m
+                    break
+        except Exception as e:
+            _log_stream(f"Search for #NoxMediaBackup: {e}, falling back to chat history", "W")
+
+        # 2. Fallback: scan recent chat history for backup file
+        if not latest_msg:
+            try:
+                async for m in client.get_chat_history(target_chat, limit=30):
+                    doc = getattr(m, "document", None)
+                    if doc and getattr(doc, "file_name", None):
+                        fname = doc.file_name.lower()
+                        cap = (m.caption or "").lower()
+                        if "noxmedia_backup" in fname or "#noxmediabackup" in cap:
+                            latest_msg = m
+                            break
+            except Exception as e:
+                _log_stream(f"Chat history search fallback: {e}", "W")
+
+        if not latest_msg or not getattr(latest_msg, "document", None):
+            return json.dumps({"status": "not_found", "message": "No backup found in Telegram chat"})
+
+        if os.path.exists(target_download_path):
+            try:
+                os.remove(target_download_path)
+            except Exception:
+                pass
+
+        downloaded = await client.download_media(latest_msg.document, file_name=target_download_path)
+        date_str = latest_msg.date.strftime("%Y-%m-%d %H:%M:%S") if getattr(latest_msg, "date", None) else ""
+        return json.dumps({
+            "status": "success",
+            "file_path": str(downloaded),
+            "date": date_str,
+            "message_id": latest_msg.id
+        })
+
+    try:
+        return run_async(_async_fetch(), timeout=60)
+    except Exception as e:
+        _log_stream(f"Error fetching backup from Telegram: {e}", "E")
+        return json.dumps({"status": "error", "error": str(e)})
+
+
+def reset_session_and_cache() -> str:
+    """Disconnects Pyrogram clients and purges in-memory chunk caches, streams, and resolved channel maps upon logout."""
+    async def _async_reset():
+        global _auth_client, _stream_client, _chunk_cache, _file_id_cache, _active_streams, _resolved_channels
+        global _pending_fetches, _pending_file_resolutions
+
+        # 1. Cancel active stream tasks
+        for s_id, s_info in list(_active_streams.items()):
+            try:
+                task = s_info.get("task")
+                if task and not task.done():
+                    task.cancel()
+            except Exception:
+                pass
+        _active_streams.clear()
+
+        # 2. Disconnect stream client
+        if _stream_client is not None:
+            try:
+                if _stream_client.is_connected:
+                    await _stream_client.disconnect()
+            except Exception as e:
+                _log_stream(f"Notice disconnecting stream client on logout: {e}", "W")
+            _stream_client = None
+
+        # 3. Disconnect auth client
+        if _auth_client is not None:
+            try:
+                if _auth_client.is_connected:
+                    await _auth_client.disconnect()
+            except Exception as e:
+                _log_stream(f"Notice disconnecting auth client on logout: {e}", "W")
+            _auth_client = None
+
+        # 4. Clear LRU RAM cache and metadata mappings
+        _chunk_cache.clear()
+        _file_id_cache.clear()
+        _resolved_channels.clear()
+        _pending_fetches.clear()
+        _pending_file_resolutions.clear()
+        _log_stream("All in-memory caches and client sessions reset on logout", "I")
+        return "ok"
+
+    try:
+        run_async(_async_reset(), timeout=10)
+        return json.dumps({"status": "ok"})
+    except Exception as e:
+        _log_stream(f"Error in reset_session_and_cache: {e}", "W")
+        return json.dumps({"status": "error", "error": str(e)})
+
+
+

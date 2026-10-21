@@ -42,7 +42,9 @@ import com.tgserver.streamer.R
 import com.tgserver.streamer.theme.*
 import com.tgserver.streamer.ui.MainAppViewModel
 import com.tgserver.streamer.ui.components.*
+import com.tgserver.streamer.update.ChangeCategory
 import com.tgserver.streamer.update.UpdateUiState
+import com.tgserver.streamer.update.WhatsNewRepository
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Locale
@@ -58,6 +60,8 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
     val session by viewModel.session.collectAsState()
     val config by viewModel.config.collectAsState()
     val updateState by viewModel.updateState.collectAsState()
+    val isBackingUpToCloud by viewModel.isBackingUpToCloud.collectAsState()
+    val isRestoringFromCloud by viewModel.isRestoringFromCloud.collectAsState()
 
     // Form inputs state synced with config
     var tmdbKeyInput by remember(config.tmdbApiKey) { mutableStateOf(config.tmdbApiKey) }
@@ -105,6 +109,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
     var expandedAutomation by remember { mutableStateOf(false) }
     var expandedBackup by remember { mutableStateOf(false) }
     var expandedUpdates by remember { mutableStateOf(false) }
+    var expandedWhatsNew by remember { mutableStateOf(false) }
     var showArtworkInfo by remember { mutableStateOf(false) }
     var showServerEngineInfo by remember { mutableStateOf(false) }
     var showRemoteAccessInfo by remember { mutableStateOf(false) }
@@ -1690,14 +1695,14 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
             // ==================== 8. BACKUP ====================
             MinimalSettingsCard(
                 icon = Icons.Default.Backup,
-                title = "Backup",
-                subtitle = if (autoBackupEnabled) "Scheduled: ${autoBackupHours}h" else "Manual snapshots",
+                title = "Cloud & Local Backup",
+                subtitle = if (autoBackupEnabled) "Auto-sync to Telegram (${autoBackupHours}h)" else "Manual & Cloud backup",
                 isExpanded = expandedBackup,
                 onToggleExpand = { expandedBackup = !expandedBackup }
             ) {
                 SettingToggleRow(
-                    title = "Scheduled Backup",
-                    description = "Periodically saves local backup snapshots of all server settings and channels.",
+                    title = "Auto-Backup to Telegram",
+                    description = "Periodically saves cloud backup snapshots of all settings & connected channels to your Telegram Saved Messages.",
                     checked = autoBackupEnabled,
                     onCheckedChange = {
                         autoBackupEnabled = it
@@ -1754,39 +1759,116 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(Color(0xFF22242D)))
                 Spacer(modifier = Modifier.height(14.dp))
 
+                // Primary Cloud Row
+                Text(
+                    text = "Telegram Cloud Sync",
+                    color = TextPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     NothingPillButton(
-                        text = "Backup Now",
+                        text = if (isBackingUpToCloud) "Uploading..." else "Backup to TG",
+                        onClick = { viewModel.backupToTelegramCloud() },
+                        enabled = !isBackingUpToCloud && !isRestoringFromCloud,
+                        variant = NothingButtonVariant.Primary,
+                        height = 42.dp,
+                        modifier = Modifier.weight(1f),
+                        leadingIcon = {
+                            Icon(Icons.Default.CloudUpload, null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                        }
+                    )
+
+                    NothingPillButton(
+                        text = if (isRestoringFromCloud) "Restoring..." else "Restore from TG",
+                        onClick = { viewModel.restoreFromTelegramCloud() },
+                        enabled = !isBackingUpToCloud && !isRestoringFromCloud,
+                        variant = NothingButtonVariant.Secondary,
+                        height = 42.dp,
+                        modifier = Modifier.weight(1f),
+                        leadingIcon = {
+                            Icon(Icons.Default.CloudDownload, null, tint = TextPrimary, modifier = Modifier.size(16.dp))
+                        }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Secondary Offline Row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    NothingPillButton(
+                        text = "Copy JSON",
                         onClick = {
                             val json = viewModel.exportBackupJson()
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                             clipboard.setPrimaryClip(ClipData.newPlainText("NoxMediaBackup", json))
                             Toast.makeText(context, "✓ Backup snapshot copied to clipboard!", Toast.LENGTH_SHORT).show()
                         },
-                        variant = NothingButtonVariant.Secondary,
-                        height = 42.dp,
+                        variant = NothingButtonVariant.Ghost,
+                        height = 38.dp,
                         modifier = Modifier.weight(1f),
                         leadingIcon = {
-                            Icon(Icons.Default.Download, null, tint = TextPrimary, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.ContentCopy, null, tint = TextSecondary, modifier = Modifier.size(14.dp))
                         }
                     )
 
                     NothingPillButton(
-                        text = "Restore",
+                        text = "Paste JSON",
                         onClick = {
                             restoreJsonInput = ""
                             showRestoreDialog = true
                         },
                         variant = NothingButtonVariant.Ghost,
-                        height = 42.dp,
+                        height = 38.dp,
                         modifier = Modifier.weight(1f),
                         leadingIcon = {
-                            Icon(Icons.Default.Upload, null, tint = TextPrimary, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Upload, null, tint = TextSecondary, modifier = Modifier.size(14.dp))
                         }
                     )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Backup Scope Info Note
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF14161E))
+                        .border(1.dp, Color(0xFF22242F), RoundedCornerShape(10.dp))
+                        .padding(12.dp)
+                ) {
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = null,
+                                tint = AccentApple,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Cross-Device Auto-Sync",
+                                color = TextPrimary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Logging in to another device automatically syncs all your connected channels, playback settings, metadata keys, and automations.\nDevice-specific hardware limits (cache, buffer, port) and Alexa settings are kept unique per device.",
+                            color = TextSecondary,
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp
+                        )
+                    }
                 }
             }
 
@@ -1993,6 +2075,187 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                                 enabled = updateState !is UpdateUiState.Checking,
                                 modifier = Modifier.wrapContentWidth()
                             )
+                        }
+                    }
+                }
+
+                // ==================== WHAT'S NEW SECTION ====================
+                Spacer(modifier = Modifier.height(14.dp))
+                Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(Color(0xFF22242D)))
+                Spacer(modifier = Modifier.height(14.dp))
+
+                val whatsNewCategories = remember { WhatsNewRepository.getItemsByCategory() }
+                val newFeaturesCount = whatsNewCategories[ChangeCategory.NEW]?.size ?: 0
+
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // Header Bar (Clickable to toggle expand)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF14151B))
+                            .border(BorderStroke(0.5.dp, Color(0xFF22242D)), RoundedCornerShape(10.dp))
+                            .clickable { expandedWhatsNew = !expandedWhatsNew }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f, fill = false)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(30.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0x22FBBF24)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.NewReleases,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFBBF24),
+                                    modifier = Modifier.size(17.dp)
+                                )
+                            }
+
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    text = "What's New!",
+                                    color = TextPrimary,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "${WhatsNewRepository.currentRelease.releaseTitle} • v${WhatsNewRepository.currentRelease.version}",
+                                    color = TextSecondary,
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            if (newFeaturesCount > 0) {
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = Color(0x1F22C55E),
+                                    border = BorderStroke(0.5.dp, Color(0x4022C55E))
+                                ) {
+                                    Text(
+                                        text = "$newFeaturesCount New",
+                                        color = Color(0xFF4ADE80),
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+
+                            Icon(
+                                imageVector = if (expandedWhatsNew) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = if (expandedWhatsNew) "Collapse" else "Expand",
+                                tint = TextSecondary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    // Expanded What's New items
+                    AnimatedVisibility(
+                        visible = expandedWhatsNew,
+                        enter = fadeIn() + expandVertically(),
+                        exit = fadeOut() + shrinkVertically()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp),
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            whatsNewCategories.forEach { (category, items) ->
+                                if (items.isNotEmpty()) {
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        // Category Pill
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = Color(category.hexColor).copy(alpha = 0.12f),
+                                            border = BorderStroke(0.5.dp, Color(category.hexColor).copy(alpha = 0.35f))
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                            ) {
+                                                Text(
+                                                    text = category.emoji,
+                                                    fontSize = 11.sp
+                                                )
+                                                Text(
+                                                    text = "${category.label.uppercase()} (${items.size})",
+                                                    color = Color(category.hexColor),
+                                                    fontSize = 10.5.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    letterSpacing = 0.4.sp
+                                                )
+                                            }
+                                        }
+
+                                        // Category items
+                                        items.forEach { item ->
+                                            Column(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(Color(0xFF101217))
+                                                    .border(BorderStroke(0.5.dp, Color(0xFF1F2128)), RoundedCornerShape(8.dp))
+                                                    .padding(10.dp),
+                                                verticalArrangement = Arrangement.spacedBy(3.dp)
+                                            ) {
+                                                Row(
+                                                    verticalAlignment = Alignment.Top,
+                                                    horizontalArrangement = Arrangement.spacedBy(7.dp)
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .padding(top = 5.dp)
+                                                            .size(5.dp)
+                                                            .background(Color(category.hexColor), CircleShape)
+                                                    )
+                                                    Text(
+                                                        text = item.title,
+                                                        color = TextPrimary,
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        lineHeight = 16.sp
+                                                    )
+                                                }
+
+                                                if (!item.description.isNullOrBlank()) {
+                                                    Text(
+                                                        text = item.description,
+                                                        color = TextSecondary,
+                                                        fontSize = 11.sp,
+                                                        lineHeight = 15.sp,
+                                                        modifier = Modifier.padding(start = 12.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }

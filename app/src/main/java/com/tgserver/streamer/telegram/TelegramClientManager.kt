@@ -210,6 +210,7 @@ class TelegramClientManager(private val context: Context) {
             }
         }
         startAutoScanLoop()
+        startAutoBackupLoop()
     }
 
     fun startAutoScanLoop() {
@@ -243,6 +244,55 @@ class TelegramClientManager(private val context: Context) {
     fun stopAutoScanLoop() {
         autoScanJob?.cancel()
         autoScanJob = null
+    }
+
+    private var autoBackupJob: Job? = null
+    private var backupJsonProvider: (() -> String)? = null
+
+    fun setBackupJsonProvider(provider: () -> String) {
+        backupJsonProvider = provider
+    }
+
+    fun startAutoBackupLoop(provider: (() -> String)? = null) {
+        if (provider != null) {
+            backupJsonProvider = provider
+        }
+        autoBackupJob?.cancel()
+        autoBackupJob = managerScope.launch {
+            delay(30_000L) // Wait 30s after startup
+            while (isActive) {
+                val isEnabled = prefs.getBoolean("auto_backup_enabled", false)
+                val intervalHours = prefs.getInt("auto_backup_interval_hours", 12)
+                if (isEnabled && _sessionState.value.isLoggedIn) {
+                    val lastBackup = prefs.getLong("last_auto_backup_timestamp", 0L)
+                    val now = System.currentTimeMillis()
+                    val intervalMs = intervalHours.coerceAtLeast(1) * 3600 * 1000L
+                    if (now - lastBackup >= intervalMs) {
+                        try {
+                            Log.d(TAG, "Triggering scheduled auto-backup to Telegram Saved Messages...")
+                            val json = backupJsonProvider?.invoke()
+                            if (!json.isNullOrBlank()) {
+                                val res = uploadBackupToTelegram(json, "me")
+                                if (res.isSuccess) {
+                                    prefs.edit().putLong("last_auto_backup_timestamp", now).apply()
+                                    Log.i(TAG, "Scheduled auto-backup to Telegram succeeded")
+                                } else {
+                                    Log.w(TAG, "Scheduled auto-backup failed: ${res.exceptionOrNull()?.message}")
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Scheduled auto-backup loop error: ${e.message}")
+                        }
+                    }
+                }
+                delay(60_000L) // Check every 60 seconds
+            }
+        }
+    }
+
+    fun stopAutoBackupLoop() {
+        autoBackupJob?.cancel()
+        autoBackupJob = null
     }
 
     private fun loadSession() {
@@ -307,6 +357,28 @@ class TelegramClientManager(private val context: Context) {
         val json = gson.toJson(list)
         prefs.edit().putString("monitored_channels", json).apply()
         _channelsState.value = list
+    }
+
+    fun restoreChannels(newChannels: List<ChannelInfo>): Int {
+        var added = 0
+        newChannels.forEach { ch ->
+            val existing = channels[ch.id]
+            if (existing == null) {
+                channels[ch.id] = ch
+                added++
+            } else {
+                channels[ch.id] = existing.copy(
+                    title = ch.title.ifBlank { existing.title },
+                    username = ch.username ?: existing.username,
+                    isAnime = ch.isAnime,
+                    isActive = ch.isActive
+                )
+            }
+        }
+        if (added > 0 || newChannels.isNotEmpty()) {
+            saveChannels()
+        }
+        return added
     }
 
     private fun loadMediaIndex() {
@@ -1349,6 +1421,24 @@ class TelegramClientManager(private val context: Context) {
     }
 
     fun logout() {
+        // 1. Stop background automation loops and cancel active scan jobs
+        stopAutoScanLoop()
+        stopAutoBackupLoop()
+        activeScanJobs.values.forEach { it.cancel() }
+        activeScanJobs.clear()
+
+        // 2. Disconnect Python Pyrogram clients and clear in-memory Python chunk/stream caches
+        try {
+            val bridge = getPyBridge()
+            bridge?.callAttr("reset_session_and_cache")
+        } catch (e: Exception) {
+            Log.w(TAG, "Notice clearing python session on logout: ${e.message}")
+        }
+
+        // 3. Clear all disk and metadata caches
+        clearAppCache()
+
+        // 4. Reset auth session state and clear cached avatar
         val emptySession = AuthSession()
         saveSession(emptySession)
         try {
@@ -2560,6 +2650,109 @@ class TelegramClientManager(private val context: Context) {
             Log.d(TAG, "Stream cache configured: dir=$cacheFolder, diskCacheMb=$diskCacheMb, bufferMb=$bufferPipelineMb")
         } catch (e: Exception) {
             Log.e(TAG, "Error updating stream cache config: ${e.message}", e)
+        }
+    }
+
+    suspend fun uploadBackupToTelegram(
+        backupJson: String,
+        destination: String = "me"
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            if (!_sessionState.value.isLoggedIn) {
+                return@withContext Result.failure(IllegalStateException("Telegram is not logged in"))
+            }
+            val bridge = getPyBridge()
+                ?: return@withContext Result.failure(IllegalStateException("Python runtime unavailable"))
+            val apiId = getApiId()
+            val apiHash = getApiHash()
+            val sessionStr = _sessionState.value.sessionString
+            if (sessionStr.isBlank() || apiId <= 0) {
+                return@withContext Result.failure(IllegalStateException("Missing Telegram credentials"))
+            }
+
+            val timestamp = System.currentTimeMillis()
+            val tempFile = File(context.cacheDir, "NoxMedia_backup_${timestamp}.json")
+            tempFile.writeText(backupJson)
+
+            val channelCount = channels.size
+            val dateStr = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(timestamp))
+            val caption = "#NoxMediaBackup\n📺 NoxMedia Backup Snapshot\nChannels: $channelCount\nDate: $dateStr"
+
+            val resStr = bridge.callAttr(
+                "upload_backup_file",
+                apiId,
+                apiHash,
+                sessionStr,
+                tempFile.absolutePath,
+                caption,
+                destination.ifBlank { "me" }
+            ).toString()
+
+            try { tempFile.delete() } catch (_: Exception) {}
+
+            val json = JSONObject(resStr)
+            if (json.optString("status") == "success") {
+                Result.success(resStr)
+            } else {
+                val err = json.optString("error", "Failed to upload backup")
+                Result.failure(Exception(err))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "uploadBackupToTelegram failed: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchLatestBackupFromTelegram(
+        source: String = "me"
+    ): Result<String?> = withContext(Dispatchers.IO) {
+        try {
+            if (!_sessionState.value.isLoggedIn) {
+                return@withContext Result.failure(IllegalStateException("Telegram is not logged in"))
+            }
+            val bridge = getPyBridge()
+                ?: return@withContext Result.failure(IllegalStateException("Python runtime unavailable"))
+            val apiId = getApiId()
+            val apiHash = getApiHash()
+            val sessionStr = _sessionState.value.sessionString
+            if (sessionStr.isBlank() || apiId <= 0) {
+                return@withContext Result.failure(IllegalStateException("Missing Telegram credentials"))
+            }
+
+            val tempFile = File(context.cacheDir, "temp_cloud_backup_${System.currentTimeMillis()}.json")
+            val resStr = bridge.callAttr(
+                "fetch_latest_backup_file",
+                apiId,
+                apiHash,
+                sessionStr,
+                tempFile.absolutePath,
+                source.ifBlank { "me" }
+            ).toString()
+
+            val json = JSONObject(resStr)
+            when (json.optString("status")) {
+                "success" -> {
+                    val downloadedPath = json.optString("file_path")
+                    val file = File(downloadedPath)
+                    if (file.exists() && file.length() > 0) {
+                        val content = file.readText()
+                        try { file.delete() } catch (_: Exception) {}
+                        Result.success(content)
+                    } else {
+                        Result.failure(Exception("Downloaded backup file is empty or missing"))
+                    }
+                }
+                "not_found" -> {
+                    Result.success(null)
+                }
+                else -> {
+                    val err = json.optString("error", "Failed to fetch backup from Telegram")
+                    Result.failure(Exception(err))
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "fetchLatestBackupFromTelegram failed: ${e.message}", e)
+            Result.failure(e)
         }
     }
 

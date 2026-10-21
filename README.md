@@ -1,168 +1,216 @@
-# NoxMedia 🚀
-### Standalone Android Stremio Local Server for Telegram
+<p align="center">
+  <img src="image_assets/NoxMediaBanner.png" alt="NoxMedia Banner" width="100%">
+</p>
 
-**NoxMedia** is a standalone Android application that turns your mobile device into a high-speed local media streaming server for **Stremio**. Stream movies, TV series, and media files directly from your Telegram channels to any device (Android TV, Firestick, PC, Mac, Phone) on your local Wi-Fi network — **without needing any PC or external server running!**
+<p align="center">
+  <strong>Transform your Android device into a private, high-performance media server powered by Telegram's infinite cloud storage.</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/TheAceOfficials/NoxMedia/releases"><img src="https://img.shields.io/badge/Platform-Android%207.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white" alt="Platform"></a>
+  <a href="https://kotlinlang.org"><img src="https://img.shields.io/badge/Kotlin-2.3-7F52FF?style=flat-square&logo=kotlin&logoColor=white" alt="Kotlin"></a>
+  <a href="https://chaquo.com/chaquopy/"><img src="https://img.shields.io/badge/Python-3.11%20(Chaquopy)-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python"></a>
+  <a href="https://stremio.com"><img src="https://img.shields.io/badge/Stremio-Addon%20v3-7A55C7?style=flat-square&logo=stremio&logoColor=white" alt="Stremio"></a>
+  <a href="https://www.patreon.com/cw/TheAceOfficials"><img src="https://img.shields.io/badge/Patreon-Support-FF424D?style=flat-square&logo=patreon&logoColor=white" alt="Patreon"></a>
+  <a href="#-license"><img src="https://img.shields.io/badge/License-AGPLv3-blue.svg?style=flat-square" alt="License"></a>
+</p>
 
 ---
 
-## 🌟 Key Features
+## 📑 Table of Contents
 
-- 📱 **100% Standalone on Android:** Runs directly on your phone as a persistent Foreground Service. No PC or VPS required.
-- ⚡ **Zero-OTP Session String Login:** 100% reliable login without OTP delivery failures, SMS rate-limits, or `FLOOD_WAIT` restrictions.
-- 📺 **Universal Stremio Compatibility:** Works seamlessly with Stremio on Android TV, Google TV, Fire TV Stick, Windows, macOS, Linux, and iOS/Web.
-- 🚀 **High-Speed HTTP 206 Streaming:** Built-in byte-range partial content engine for instant video seeking and playback.
-- 📡 **Local Wi-Fi Broadcast:** Generates a universal `manifest.json` addon URL (e.g., `http://192.168.1.15:7788/manifest.json`) accessible by any device on your home network.
+- [What is NoxMedia?](#-what-is-noxmedia)
+- [Why NoxMedia? (Use-Cases)](#-why-noxmedia-use-cases)
+- [Key Features](#-key-features)
+- [Platform Support & iOS Limitations](#-platform-support--ios-limitations)
+- [Step-by-Step Setup Guide](#-step-by-step-setup-guide)
+  - [Step 1: Get Telegram API Credentials](#step-1-get-telegram-api-credentials)
+  - [Step 2: Authenticate Account](#step-2-authenticate-account)
+  - [Step 3: Connect Monitored Channels](#step-3-connect-monitored-channels)
+  - [Step 4: Stream in Stremio](#step-4-stream-in-stremio)
+- [Remote Streaming (Tailscale & Custom Domains)](#-remote-streaming-tailscale--custom-domains)
+- [Background Streaming Best Practices](#-background-streaming-best-practices)
+- [Support & Sponsorship](#-support--sponsorship)
+- [Acknowledgements & Inspiration](#-acknowledgements--inspiration)
+- [License](#-license)
 
 ---
 
-## 📋 Quick Setup Workflow
+## 📖 What is NoxMedia?
+
+**NoxMedia** is an advanced, standalone Android application that transforms your smartphone, tablet, or Android TV box into a private, self-hosted media streaming server and **Stremio Addon**.
+
+By interfacing directly with Telegram's robust content delivery network via an embedded MTProto bridge, NoxMedia parses, catalogs, enriches, and serves media files stored in your monitored Telegram channels straight to modern media players—with zero-latency byte-range seeking, automatic anime episode mapping, and zero external PC or hosting requirements.
+
+> [!NOTE]
+> **Acknowledgement & Roots:**  
+> NoxMedia is inspired by the pioneering work of [Telegram-Stremio](https://github.com/nabilaba/telegram-stremio). While honoring that open-source foundation, NoxMedia has been completely re-architected from the ground up as a native Android-first ecosystem featuring an embedded Python runtime (Chaquopy), a custom multi-part video merge pipeline, an automated Telegram cloud backup system, smart battery management, and a sleek, Nothing OS-inspired Jetpack Compose interface.
+
+---
+
+## 💡 Why NoxMedia? (Use-Cases)
+
+### 1. Unlimited Cloud Media Vault (The Zero-Cost Jellyfin Alternative)
+Self-hosting media servers like Plex, Jellyfin, or Emby traditionally requires thousands of dollars in investment: dedicated NAS enclosures, multi-terabyte mechanical hard drives, RAID arrays, and continuous electricity bills. NoxMedia unlocks **Telegram’s virtually unlimited cloud storage** to serve as your personal media library. Upload or forward your 4K HDR movies, anime collections, and series to private channels, and NoxMedia serves them seamlessly on demand.
+
+### 2. Zero Server Overhead & Hardware Independence
+No dedicated Linux home lab or Raspberry Pi required. An old spare Android phone or inexpensive Android TV box running NoxMedia consumes less than 5 Watts of power while operating 24/7 as an ultra-compact local streaming server on your home network.
+
+### 3. Native Stremio Ecosystem Integration
+Install the local addon manifest URL once into Stremio, and all indexed media appears instantly across your Smart TVs, Fire TV Sticks, laptops, PCs, or tablets with movie posters, synopsis, season groupings, and episode streams.
+
+---
+
+## ⚡ Key Features
+
+### 🚀 High-Performance Streaming Engine
+- **HTTP 206 Partial Content Support:** Built-in byte-range seek engine provides instant scrubbing, fast forward, and rewind identical to local file playback.
+- **Dual-Tier Dynamic Caching:** Combines an ultra-fast **48MB in-memory LRU chunk cache** for instant header/index seeks with a configurable on-disk chunk cache (512MB – 8GB).
+- **Multi-Part Split Video Assembly:** Automatically discovers and transparently concatenates split archive parts (`part1.mp4`, `part2.mp4` / `pt1`, `pt2`) into a single unified stream on the fly.
+
+### 🧠 Intelligent Catalog & Automation
+- **Continuous Auto-Scan:** Automatically discovers and indexes newly uploaded media in monitored channels every 30 seconds without manual syncing.
+- **Deduplication & Quality Filter:** Identifies identical content uploaded across channels and provides an automated switch to skip or clean redundant split duplicates and low-quality CAM/TS releases.
+- **Dead Link Detection:** Scans for deleted Telegram messages or revoked media and purges inaccessible items from your library automatically.
+
+### 🎨 Rich Metadata & Artwork Enrichment
+- **Automated TMDB & TVDB Scraping:** Automatically extracts clean release titles, release years, plot summaries, and backdrops.
+- **Kitsu Anime Database Integration:** Built-in absolute numbering support (e.g., *One Piece 1130*, *Bleach 39*) ensuring long-running anime map to correct season/episode structures.
+- **SpatialPosters & Custom API Compatibility:** Plug in custom poster providers or third-party artwork APIs for high-resolution graphics.
+
+### ☁️ Automated Telegram Cloud Backup & Cross-Device Restore
+- **Telegram Saved Messages Backup:** Automatically backs up all server settings, automation preferences, and monitored channels directly to your Telegram **Saved Messages** (`#NoxMediaBackup`) on a scheduled interval (1h, 2h, 6h, 12h, 24h).
+- **Silent Cross-Device Auto-Sync:** When logging into NoxMedia on a new device (e.g., setting up an Android TV box), NoxMedia silently detects and restores your channels and preferences from your Telegram cloud backup in seconds.
+
+### 🎙️ Alexa Smart Home Voice Control
+- **Hands-Free Control:** Built-in faux Philips Hue bridge allowing you to turn NoxMedia streaming services ON or OFF using Amazon Alexa voice commands (*"Alexa, turn on NoxMedia"*).
+
+### 🔋 Smart Battery & Power Management
+- **Auto-Sleep Watchdog:** Configurable inactivity timer that shuts down streaming listeners when no client is playing to maximize battery life on mobile devices.
+- **Wi-Fi High-Performance Locks:** Prevents the Android kernel from entering low-power network throttling while a video stream is actively playing.
+
+### 🌐 Remote Access & Mesh Networking
+- **Native Tailscale Detection:** Automatically detects your device's Tailscale VPN IP address for secure, out-of-home streaming anywhere in the world.
+- **Public Domain Tunneling:** Support for custom reverse proxies and remote URLs (Cloudflare Tunnels, ngrok, VPS proxies).
+
+### 🧪 Jellyfin Bridge Mode
+- **Jellyfin Compatibility Layer:** *(Currently on Hold / In Development — Planned for Future Stable Release)* — An experimental bridge architecture allowing native Jellyfin clients and apps to stream directly from NoxMedia's indexed catalog.
+
+---
+
+## 📱 Platform Support & iOS Limitations
+
+| Platform | Support Status | Notes |
+| :--- | :---: | :--- |
+| **Android Phones & Tablets** | ✅ **Fully Supported** | Android 7.0 (API 24) to Android 16 |
+| **Android TV / Google TV** | ✅ **Fully Supported** | Leanback UI support, remote-friendly controls |
+| **Fire TV / Firestick** | ✅ **Fully Supported** | Side-loadable APK, background service compatible |
+| **Apple iOS (iPhone / iPad)** | ❌ **Not Supported (Host Server)** | Technical architectural limitation (see below) |
+
+### ❓ Why isn't NoxMedia available for iOS?
+Running a dedicated, 24/7 background media streaming server requires:
+1. Long-lived background TCP socket listeners bound to local ports.
+2. Uninterrupted background multi-connection networking.
+3. Persistent Wi-Fi CPU wake-locks that ignore screen lock states.
+
+**Apple's iOS security architecture strictly forbids long-running background socket servers.** iOS suspends and kills background network tasks within 30 seconds of the device being locked or an app being minimized. While you cannot host the NoxMedia server *on* an iOS device, **you can seamlessly watch NoxMedia streams on iOS** by opening [Stremio Web](https://web.stremio.com) on your iPhone/iPad and connecting to your Android phone's NoxMedia manifest URL!
+
+---
+
+## 🚀 Step-by-Step Setup Guide
 
 ```
-[1. Get API Credentials] ──▶ [2. Generate Session String] ──▶ [3. Paste in NoxMedia & Start] ──▶ [4. Stream in Stremio]
-   (my.telegram.org)           (Mobile Bot or PC Script)          (Turn On Foreground Service)     (Addon Manifest URL)
+┌────────────────────────┐      ┌───────────────────────────┐      ┌─────────────────────────┐
+│ 1. Get API Credentials │ ───▶ │ 2. Log in with Account    │ ───▶ │ 3. Connect Channels     │
+│    (my.telegram.org)   │      │    (In-App or Session)    │      │    (Public or Private)  │
+└────────────────────────┘      └───────────────────────────┘      └─────────────────────────┘
+                                                                                │
+                                                                                ▼
+                                                                   ┌─────────────────────────┐
+                                                                   │ 4. Install in Stremio   │
+                                                                   │    (manifest.json URL)  │
+                                                                   └─────────────────────────┘
 ```
 
----
-
-## 🔑 Step 1: Get Telegram API ID & Hash (Takes 30 Seconds)
-
-1. Open your browser and go to [my.telegram.org](https://my.telegram.org).
-2. Log in with your phone number and the confirmation code sent to your Telegram app.
-3. Tap on **"API development tools"**.
-4. Create a new application (enter any app name and short name).
+### Step 1: Get Telegram API Credentials
+1. Open any web browser and navigate to [my.telegram.org](https://my.telegram.org).
+2. Log in using your Telegram phone number and confirmation code.
+3. Tap on **API development tools**.
+4. Fill in any App title and short name, then submit.
 5. Copy your **`api_id`** (numbers) and **`api_hash`** (32-character string).
 
----
+### Step 2: Authenticate Account
+Open NoxMedia on your Android device and enter your `API ID` and `API Hash`. You have two authentication methods:
+- **Direct In-App Login:** Enter your phone number, receive the official code in your Telegram app, and enter it directly.
+- **Session String Login:** Paste an existing Pyrogram session string generated via our [Google Colab Notebook](https://colab.research.google.com/github/TheAceOfficials/NoxMedia/blob/main/string_session.ipynb) or via `@StringSessionRobot` in Telegram.
 
-## 📱 Step 2: How to Generate Telegram Session String
+### Step 3: Connect Monitored Channels
+1. Navigate to the **Channels** tab.
+2. Enter the channel username (e.g., `@MyMoviesChannel`), invite link, or private channel ID (`t.me/c/...`).
+3. Tap **Connect Channel**. NoxMedia will resolve channel access and begin background media indexing immediately.
 
-A **Session String** is a secure, persistent token that lets NoxMedia stream media from your account without asking for phone codes every time.
-
-### Option A: 1-Click Google Colab (Safest & 100% Transparent — Mobile & PC) ⭐ *Recommended*
-
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/TheAceOfficials/NoxMedia/blob/main/string_session.ipynb)
-
-Run the generator in your own private Google Cloud sandbox without installing anything on your device:
-1. Tap on the **[Open in Colab](https://colab.research.google.com/github/TheAceOfficials/NoxMedia/blob/main/string_session.ipynb)** button above.
-2. Tap the **▶ Run** button on the code block.
-3. Enter your `API ID`, `API HASH`, and `Phone Number`.
-4. Enter the Telegram login OTP.
-5. Your session string is printed and sent straight to your **Saved Messages**!
-
----
-
-### Option B: On Mobile via Telegram Bot
-
-1. Open your Telegram app and search for:
-   - **`@StringSessionRobot`** or **`@SessionStringGeneratorBot`**
-2. Tap **START** (`/start`).
-3. Select **Pyrogram** (recommended) or **Telethon**.
-4. When prompted, provide:
-   - Your **API ID** (from Step 1)
-   - Your **API HASH** (from Step 1)
-   - Your **Phone Number** in international format (e.g., `+919876543210`)
-5. Telegram will send an official login code to your Telegram app. Enter this code into the bot.
-   *(If you have 2-Step Verification enabled, send your 2FA password).*
-6. The bot will instantly generate your **Session String** and send it directly to your **Saved Messages** chat!
-7. Long-press the session string token in Saved Messages and tap **Copy**.
-
-> 💡 **Mobile Alternative (Termux on Android):**  
-> If you have Termux installed on your Android device:  
-> ```bash
-> pkg update && pkg install python -y
-> pip install pyrogram tgcrypto
-> python -m pyrogram
-> ```  
-> Follow the on-screen prompt, and your session string will be printed right in Termux.
+### Step 4: Stream in Stremio
+1. On the **Home** tab, toggle the server switch to **RUNNING**.
+2. Note your local server URL (e.g., `http://192.168.1.50:7788/manifest.json`).
+3. Open **Stremio** on any TV, PC, phone, or tablet connected to the same Wi-Fi.
+4. Go to **Addons** ➔ paste your `manifest.json` URL into the search bar ➔ tap **Install**.
+5. Browse your movies, series, and anime with full posters, episode streams, and instant seeking!
 
 ---
 
-### Option B: On PC (Windows / Linux / macOS)
+## 🌐 Remote Streaming (Tailscale & Custom Domains)
 
-If you are on a computer, you can generate your string in 1 minute using Python:
+Want to access your Telegram Stremio library outside your house over mobile 4G/5G data?
 
-#### 1. Open PowerShell (Windows) or Terminal (Linux/macOS) and install Pyrogram:
-```bash
-pip install pyrogram tgcrypto
-```
-
-#### 2. Run the 1-Line Generator:
-```bash
-python -m pyrogram
-```
-Enter your `API_ID`, `API_HASH`, and Phone number when prompted.
-
-#### Or use this Quick Python Script:
-```python
-from pyrogram import Client
-
-api_id = int(input("Enter API ID: "))
-api_hash = input("Enter API HASH: ")
-
-with Client("temp_session", api_id=api_id, api_hash=api_hash, in_memory=True) as app:
-    session_string = app.export_session_string()
-    print("\n--- YOUR SESSION STRING ---")
-    print(session_string)
-    print("---------------------------\n")
-    # Send it directly to your Telegram Saved Messages
-    app.send_message("me", f"**Your NoxMedia Session String:**\n`{session_string}`")
-    print("✓ Also sent directly to your Telegram Saved Messages!")
-```
-
-Copy the generated session string token and paste it into NoxMedia.
-
----
-
-## 🚀 Step 3: Connect in NoxMedia App & Start Server
-
-1. Open **NoxMedia** on your Android phone.
-2. Enter your **API ID** & **API Hash** (saved permanently).
-3. On the **Connect Telegram** screen:
-   - Tap the **Paste** button to paste your copied Session String.
-   - Tap **Connect & Start Server**.
-4. NoxMedia will instantly validate and connect to your Telegram account!
-5. On the **Home Screen**, tap the **Server Switch** to toggle the server **ON**.
-6. You will see your local manifest URL:
+1. **Install Tailscale** on both your NoxMedia Android device and your client device (phone or laptop).
+2. NoxMedia automatically detects and displays your 100.x.x.x Tailscale IP address on the home screen.
+3. Use the Tailscale manifest link:
    ```
-   http://192.168.1.15:7788/manifest.json
+   http://100.x.y.z:7788/manifest.json
    ```
+4. Alternatively, enter a Cloudflare Tunnel or reverse-proxy domain into **Settings ➔ Remote Access URL**.
 
 ---
 
-## 📺 Step 4: Stream in Stremio (Any Device)
+## ⚙️ Background Streaming Best Practices
 
-1. Open **Stremio** on your Smart TV, Firestick, PC, Laptop, or Phone.
-   *(Ensure the device is connected to the same Wi-Fi network as your phone).*
-2. Go to **Addons** (Puzzle Icon).
-3. Tap on **"Add Addon"** / paste the search bar.
-4. Paste your server URL:
-   ```
-   http://<YOUR_PHONE_IP>:7788/manifest.json
-   ```
-5. Click **Install**.
-6. Done! All media from your monitored Telegram channels will now appear in your Stremio library with rich metadata, posters, and instant seekable streaming!
+To ensure Android does not pause or terminate NoxMedia when your screen is locked:
+- **Set Battery to Unrestricted:** Go to Android **Settings ➔ Apps ➔ NoxMedia ➔ Battery ➔ Select "Unrestricted"**.
+- **Lock App in Recents:** On devices with aggressive memory management (Xiaomi MIUI/HyperOS, OnePlus OxygenOS, Samsung OneUI), open the recent apps screen, long-press NoxMedia, and tap the **Lock** icon.
+- **Exclude from Memory Cleaners:** Add NoxMedia to your device's whitelist for background app killers.
 
 ---
 
-## ⚙️ Best Practices for Android Background Streaming
+## 💖 Support & Sponsorship
 
-- **Disable Battery Optimization:** In your phone's Android Settings -> Apps -> NoxMedia -> Battery -> Select **"Unrestricted"**. This prevents Android from putting the server to sleep when your screen is locked.
-- **Keep Wi-Fi Active:** Make sure your phone stays connected to Wi-Fi while streaming. NoxMedia automatically holds a high-performance Wi-Fi wake lock while the server is active.
+**NoxMedia** is built with passion and provided 100% free and open-source under the **AGPLv3** license.
+
+If you love using NoxMedia or want to support future open-source projects created by **@TheAceOfficials**, consider backing on Patreon:
+
+<p align="center">
+  <a href="https://www.patreon.com/cw/TheAceOfficials">
+    <img src="https://img.shields.io/badge/Patreon-SUPPORT%20%40THEACEOFFICIALS-FF424D?style=for-the-badge&logo=patreon&logoColor=white" alt="Support on Patreon">
+  </a>
+</p>
+
+### 🌟 Membership Tiers
+
+- ☕ **Coffee Supporter ($3/mo):** Supporter credit in GitHub README & App UI + Early dev updates.
+- 🔥 **Priority Feature Requester ($5/mo):** Fast-track feature requests & shape future project roadmaps.
+- 👑 **Supporter Hall of Fame ($10/mo):** Official Sponsor Logo/Link credit across all @TheAceOfficials projects.
 
 ---
 
-## ❓ Frequently Asked Questions (FAQ)
+## 🤝 Acknowledgements & Inspiration
 
-### Q: Why use Session String instead of Phone OTP login in the app?
-**A:** Telegram restricts third-party client logins over raw HTTP and aggressively blocks phone numbers with `FLOOD_WAIT` or SMS delivery failure. A Session String authenticates directly via Telegram's official cryptographic MTProto protocol, bypassing all OTP and rate-limit issues.
-
-### Q: Can my session string expire?
-**A:** No, Telegram session strings remain valid indefinitely until you manually terminate the session from your Telegram app (*Settings -> Devices -> Terminate Session*).
-
-### Q: Is my Telegram account safe?
-**A:** Yes! The Session String stays 100% on your local Android device inside secure app storage (`SharedPreferences`). It is never sent to any external server or third party.
+- [Telegram-Stremio](https://github.com/nabilaba/telegram-stremio) — For the visionary concept of streaming Telegram media directly to Stremio.
+- [Pyrogram](https://github.com/pyrogram/pyrogram) — Elegant, high-speed Telegram MTProto framework in Python.
+- [Chaquopy](https://chaquo.com/chaquopy/) — Python SDK for Android that brings native MTProto capabilities into Jetpack Compose.
+- [Stremio](https://stremio.com) — The ultimate modern media aggregation and streaming player.
 
 ---
 
 ## 📄 License
-MIT License. Built for the community.
+
+This project is licensed under the **GNU Affero General Public License v3.0 (AGPLv3)**.  
+Built with ❤️ by **[TheAceOfficials](https://github.com/TheAceOfficials)**.

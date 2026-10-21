@@ -38,6 +38,8 @@ import com.tgserver.streamer.update.AppUpdateManager
 import com.tgserver.streamer.update.UpdateUiState
 import java.io.File
 import java.util.concurrent.TimeUnit
+import org.json.JSONArray
+import org.json.JSONObject
 
 enum class AppTab {
     HOME, CHANNELS, LIBRARY, SETTINGS
@@ -133,12 +135,19 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     private val _isScanningAll = MutableStateFlow(false)
     val isScanningAll: StateFlow<Boolean> = _isScanningAll.asStateFlow()
 
+    private val _isBackingUpToCloud = MutableStateFlow(false)
+    val isBackingUpToCloud: StateFlow<Boolean> = _isBackingUpToCloud.asStateFlow()
+
+    private val _isRestoringFromCloud = MutableStateFlow(false)
+    val isRestoringFromCloud: StateFlow<Boolean> = _isRestoringFromCloud.asStateFlow()
+
     private val startTime = System.currentTimeMillis()
 
     init {
         val loaded = loadStoredConfig()
         _config.value = loaded
         StreamerForegroundService.activeConfig = loaded
+        tgClient.setBackupJsonProvider { exportBackupJson() }
         viewModelScope.launch(Dispatchers.IO) {
             tgClient.cleanupSplitDuplicates()
             if (session.value.isLoggedIn) {
@@ -615,6 +624,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                 _codeSentSuccess.value = false
                 _is2FARequired.value = false
                 Toast.makeText(getApplication(), "✓ Logged in successfully!", Toast.LENGTH_SHORT).show()
+                autoRestoreCloudBackupSilently()
             } else {
                 val err = res.exceptionOrNull()?.message ?: "Invalid code"
                 if (err == "2FA_REQUIRED") {
@@ -636,6 +646,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                 _codeSentSuccess.value = false
                 _is2FARequired.value = false
                 Toast.makeText(getApplication(), "✓ 2FA Verified! Logged in successfully!", Toast.LENGTH_SHORT).show()
+                autoRestoreCloudBackupSilently()
             } else {
                 val err = res.exceptionOrNull()?.message ?: "Incorrect 2FA password"
                 Toast.makeText(getApplication(), err, Toast.LENGTH_LONG).show()
@@ -656,6 +667,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             _isImportingSession.value = false
             if (res.isSuccess) {
                 Toast.makeText(getApplication(), "✓ Connected to Telegram successfully!", Toast.LENGTH_SHORT).show()
+                autoRestoreCloudBackupSilently()
             } else {
                 val err = res.exceptionOrNull()?.message ?: "Invalid session string"
                 _sessionImportError.value = err
@@ -664,21 +676,47 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-
-
     fun loginWithWebSession(firstName: String, username: String, userId: Long, sessionStr: String) {
         viewModelScope.launch {
             val res = tgClient.loginWithWebSession(firstName, username, userId, sessionStr)
             if (res.isSuccess) {
                 Toast.makeText(getApplication(), "✓ Telegram Login Successful!", Toast.LENGTH_SHORT).show()
+                autoRestoreCloudBackupSilently()
+            }
+        }
+    }
+
+    fun autoRestoreCloudBackupSilently() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                Log.d("MainAppViewModel", "Checking Telegram Saved Messages for cloud backup after login...")
+                val res = tgClient.fetchLatestBackupFromTelegram("me")
+                val json = res.getOrNull()
+                if (!json.isNullOrBlank()) {
+                    withContext(Dispatchers.Main) {
+                        val (settingsRestored, channelsRestored) = importBackupJsonDetailed(json)
+                        if (settingsRestored || channelsRestored > 0) {
+                            val msg = "✓ Cloud backup restored: $channelsRestored channels & settings synced!"
+                            Toast.makeText(getApplication(), msg, Toast.LENGTH_LONG).show()
+                            if (channelsRestored > 0) {
+                                syncAllChannels()
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("MainAppViewModel", "Silent auto-restore on login: ${e.message}")
             }
         }
     }
 
     fun logout() {
+        val freed = clearAppCache()
         tgClient.logout()
         _codeSentSuccess.value = false
-        Toast.makeText(getApplication(), "Logged out", Toast.LENGTH_SHORT).show()
+        val freedMb = freed / (1024 * 1024)
+        val msg = if (freedMb > 0) "✓ Logged out • ${freedMb}MB cache cleared" else "✓ Logged out • Cache cleared"
+        Toast.makeText(getApplication(), msg, Toast.LENGTH_SHORT).show()
     }
 
     // --- Settings Actions & Persistence ---
@@ -932,7 +970,13 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             autoBackupIntervalHours = intervalHours
         )
         saveStoredConfig(updated)
-        Toast.makeText(getApplication(), "✓ Backup schedule updated", Toast.LENGTH_SHORT).show()
+        if (enabled) {
+            tgClient.startAutoBackupLoop { exportBackupJson() }
+            Toast.makeText(getApplication(), "✓ Auto-backup scheduled every ${intervalHours}h to Telegram", Toast.LENGTH_SHORT).show()
+        } else {
+            tgClient.stopAutoBackupLoop()
+            Toast.makeText(getApplication(), "✓ Auto-backup disabled", Toast.LENGTH_SHORT).show()
+        }
     }
 
     fun scanDuplicates(): Int = tgClient.scanDuplicates()
@@ -1000,58 +1044,188 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     fun exportBackupJson(): String {
         val cfg = _config.value
         val channelList = channels.value
-        return """
-            {
-              "version": 1,
-              "timestamp": ${System.currentTimeMillis()},
-              "serverConfig": {
-                "port": ${cfg.port},
-                "preferredQuality": "${cfg.preferredQuality}",
-                "hideCamTs": ${cfg.hideCamTs},
-                "remotePublicUrl": "${cfg.remotePublicUrl}",
-                "startOnBoot": ${cfg.startOnBoot},
-                "autoScanNewContent": ${cfg.autoScanNewContent},
-                "replaceSameQuality": ${cfg.replaceSameQuality},
-                "skipExactDuplicates": ${cfg.skipExactDuplicates},
-                "autoSleepEnabled": ${cfg.autoSleepEnabled},
-                "autoSleepTimeoutMinutes": ${cfg.autoSleepTimeoutMinutes},
-                "alexaVoiceControlEnabled": ${cfg.alexaVoiceControlEnabled},
-                "alexaDeviceName": "${cfg.alexaDeviceName}"
-              },
-              "monitoredChannelsCount": ${channelList.size}
+        val channelsJsonArray = JSONArray()
+        channelList.forEach { ch ->
+            val chObj = JSONObject().apply {
+                put("id", ch.id)
+                put("title", ch.title)
+                if (!ch.username.isNullOrBlank()) put("username", ch.username)
+                put("isAnime", ch.isAnime)
+                put("isActive", ch.isActive)
+                put("autoIndex", ch.autoIndex)
             }
-        """.trimIndent()
+            channelsJsonArray.put(chObj)
+        }
+
+        val settingsObj = JSONObject().apply {
+            put("preferredQuality", cfg.preferredQuality)
+            put("hideCamTs", cfg.hideCamTs)
+            put("remotePublicUrl", cfg.remotePublicUrl)
+            put("customPosterUrl", cfg.customPosterUrl)
+            put("customPosterApiKey", cfg.customPosterApiKey)
+            put("tmdbApiKey", cfg.tmdbApiKey)
+            put("tvdbApiKey", cfg.tvdbApiKey)
+            put("autoScanNewContent", cfg.autoScanNewContent)
+            put("replaceSameQuality", cfg.replaceSameQuality)
+            put("skipExactDuplicates", cfg.skipExactDuplicates)
+            put("autoBackupEnabled", cfg.autoBackupEnabled)
+            put("autoBackupIntervalHours", cfg.autoBackupIntervalHours)
+        }
+
+        val root = JSONObject().apply {
+            put("version", 2)
+            put("appName", "NoxMedia")
+            put("timestamp", System.currentTimeMillis())
+            put("settings", settingsObj)
+            put("channels", channelsJsonArray)
+        }
+
+        return root.toString(2)
+    }
+
+    fun importBackupJsonDetailed(json: String): Pair<Boolean, Int> {
+        return try {
+            val root = JSONObject(json)
+            var settingsRestored = false
+            var channelsRestoredCount = 0
+
+            val settingsObj = when {
+                root.has("settings") -> root.getJSONObject("settings")
+                root.has("serverConfig") -> root.getJSONObject("serverConfig")
+                else -> null
+            }
+
+            if (settingsObj != null) {
+                val cur = _config.value
+                val updated = cur.copy(
+                    preferredQuality = settingsObj.optString("preferredQuality", cur.preferredQuality),
+                    hideCamTs = settingsObj.optBoolean("hideCamTs", cur.hideCamTs),
+                    remotePublicUrl = settingsObj.optString("remotePublicUrl", cur.remotePublicUrl),
+                    customPosterUrl = settingsObj.optString("customPosterUrl", cur.customPosterUrl),
+                    customPosterApiKey = settingsObj.optString("customPosterApiKey", cur.customPosterApiKey),
+                    tmdbApiKey = settingsObj.optString("tmdbApiKey", cur.tmdbApiKey),
+                    tvdbApiKey = settingsObj.optString("tvdbApiKey", cur.tvdbApiKey),
+                    autoScanNewContent = settingsObj.optBoolean("autoScanNewContent", cur.autoScanNewContent),
+                    replaceSameQuality = settingsObj.optBoolean("replaceSameQuality", cur.replaceSameQuality),
+                    skipExactDuplicates = settingsObj.optBoolean("skipExactDuplicates", cur.skipExactDuplicates),
+                    autoBackupEnabled = settingsObj.optBoolean("autoBackupEnabled", cur.autoBackupEnabled),
+                    autoBackupIntervalHours = settingsObj.optInt("autoBackupIntervalHours", cur.autoBackupIntervalHours)
+                )
+                saveStoredConfig(updated)
+                settingsRestored = true
+            }
+
+            if (root.has("channels")) {
+                val channelsArray = root.getJSONArray("channels")
+                val channelList = mutableListOf<ChannelInfo>()
+                for (i in 0 until channelsArray.length()) {
+                    val chObj = channelsArray.getJSONObject(i)
+                    val id = chObj.optLong("id")
+                    if (id != 0L) {
+                        val title = chObj.optString("title", "Channel $id")
+                        val username = if (chObj.has("username") && !chObj.isNull("username")) chObj.getString("username") else null
+                        val isAnime = chObj.optBoolean("isAnime", false)
+                        val isActive = chObj.optBoolean("isActive", true)
+                        val autoIndex = chObj.optBoolean("autoIndex", true)
+                        channelList.add(
+                            ChannelInfo(
+                                id = id,
+                                title = title,
+                                username = username,
+                                isAnime = isAnime,
+                                isActive = isActive,
+                                autoIndex = autoIndex
+                            )
+                        )
+                    }
+                }
+                if (channelList.isNotEmpty()) {
+                    channelsRestoredCount = tgClient.restoreChannels(channelList)
+                }
+            }
+
+            Pair(settingsRestored, channelsRestoredCount)
+        } catch (e: Exception) {
+            Log.e("MainAppViewModel", "Failed to parse backup JSON: ${e.message}", e)
+            Pair(false, 0)
+        }
     }
 
     fun importBackupJson(json: String): Boolean {
-        return try {
-            val jsonObject = org.json.JSONObject(json)
-            if (jsonObject.has("serverConfig")) {
-                val sc = jsonObject.getJSONObject("serverConfig")
-                val updated = _config.value.copy(
-                    port = sc.optInt("port", _config.value.port),
-                    preferredQuality = sc.optString("preferredQuality", _config.value.preferredQuality),
-                    hideCamTs = sc.optBoolean("hideCamTs", _config.value.hideCamTs),
-                    remotePublicUrl = sc.optString("remotePublicUrl", _config.value.remotePublicUrl),
-                    startOnBoot = sc.optBoolean("startOnBoot", _config.value.startOnBoot),
-                    autoScanNewContent = sc.optBoolean("autoScanNewContent", _config.value.autoScanNewContent),
-                    replaceSameQuality = sc.optBoolean("replaceSameQuality", _config.value.replaceSameQuality),
-                    skipExactDuplicates = sc.optBoolean("skipExactDuplicates", _config.value.skipExactDuplicates),
-                    autoSleepEnabled = sc.optBoolean("autoSleepEnabled", _config.value.autoSleepEnabled),
-                    autoSleepTimeoutMinutes = sc.optInt("autoSleepTimeoutMinutes", _config.value.autoSleepTimeoutMinutes),
-                    alexaVoiceControlEnabled = sc.optBoolean("alexaVoiceControlEnabled", _config.value.alexaVoiceControlEnabled),
-                    alexaDeviceName = sc.optString("alexaDeviceName", _config.value.alexaDeviceName)
-                )
-                saveStoredConfig(updated)
-                Toast.makeText(getApplication(), "✓ Settings successfully restored from backup!", Toast.LENGTH_LONG).show()
-                true
+        val (settingsRestored, channelsRestored) = importBackupJsonDetailed(json)
+        return if (settingsRestored || channelsRestored > 0) {
+            val msg = if (channelsRestored > 0) {
+                "✓ Restored settings and $channelsRestored channel(s) from backup!"
             } else {
-                Toast.makeText(getApplication(), "Invalid backup JSON: Missing serverConfig", Toast.LENGTH_SHORT).show()
-                false
+                "✓ Settings successfully restored from backup!"
             }
-        } catch (e: Exception) {
-            Toast.makeText(getApplication(), "Failed to parse backup JSON: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(getApplication(), msg, Toast.LENGTH_LONG).show()
+            true
+        } else {
+            Toast.makeText(getApplication(), "Invalid backup JSON: No settings or channels found", Toast.LENGTH_SHORT).show()
             false
+        }
+    }
+
+    fun backupToTelegramCloud(destination: String = "me", onDone: ((Boolean, String?) -> Unit)? = null) {
+        viewModelScope.launch {
+            if (!session.value.isLoggedIn) {
+                Toast.makeText(getApplication(), "Telegram is not connected", Toast.LENGTH_SHORT).show()
+                onDone?.invoke(false, "Telegram not connected")
+                return@launch
+            }
+            _isBackingUpToCloud.value = true
+            val backupJson = exportBackupJson()
+            val res = tgClient.uploadBackupToTelegram(backupJson, destination)
+            _isBackingUpToCloud.value = false
+            if (res.isSuccess) {
+                Toast.makeText(getApplication(), "✓ Backup saved to Telegram Saved Messages!", Toast.LENGTH_SHORT).show()
+                onDone?.invoke(true, null)
+            } else {
+                val err = res.exceptionOrNull()?.message ?: "Upload failed"
+                Toast.makeText(getApplication(), "Backup upload failed: $err", Toast.LENGTH_LONG).show()
+                onDone?.invoke(false, err)
+            }
+        }
+    }
+
+    fun restoreFromTelegramCloud(source: String = "me", onDone: ((Boolean, String?) -> Unit)? = null) {
+        viewModelScope.launch {
+            if (!session.value.isLoggedIn) {
+                Toast.makeText(getApplication(), "Telegram is not connected", Toast.LENGTH_SHORT).show()
+                onDone?.invoke(false, "Telegram not connected")
+                return@launch
+            }
+            _isRestoringFromCloud.value = true
+            val res = tgClient.fetchLatestBackupFromTelegram(source)
+            _isRestoringFromCloud.value = false
+            if (res.isSuccess) {
+                val json = res.getOrNull()
+                if (json.isNullOrBlank()) {
+                    Toast.makeText(getApplication(), "No backup found in Telegram", Toast.LENGTH_SHORT).show()
+                    onDone?.invoke(false, "No backup found")
+                } else {
+                    val (settingsRestored, channelsRestored) = importBackupJsonDetailed(json)
+                    if (settingsRestored || channelsRestored > 0) {
+                        Toast.makeText(
+                            getApplication(),
+                            "✓ Cloud backup restored: $channelsRestored channels & settings synced!",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        if (channelsRestored > 0) {
+                            syncAllChannels()
+                        }
+                        onDone?.invoke(true, null)
+                    } else {
+                        Toast.makeText(getApplication(), "Backup file did not contain valid settings", Toast.LENGTH_SHORT).show()
+                        onDone?.invoke(false, "Invalid format")
+                    }
+                }
+            } else {
+                val err = res.exceptionOrNull()?.message ?: "Fetch failed"
+                Toast.makeText(getApplication(), "Failed to fetch backup: $err", Toast.LENGTH_LONG).show()
+                onDone?.invoke(false, err)
+            }
         }
     }
 
