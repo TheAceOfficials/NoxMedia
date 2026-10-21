@@ -35,6 +35,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Movie
@@ -844,7 +845,93 @@ private fun PosterCard(
 }
 
 /**
- * Full-Screen Content Details View (Adapted from user's attached screenshots)
+ * Apple TV Style ClearLogo or Bold Typography with Automatic Fallback
+ */
+@Composable
+private fun RemoteLogoOrTitle(
+    logoUrl: String?,
+    fallbackTitle: String,
+    modifier: Modifier = Modifier
+) {
+    var logoLoaded by remember(logoUrl) { mutableStateOf(false) }
+    var logoFailed by remember(logoUrl) { mutableStateOf(false) }
+    var bitmap by remember(logoUrl) { mutableStateOf<ImageBitmap?>(null) }
+    val context = LocalContext.current.applicationContext
+
+    LaunchedEffect(logoUrl) {
+        if (logoUrl.isNullOrBlank()) {
+            logoFailed = true
+            return@LaunchedEffect
+        }
+        val cached = ImageMemoryCache.get(logoUrl)
+        if (cached != null) {
+            bitmap = cached
+            logoLoaded = true
+            return@LaunchedEffect
+        }
+        withContext(Dispatchers.IO) {
+            try {
+                val client = getImageHttpClient(context)
+                val req = Request.Builder()
+                    .url(logoUrl)
+                    .header("User-Agent", "NoxMedia/1.0 (Android)")
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        resp.body?.byteStream()?.use { stream ->
+                            val options = BitmapFactory.Options().apply {
+                                inPreferredConfig = Bitmap.Config.ARGB_8888
+                            }
+                            val decoded = BitmapFactory.decodeStream(stream, null, options)
+                            if (decoded != null) {
+                                val imgBmp = decoded.asImageBitmap()
+                                ImageMemoryCache.put(logoUrl, imgBmp)
+                                withContext(Dispatchers.Main) {
+                                    bitmap = imgBmp
+                                    logoLoaded = true
+                                }
+                            } else {
+                                withContext(Dispatchers.Main) { logoFailed = true }
+                            }
+                        }
+                    } else {
+                        withContext(Dispatchers.Main) { logoFailed = true }
+                    }
+                }
+            } catch (_: Exception) {
+                withContext(Dispatchers.Main) { logoFailed = true }
+            }
+        }
+    }
+
+    if (logoLoaded && bitmap != null) {
+        Image(
+            bitmap = bitmap!!,
+            contentDescription = fallbackTitle,
+            modifier = modifier
+                .heightIn(max = 66.dp)
+                .fillMaxWidth(0.72f),
+            contentScale = ContentScale.Fit,
+            alignment = Alignment.Center
+        )
+    } else {
+        Text(
+            text = fallbackTitle,
+            color = Color.White,
+            fontFamily = FontFamily.Default,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 24.sp,
+            letterSpacing = (-0.5).sp,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = modifier.fillMaxWidth(0.9f)
+        )
+    }
+}
+
+/**
+ * Full-Screen Content Details View (Apple TV+ Inspired Ultra-Premium Design)
  */
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
@@ -860,6 +947,7 @@ private fun ContentDetailsScreen(
     val isSeries = group.type == "series" || group.type == "anime"
     var showRescanDialog by remember { mutableStateOf(false) }
     var showPosterZoomDialog by remember { mutableStateOf(false) }
+    var isOverviewExpanded by remember { mutableStateOf(false) }
 
     val visualSpecs = remember(group) {
         extractMediaVisualSpecs(group)
@@ -872,9 +960,20 @@ private fun ContentDetailsScreen(
     // Group episodes by Season for series
     val seasonMap = remember(group.items) {
         if (isSeries) {
-            group.items.groupBy { it.season ?: 1 }
+            group.items.groupBy { it.season ?: 1 }.toSortedMap()
         } else {
-            emptyMap()
+            sortedMapOf()
+        }
+    }
+
+    var selectedSeason by remember(group.key) {
+        mutableStateOf(seasonMap.keys.firstOrNull() ?: 1)
+    }
+
+    // ClearLogo URL candidate from Metahub
+    val effectiveLogoUrl = remember(group.imdbId) {
+        group.imdbId?.takeIf { it.startsWith("tt") }?.let { id ->
+            "https://images.metahub.space/logo/medium/$id/img"
         }
     }
 
@@ -967,25 +1066,21 @@ private fun ContentDetailsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(Color(0xFF070709))
             .verticalScroll(rememberScrollState())
     ) {
-        // TOP BACKDROP WITH APP BAR (Edge-to-edge behind status bar)
+        // ==================== 1. HERO BACKDROP & FLOATING GLASS BAR ====================
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(260.dp)
+                .height(350.dp)
         ) {
-            if (!group.backdropUrl.isNullOrBlank()) {
+            // Immersive Backdrop Image
+            val heroImageUrl = group.backdropUrl?.takeIf { it.isNotBlank() } ?: group.posterUrl
+            if (!heroImageUrl.isNullOrBlank()) {
                 RemoteImage(
-                    url = group.backdropUrl,
-                    contentDescription = "Backdrop",
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-            } else if (!group.posterUrl.isNullOrBlank()) {
-                RemoteImage(
-                    url = group.posterUrl,
-                    contentDescription = "Backdrop",
+                    url = heroImageUrl,
+                    contentDescription = group.title,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
                 )
@@ -995,352 +1090,374 @@ private fun ContentDetailsScreen(
                         .fillMaxSize()
                         .background(
                             Brush.verticalGradient(
-                                colors = listOf(Color(0xFF1F0D36), Color(0xFF090310))
+                                colors = listOf(Color(0xFF1E102F), Color(0xFF070709))
                             )
                         )
                 )
             }
 
-            // Dark gradient overlay towards bottom
+            // Top vignette for clear status & action buttons
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(95.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Black.copy(alpha = 0.6f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+            )
+
+            // Apple TV Signature Bottom Gradient (Seamless OLED Black fade)
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
-                                Color.Black.copy(alpha = 0.4f),
-                                Color.Black.copy(alpha = 0.85f),
-                                BackgroundOled
+                                Color.Transparent,
+                                Color(0xFF070709).copy(alpha = 0.2f),
+                                Color(0xFF070709).copy(alpha = 0.78f),
+                                Color(0xFF070709)
                             )
                         )
                     )
             )
 
-            // Top Bar Overlay with Status Bar clearance
+            // Floating Frosted Glass Action Bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .statusBarsPadding()
-                    .padding(top = 8.dp, start = 14.dp, end = 14.dp),
+                    .padding(top = 10.dp, start = 16.dp, end = 16.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Back Button
                 IconButton(
                     onClick = onBack,
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(38.dp)
                         .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.6f))
+                        .background(Color.Black.copy(alpha = 0.55f))
+                        .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.2f)), CircleShape)
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back",
                         tint = Color.White,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(19.dp)
                     )
                 }
 
-                // Top bar Title in NORMAL FONT (SemiBold, clear and legible)
-                Text(
-                    text = group.title,
-                    color = Color.White,
-                    fontFamily = FontFamily.Default,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 15.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(horizontal = 12.dp)
-                )
-
-                // Top bar Action: Refresh (Rescan button is already present below next to type badge)
-                IconButton(
-                    onClick = onRefreshMetadata,
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.6f))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = "Refresh",
-                        tint = Color.White,
-                        modifier = Modifier.size(16.dp)
-                    )
+                    // Rescan Metadata Button
+                    IconButton(
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            showRescanDialog = true
+                        },
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.55f))
+                            .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.2f)), CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Rescan",
+                            tint = Color.White,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
+
+                    // Refresh Metadata Button
+                    IconButton(
+                        onClick = onRefreshMetadata,
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.55f))
+                            .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.2f)), CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Refresh",
+                            tint = Color.White,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
                 }
             }
-        }
 
-        // CONTENT INFO HEADER (Poster + Title + Badges)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            verticalAlignment = Alignment.Top
-        ) {
-            // Poster thumbnail (Clickable to open high-res zoom popup)
-            Box(
-                modifier = Modifier
-                    .width(96.dp)
-                    .height(142.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .border(1.dp, Color(0xFF38155E), RoundedCornerShape(12.dp))
-                    .clickable {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        showPosterZoomDialog = true
-                    }
-            ) {
-                RemoteImage(
-                    url = group.posterUrl,
-                    contentDescription = group.title,
-                    isSeries = isSeries,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-
-            // Title & Meta Info
+            // Hero Center & Bottom: Logo / Title + Metadata Line
             Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = 20.dp, vertical = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Header Title in NORMAL FONT (Bold, clear and prominent)
-                Text(
-                    text = group.title,
-                    color = Color.White,
-                    fontFamily = FontFamily.Default,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.5.sp,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                // Text Logo / Graphic Artwork (Fallback: Bold Typography)
+                RemoteLogoOrTitle(
+                    logoUrl = effectiveLogoUrl,
+                    fallbackTitle = group.title
                 )
 
-                // 1. Release Info: Year & Rating on Line 1
+                // Metadata Row (Apple TV style: Year • Type • Rating • Quality • Audio)
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Year Badge
-                    NetflixAppleBadge(
+                    Text(
                         text = visualSpecs.year,
-                        textColor = Color(0xFFE4E4E7),
-                        borderColor = Color(0x35FFFFFF),
-                        bgColor = Color(0x18FFFFFF)
+                        color = Color(0xFFD1D5DB),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
                     )
 
-                    // Rating Badge (Gold Star)
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(Color(0x20FBBF24))
-                            .border(BorderStroke(0.8.dp, Color(0x66FBBF24)), RoundedCornerShape(4.dp))
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(3.dp)
-                        ) {
-                            Text(
-                                text = "★",
-                                color = Color(0xFFFBBF24),
-                                fontSize = 9.sp
-                            )
-                            Text(
-                                text = visualSpecs.rating,
-                                color = Color(0xFFFBBF24),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Default
-                            )
-                        }
-                    }
-                }
+                    Text(text = "•", color = Color(0xFF6B7280), fontSize = 11.sp)
 
-                // 2. Technical Quality & Visual Badges on Line 2
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    // Quality Badge (e.g. 720p -> HD, 1080p -> FHD, 1440p -> 2K, 2160p -> 4K)
+                    Text(
+                        text = group.type.uppercase(),
+                        color = Color(0xFFA855F7),
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    if (isSeries) {
+                        val seasonCount = seasonMap.size
+                        val seasonTxt = if (seasonCount <= 1) "1 Season" else "$seasonCount Seasons"
+                        Text(text = "•", color = Color(0xFF6B7280), fontSize = 11.sp)
+                        Text(
+                            text = seasonTxt,
+                            color = Color(0xFFD1D5DB),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
+                    Text(text = "•", color = Color(0xFF6B7280), fontSize = 11.sp)
+
+                    // Gold Star Rating Badge
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Text(text = "★", color = Color(0xFFFBBF24), fontSize = 10.sp)
+                        Text(
+                            text = visualSpecs.rating,
+                            color = Color(0xFFFBBF24),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    // Quality Badge (e.g. 4K / FHD)
                     NetflixAppleBadge(
                         text = visualSpecs.resolutionBadge,
                         textColor = Color.White,
                         borderColor = Color(0x55FFFFFF),
-                        bgColor = Color(0x28FFFFFF)
+                        bgColor = Color(0x24FFFFFF)
                     )
 
-                    // Visual Badges: DV, HDR, HDR10+, IMAX, 10-bit, 5.1/ATMOS, HEVC
-                    visualSpecs.visualBadges.forEach { badge ->
-                        val isDv = badge == "DV"
-                        val isImax = badge == "IMAX"
-                        val textColor = when {
-                            isDv -> Color(0xFFFBBF24)
-                            isImax -> Color(0xFF60A5FA)
-                            else -> Color(0xFFE4E4E7)
-                        }
-                        val borderColor = when {
-                            isDv -> Color(0x66FBBF24)
-                            isImax -> Color(0x6660A5FA)
-                            else -> Color(0x35FFFFFF)
-                        }
-                        val bgColor = when {
-                            isDv -> Color(0x20FBBF24)
-                            isImax -> Color(0x203B82F6)
-                            else -> Color(0x18FFFFFF)
-                        }
+                    // Top audio badge
+                    if (visualSpecs.visualBadges.contains("5.1") || visualSpecs.visualBadges.contains("ATMOS")) {
                         NetflixAppleBadge(
-                            text = badge,
-                            textColor = textColor,
-                            borderColor = borderColor,
-                            bgColor = bgColor
+                            text = if (visualSpecs.visualBadges.contains("ATMOS")) "ATMOS" else "5.1",
+                            textColor = Color(0xFFE4E4E7),
+                            borderColor = Color(0x35FFFFFF),
+                            bgColor = Color(0x18FFFFFF)
                         )
                     }
                 }
 
-                // 3. Audio Tracks Row: Available in: Hindi, English, Tamil
-                Row(
-                    verticalAlignment = Alignment.Top,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier.padding(top = 2.dp)
-                ) {
+                // Audio Languages Row
+                if (visualSpecs.audioLanguages.isNotEmpty()) {
                     Text(
-                        text = "Available in:",
-                        color = Color(0xFF8E909A),
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Default
-                    )
-                    Text(
-                        text = visualSpecs.audioLanguages.joinToString(", ").ifBlank { "Unknown" },
-                        color = Color(0xFFE4E4E7),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        fontFamily = FontFamily.Default,
-                        maxLines = 2,
+                        text = "Available in: " + visualSpecs.audioLanguages.joinToString(", "),
+                        color = Color(0xFF9CA3AF),
+                        fontSize = 11.5.sp,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                }
-
-                // 4. Total Size Row
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Text(
-                        text = "Total Size:",
-                        color = Color(0xFF8E909A),
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Default
-                    )
-                    Text(
-                        text = visualSpecs.totalSize,
-                        color = Color(0xFFC084FC),
-                        fontSize = 11.sp,
-                        fontFamily = NdotFont,
-                        letterSpacing = 0.4.sp
-                    )
-                }
-
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Type Badge
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color(0xFF28103F))
-                            .border(1.dp, Color(0xFF4C1D7C), RoundedCornerShape(6.dp))
-                            .padding(horizontal = 8.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = group.type.uppercase(),
-                            color = Color(0xFFC084FC),
-                            fontFamily = NdotFont,
-                            fontSize = 10.sp
-                        )
-                    }
-
-                    // Rescan Metadata pill button
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color(0xFF1E1729))
-                            .border(1.dp, Color(0xFF5B21B6), RoundedCornerShape(6.dp))
-                            .clickable {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                showRescanDialog = true
-                            }
-                            .padding(horizontal = 7.dp, vertical = 2.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Search,
-                                contentDescription = null,
-                                tint = Color(0xFFC084FC),
-                                modifier = Modifier.size(11.dp)
-                            )
-                            Text(
-                                text = "RESCAN",
-                                color = Color(0xFFC084FC),
-                                fontFamily = NdotFont,
-                                fontSize = 9.sp
-                            )
-                        }
-                    }
-                }
-
-                // External IDs (IMDb / TMDb)
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (!group.imdbId.isNullOrBlank()) {
-                        Text(
-                            text = group.imdbId,
-                            color = Color(0xFFFBBF24),
-                            fontFamily = NdotFont,
-                            fontSize = 10.sp
-                        )
-                    }
-                    if (group.tmdbId != null && group.tmdbId > 0) {
-                        Text(
-                            text = "tmdb ${group.tmdbId}",
-                            color = Color(0xFF60A5FA),
-                            fontFamily = NdotFont,
-                            fontSize = 10.sp
-                        )
-                    }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        // OVERVIEW SYNOPSIS
+        // ==================== 2. APPLE TV ACTION BUTTONS ROW ====================
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Left Action: Rescan / Match Metadata
+            Surface(
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    showRescanDialog = true
+                },
+                shape = CircleShape,
+                color = Color(0xFF191B24),
+                border = BorderStroke(0.8.dp, Color(0x33FFFFFF)),
+                modifier = Modifier.size(44.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = "Rescan",
+                        tint = Color.White,
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
+            }
+
+            // Center Primary: Apple TV Signature White Pill Button
+            val primaryStreamItem = remember(group.items, selectedSeason, isSeries) {
+                if (isSeries) {
+                    val seasonItems = seasonMap[selectedSeason] ?: group.items
+                    seasonItems.firstOrNull { !it.isHidden } ?: seasonItems.firstOrNull() ?: group.items.firstOrNull()
+                } else {
+                    group.items.firstOrNull { !it.isHidden } ?: group.items.firstOrNull()
+                }
+            }
+
+            val playButtonLabel = if (isSeries) {
+                val epNum = primaryStreamItem?.episode ?: 1
+                "Play S$selectedSeason : E$epNum"
+            } else {
+                "Play / Stream"
+            }
+
+            Surface(
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    if (primaryStreamItem != null) {
+                        val encodedName = try {
+                            URLEncoder.encode(primaryStreamItem.fileName.ifBlank { "video.mp4" }, "UTF-8").replace("+", "%20")
+                        } catch (_: Exception) { "video.mp4" }
+                        val streamUrl = "$streamBaseUrl/stream/video/${primaryStreamItem.channelId}/${primaryStreamItem.messageId}/$encodedName"
+                        onCopyStream(streamUrl)
+                    }
+                },
+                shape = CircleShape,
+                color = Color.White,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(44.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = "Play",
+                        tint = Color.Black,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = playButtonLabel,
+                        color = Color.Black,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.5.sp
+                    )
+                }
+            }
+
+            // Right Action: View High-Res Poster
+            Surface(
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    showPosterZoomDialog = true
+                },
+                shape = CircleShape,
+                color = Color(0xFF191B24),
+                border = BorderStroke(0.8.dp, Color(0x33FFFFFF)),
+                modifier = Modifier.size(44.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.Image,
+                        contentDescription = "View Poster",
+                        tint = Color.White,
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
+            }
+        }
+
+        // Library Storage Pill Indicator
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 10.dp, bottom = 4.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Surface(
+                shape = RoundedCornerShape(999.dp),
+                color = Color(0x14FFFFFF),
+                border = BorderStroke(0.5.dp, Color(0x28FFFFFF))
+            ) {
+                Text(
+                    text = "${visualSpecs.totalSize} in Library • ${group.items.size} files",
+                    color = Color(0xFF9CA3AF),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // ==================== 3. SYNOPSIS / OVERVIEW ====================
         if (!group.overview.isNullOrBlank()) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
+                val overviewText = group.overview.trim()
+                val isLong = overviewText.length > 180
+
                 Text(
-                    text = group.overview,
+                    text = if (isLong && !isOverviewExpanded) overviewText.take(180) + "..." else overviewText,
                     color = Color(0xFFD4D4D8),
                     fontSize = 12.5.sp,
                     lineHeight = 18.sp
                 )
+
+                if (isLong) {
+                    Text(
+                        text = if (isOverviewExpanded) "Less" else "More",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp,
+                        modifier = Modifier
+                            .clickable { isOverviewExpanded = !isOverviewExpanded }
+                            .padding(vertical = 2.dp)
+                    )
+                }
             }
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(18.dp))
         }
 
-        // VERSIONS IN LIBRARY (Detected OTT platforms & release editions)
+        // ==================== 4. VERSIONS IN LIBRARY (Detected OTT) ====================
         if (detectedVersions.isNotEmpty()) {
             MediaVersionsSection(
                 versions = detectedVersions,
@@ -1349,25 +1466,37 @@ private fun ContentDetailsScreen(
             Spacer(modifier = Modifier.height(20.dp))
         }
 
-        // STREAMS & EPISODES SECTION
+        // ==================== 5. SEASONS & EPISODES / MOVIE STREAMS ====================
         if (!isSeries) {
-            // MOVIE STREAMS (Multi-format listing with Hide/Unhide toggle)
+            // MOVIE STREAMS LIST
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text(
-                    text = "STREAMS (${group.items.size})",
-                    color = Color(0xFF8E909A),
-                    fontFamily = NdotFont,
-                    fontSize = 11.5.sp
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "MOVIE STREAMS (${group.items.size})",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                    Text(
+                        text = group.formattedTotalSize,
+                        color = Color(0xFF8E909A),
+                        fontSize = 11.5.sp
+                    )
+                }
 
                 group.items.forEach { streamItem ->
                     MovieStreamItemRow(
                         item = streamItem,
+                        backdropUrl = group.backdropUrl ?: group.posterUrl,
                         onToggleHide = {
                             viewModel.toggleHideMedia(streamItem.id)
                         },
@@ -1384,97 +1513,213 @@ private fun ContentDetailsScreen(
                 }
             }
         } else {
-            // SERIES SEASONS & EPISODES (Multi-quality grouping per episode: E01 | Title | 1080p | 4K)
+            // SERIES SEASONS & 16:9 EPISODES
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                val seasonCount = seasonMap.size
-                val seasonLabel = if (seasonCount == 1) "1 SEASON" else "$seasonCount SEASONS"
-                val epCount = group.distinctEpisodeCount
-                val epLabel = if (epCount == 1) "1 EPISODE" else "$epCount EPISODES"
-                Text(
-                    text = "$seasonLabel · $epLabel",
-                    color = Color(0xFF8E909A),
-                    fontFamily = NdotFont,
-                    fontSize = 11.5.sp
-                )
-
-                seasonMap.forEach { (seasonNum, seasonItems) ->
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color(0xFF14151B))
-                            .border(1.dp, Color(0xFF262832), RoundedCornerShape(16.dp))
-                            .padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                // Multi-Season Selector Pills
+                if (seasonMap.size > 1) {
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Season Header in NORMAL FONT (SemiBold, clear and legible)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        items(seasonMap.keys.toList()) { seasonNum ->
+                            val isSelected = seasonNum == selectedSeason
+                            Surface(
+                                shape = RoundedCornerShape(20.dp),
+                                color = if (isSelected) Color.White else Color(0xFF14151C),
+                                border = BorderStroke(0.5.dp, if (isSelected) Color.White else Color(0x33FFFFFF)),
+                                modifier = Modifier.clickable { selectedSeason = seasonNum }
+                            ) {
+                                Text(
+                                    text = "Season $seasonNum",
+                                    color = if (isSelected) Color.Black else Color(0xFFD1D5DB),
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                val currentSeasonItems = seasonMap[selectedSeason] ?: group.items
+                val distinctEps = currentSeasonItems.map { it.episode ?: 1 }.distinct()
+                val seasonTotalSize = currentSeasonItems.sumOf { it.sizeBytes }.let { bytes ->
+                    if (bytes <= 0L) "0 MB"
+                    else {
+                        val gb = bytes.toDouble() / (1024.0 * 1024.0 * 1024.0)
+                        if (gb >= 1.0) String.format(java.util.Locale.US, "%.1f GB", gb)
+                        else String.format(java.util.Locale.US, "%.0f MB", bytes.toDouble() / (1024.0 * 1024.0))
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Season $selectedSeason",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    )
+                    Text(
+                        text = "${distinctEps.size} Episodes • $seasonTotalSize",
+                        color = Color(0xFF8E909A),
+                        fontSize = 12.sp
+                    )
+                }
+
+                // Group files by Episode number
+                val episodesGrouped = remember(currentSeasonItems) {
+                    currentSeasonItems.groupBy { it.episode ?: 1 }.toSortedMap()
+                }
+
+                episodesGrouped.forEach { (epNum, epItems) ->
+                    EpisodeGroupAccordionRow(
+                        epNum = epNum,
+                        epItems = epItems,
+                        showTitle = group.title,
+                        groupImdbId = group.imdbId,
+                        groupBackdropUrl = group.backdropUrl,
+                        groupPosterUrl = group.posterUrl,
+                        onToggleHide = { item ->
+                            viewModel.toggleHideMedia(item.id)
+                        },
+                        onCopyStream = { streamUrl ->
+                            onCopyStream(streamUrl)
+                        },
+                        streamBaseUrl = streamBaseUrl
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // ==================== 6. ABOUT & SERVER SPECIFICATIONS ====================
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "About",
+                color = Color.White,
+                fontFamily = FontFamily.Default,
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp
+            )
+
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = Color(0xFF101117),
+                border = BorderStroke(0.5.dp, Color(0xFF22242F)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // Row 1: External IDs
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text("IMDb ID", color = Color(0xFF717482), fontSize = 11.sp)
                             Text(
-                                text = "Season $seasonNum",
-                                color = Color.White,
-                                fontFamily = FontFamily.Default,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 15.sp
+                                text = group.imdbId ?: "N/A",
+                                color = Color(0xFFFBBF24),
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.SemiBold
                             )
-                            val distinctEpCount = seasonItems.map { it.episode ?: 1 }.distinct().size
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("TMDb ID", color = Color(0xFF717482), fontSize = 11.sp)
                             Text(
-                                text = "$distinctEpCount eps",
-                                color = Color(0xFF8E909A),
-                                fontFamily = NdotFont,
-                                fontSize = 11.sp
+                                text = group.tmdbId?.toString() ?: "N/A",
+                                color = Color(0xFF60A5FA),
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
+                    }
 
-                        HorizontalDivider(color = Color(0xFF22242D), thickness = 1.dp)
+                    HorizontalDivider(color = Color(0xFF1F212A), thickness = 0.5.dp)
 
-                        // Group files by Episode number so multi-qualities don't duplicate the row
-                        val episodesGrouped = remember(seasonItems) {
-                            seasonItems.groupBy { it.episode ?: 1 }.toSortedMap()
-                        }
-
-                        episodesGrouped.forEach { (epNum, epItems) ->
-                            EpisodeGroupAccordionRow(
-                                epNum = epNum,
-                                epItems = epItems,
-                                showTitle = group.title,
-                                onToggleHide = { item ->
-                                    viewModel.toggleHideMedia(item.id)
-                                },
-                                onCopyStream = { streamUrl ->
-                                    onCopyStream(streamUrl)
-                                },
-                                streamBaseUrl = streamBaseUrl
+                    // Row 2: Media Specs & Total Storage
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text("Audio / Languages", color = Color(0xFF717482), fontSize = 11.sp)
+                            Text(
+                                text = visualSpecs.audioLanguages.joinToString(", ").ifBlank { "Original" },
+                                color = Color(0xFFE4E4E7),
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("Total Storage", color = Color(0xFF717482), fontSize = 11.sp)
+                            Text(
+                                text = visualSpecs.totalSize,
+                                color = Color(0xFFC084FC),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = Color(0xFF1F212A), thickness = 0.5.dp)
+
+                    // Row 3: Server Indexing Info
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "${group.items.size} video files indexed",
+                            color = Color(0xFF9CA3AF),
+                            fontSize = 11.5.sp
+                        )
+                        Text(
+                            text = "Type: ${group.type.uppercase()}",
+                            color = Color(0xFFA855F7),
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                 }
             }
         }
 
         // Bottom space for floating bottom bar clearance
-        Spacer(modifier = Modifier.height(90.dp))
+        Spacer(modifier = Modifier.height(100.dp))
     }
 }
 
 /**
- * Grouped Episode Row with multi-quality badges and expandable dropdown details
- * Displays: "E01 | A Whole New Whirled | 1080p | 4K"
- * Clicking expands dropdown to show full Telegram filename, specs, size, and Hide/Unhide toggle
+ * Grouped Episode Row (Apple TV 16:9 Thumbnail Card + Accordion Details)
+ * Displays: 16:9 Episode Thumbnail with overlay number, Title, Qualities, and expandable Telegram file details
  */
 @Composable
 private fun EpisodeGroupAccordionRow(
     epNum: Int,
     epItems: List<MediaItem>,
     showTitle: String,
+    groupImdbId: String?,
+    groupBackdropUrl: String?,
+    groupPosterUrl: String?,
     streamBaseUrl: String,
     onToggleHide: (MediaItem) -> Unit,
     onCopyStream: (String) -> Unit
@@ -1491,125 +1736,156 @@ private fun EpisodeGroupAccordionRow(
     val allHidden = epItems.all { it.isHidden }
     val anyHidden = epItems.any { it.isHidden }
 
+    // Resolve 16:9 Episode Thumbnail URL
+    val epThumbUrl = remember(epNum, primary.season, groupImdbId) {
+        primary.episodeThumbnailUrl?.takeIf { it.isNotBlank() }
+            ?: groupImdbId?.takeIf { it.startsWith("tt") }?.let { id ->
+                "https://episodes.metahub.space/$id/${primary.season ?: 1}/$epNum/w780.jpg"
+            } ?: groupBackdropUrl ?: groupPosterUrl
+    }
+
+    val totalEpBytes = remember(epItems) { epItems.sumOf { it.sizeBytes } }
+    val formattedEpSize = remember(totalEpBytes) {
+        if (totalEpBytes <= 0L) "0 MB"
+        else {
+            val gb = totalEpBytes.toDouble() / (1024.0 * 1024.0 * 1024.0)
+            if (gb >= 1.0) String.format(java.util.Locale.US, "%.1f GB", gb)
+            else String.format(java.util.Locale.US, "%.0f MB", totalEpBytes.toDouble() / (1024.0 * 1024.0))
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (isExpanded) Color(0xFF181A22) else Color(0xFF13141B))
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (isExpanded) Color(0xFF14161F) else Color(0xFF0F1015))
             .border(
-                1.dp,
-                if (isExpanded) Color(0xFF3B235E) else Color(0xFF22242E),
-                RoundedCornerShape(12.dp)
+                BorderStroke(0.8.dp, if (isExpanded) Color(0x55A855F7) else Color(0xFF1E202B)),
+                RoundedCornerShape(14.dp)
             )
     ) {
-        // SUMMARY HEADER ROW (Clickable to expand/collapse)
+        // TOP 16:9 EPISODE CARD ROW (Clickable to expand/collapse)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { isExpanded = !isExpanded }
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+                .padding(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically
+            // 16:9 Episode Thumbnail Box
+            Box(
+                modifier = Modifier
+                    .width(118.dp)
+                    .aspectRatio(16f / 9f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF191B24))
+                    .border(BorderStroke(0.5.dp, Color(0x28FFFFFF)), RoundedCornerShape(8.dp))
             ) {
-                // Episode Number (e.g. E01)
-                Box(
+                RemoteImage(
+                    url = epThumbUrl,
+                    contentDescription = epTitle,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                    isSeries = true
+                )
+
+                // Episode Number Pill Overlay (Top-Left)
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = Color.Black.copy(alpha = 0.75f),
+                    border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.25f)),
                     modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Color(0xFF2E230A))
-                        .border(1.dp, Color(0xFFD97706), RoundedCornerShape(6.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                        .padding(5.dp)
+                        .align(Alignment.TopStart)
                 ) {
                     Text(
-                        text = "E%02d".format(epNum),
-                        color = Color(0xFFFBBF24),
-                        fontFamily = NdotFont,
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Bold
+                        text = "$epNum",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.5.sp,
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
                     )
                 }
 
-                // Episode Title and Qualities stacked vertically
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(3.dp)
-                ) {
-                    Text(
-                        text = epTitle,
-                        color = if (allHidden) Color(0xFF6B7280) else Color.White,
-                        fontFamily = FontFamily.Default,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 13.5.sp,
-                        lineHeight = 17.sp,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis
-                    )
-
-                    // Available Qualities in Netflix / Apple TV+ Badge Style
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        val distinctResolutions = remember(epItems) {
-                            epItems.map { detectItemResolution(it) }.distinct()
-                        }
-                        distinctResolutions.forEach { res ->
-                            val is4k = res == "4K"
-                            NetflixAppleBadge(
-                                text = res,
-                                textColor = if (is4k) Color.White else Color(0xFFE4E4E7),
-                                borderColor = if (is4k) Color(0x55FFFFFF) else Color(0x35FFFFFF),
-                                bgColor = if (is4k) Color(0x28FFFFFF) else Color(0x18FFFFFF)
-                            )
-                        }
-
-                        val hasDv = epItems.any { (it.qualityBadge + " " + it.fileName).contains("dv", ignoreCase = true) }
-                        if (hasDv) {
-                            NetflixAppleBadge(
-                                text = "DV",
-                                textColor = Color(0xFFFBBF24),
-                                borderColor = Color(0x66FBBF24),
-                                bgColor = Color(0x20FBBF24)
-                            )
-                        }
-                    }
-                }
-            }
-
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (anyHidden) {
+                // If hidden, show red overlay
+                if (allHidden) {
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(Color(0xFF3F1318))
-                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.65f)),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = if (allHidden) "HIDDEN" else "PARTIAL",
-                            color = Color(0xFFF87171),
-                            fontSize = 8.sp,
-                            fontFamily = NdotFont
+                        Icon(
+                            imageVector = Icons.Default.VisibilityOff,
+                            contentDescription = "Hidden",
+                            tint = Color(0xFFEF4444),
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
-
-                Icon(
-                    imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                    contentDescription = if (isExpanded) "Collapse" else "Expand",
-                    tint = Color(0xFF94A3B8),
-                    modifier = Modifier.size(18.dp)
-                )
             }
+
+            // Episode Info & Badges
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                Text(
+                    text = epTitle,
+                    color = if (allHidden) Color(0xFF6B7280) else Color.White,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.5.sp,
+                    lineHeight = 17.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                // Available Qualities in Apple TV badge style
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val distinctResolutions = remember(epItems) {
+                        epItems.map { detectItemResolution(it) }.distinct()
+                    }
+                    distinctResolutions.forEach { res ->
+                        NetflixAppleBadge(
+                            text = res,
+                            textColor = if (res == "4K") Color.White else Color(0xFFD1D5DB),
+                            borderColor = if (res == "4K") Color(0x66FFFFFF) else Color(0x33FFFFFF),
+                            bgColor = if (res == "4K") Color(0x28FFFFFF) else Color(0x14FFFFFF)
+                        )
+                    }
+
+                    val hasDv = epItems.any { (it.qualityBadge + " " + it.fileName).contains("dv", ignoreCase = true) }
+                    if (hasDv) {
+                        NetflixAppleBadge(
+                            text = "DV",
+                            textColor = Color(0xFFFBBF24),
+                            borderColor = Color(0x66FBBF24),
+                            bgColor = Color(0x20FBBF24)
+                        )
+                    }
+
+                    Text(
+                        text = "• $formattedEpSize",
+                        color = Color(0xFF8E909A),
+                        fontSize = 11.sp
+                    )
+                }
+            }
+
+            // Expand Chevron
+            Icon(
+                imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                contentDescription = if (isExpanded) "Collapse" else "Expand",
+                tint = Color(0xFF94A3B8),
+                modifier = Modifier.size(18.dp)
+            )
         }
 
-        // EXPANDED ACCORDION DETAILS (Full Telegram filename on top, specs/size/hide underneath)
+        // EXPANDED ACCORDION DETAILS (Full Telegram filename, specs, size, Copy, Hide/Unhide)
         AnimatedVisibility(
             visible = isExpanded,
             enter = expandVertically() + fadeIn(),
@@ -1621,7 +1897,7 @@ private fun EpisodeGroupAccordionRow(
                     .padding(start = 12.dp, end = 12.dp, bottom = 12.dp, top = 2.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                HorizontalDivider(color = Color(0xFF252733), thickness = 1.dp)
+                HorizontalDivider(color = Color(0xFF222432), thickness = 0.8.dp)
 
                 epItems.forEach { item ->
                     val isHidden = item.isHidden
@@ -1638,7 +1914,7 @@ private fun EpisodeGroupAccordionRow(
                             .padding(10.dp)
                     ) {
                         Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                            // 1. UPPER: Full Telegram File Name (Pura title, upper)
+                            // 1. Full Telegram File Name
                             Text(
                                 text = item.fileName.ifBlank { item.title },
                                 color = if (isHidden) Color(0xFF94A3B8).copy(alpha = 0.6f) else Color(0xFFE2E8F0),
@@ -1647,7 +1923,7 @@ private fun EpisodeGroupAccordionRow(
                                 lineHeight = 15.5.sp
                             )
 
-                            // 2. NICHE: Details - Quality specs pill
+                            // 2. Details - Quality specs pill
                             val formattedBadge = formatShortBadge(item.qualityBadge.ifBlank { item.quality })
                             if (formattedBadge.isNotBlank()) {
                                 Box(
@@ -1660,7 +1936,6 @@ private fun EpisodeGroupAccordionRow(
                                     Text(
                                         text = formattedBadge,
                                         color = Color(0xFFFBBF24),
-                                        fontFamily = NdotFont,
                                         fontSize = 9.5.sp,
                                         lineHeight = 13.sp
                                     )
@@ -1676,8 +1951,7 @@ private fun EpisodeGroupAccordionRow(
                                 Text(
                                     text = item.formattedSize,
                                     color = Color(0xFF94A3B8),
-                                    fontFamily = NdotFont,
-                                    fontSize = 10.5.sp,
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.Medium
                                 )
 
@@ -1693,7 +1967,7 @@ private fun EpisodeGroupAccordionRow(
 
                                     IconButton(
                                         onClick = { onCopyStream(streamUrl) },
-                                        modifier = Modifier.size(26.dp)
+                                        modifier = Modifier.size(28.dp)
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.ContentCopy,
@@ -1729,7 +2003,6 @@ private fun EpisodeGroupAccordionRow(
                                             Text(
                                                 text = if (isHidden) "UNHIDE" else "HIDE",
                                                 color = if (isHidden) Color(0xFFFCA5A5) else Color(0xFFCBD5E1),
-                                                fontFamily = NdotFont,
                                                 fontSize = 9.sp,
                                                 fontWeight = FontWeight.Bold
                                             )
@@ -1756,11 +2029,12 @@ private fun EpisodeGroupAccordionRow(
 }
 
 /**
- * Stream item row for Movies with Hide/Unhide toggle and full filename
+ * Stream item row for Movies with Apple TV card styling, 16:9 thumbnail, Hide/Unhide toggle and full filename
  */
 @Composable
 private fun MovieStreamItemRow(
     item: MediaItem,
+    backdropUrl: String?,
     onToggleHide: (MediaItem) -> Unit,
     onCopy: () -> Unit
 ) {
@@ -1768,46 +2042,77 @@ private fun MovieStreamItemRow(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (isHidden) Color(0xFF131014) else Color(0xFF14151B))
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (isHidden) Color(0xFF131014) else Color(0xFF0F1015))
             .border(
-                1.dp,
-                if (isHidden) Color(0xFF4A1924) else Color(0xFF262832),
-                RoundedCornerShape(12.dp)
+                BorderStroke(0.8.dp, if (isHidden) Color(0xFF4A1924) else Color(0xFF1E202B)),
+                RoundedCornerShape(14.dp)
             )
             .padding(12.dp)
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            // 1. UPPER: Full Telegram File Name (Pura title, upper)
-            Text(
-                text = item.fileName.ifBlank { item.title },
-                color = if (isHidden) Color(0xFF94A3B8).copy(alpha = 0.6f) else Color.White,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 12.sp,
-                lineHeight = 16.5.sp
-            )
-
-            // 2. NICHE: Details - Quality specs pill
-            val formattedBadge = formatShortBadge(item.qualityBadge.ifBlank { item.quality })
-            if (formattedBadge.isNotBlank()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                // 16:9 Movie File Thumbnail
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Color(0xFF2E1C0A))
-                        .border(1.dp, Color(0xFFF59E0B), RoundedCornerShape(6.dp))
-                        .padding(horizontal = 7.dp, vertical = 3.dp)
+                        .width(108.dp)
+                        .aspectRatio(16f / 9f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFF191B24))
+                        .border(BorderStroke(0.5.dp, Color(0x28FFFFFF)), RoundedCornerShape(8.dp))
+                ) {
+                    RemoteImage(
+                        url = backdropUrl,
+                        contentDescription = item.fileName,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                        isSeries = false
+                    )
+
+                    val res = detectItemResolution(item)
+                    NetflixAppleBadge(
+                        text = res,
+                        textColor = Color.White,
+                        borderColor = Color(0x66FFFFFF),
+                        bgColor = Color(0x33000000),
+                        modifier = Modifier
+                            .padding(4.dp)
+                            .align(Alignment.TopStart)
+                    )
+                }
+
+                // File Details & Name
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Text(
-                        text = formattedBadge,
-                        color = Color(0xFFFBBF24),
-                        fontFamily = NdotFont,
-                        fontSize = 10.sp,
-                        lineHeight = 13.5.sp
+                        text = item.fileName.ifBlank { item.title },
+                        color = if (isHidden) Color(0xFF94A3B8).copy(alpha = 0.6f) else Color.White,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.5.sp,
+                        lineHeight = 15.sp,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis
                     )
+
+                    val formattedBadge = formatShortBadge(item.qualityBadge.ifBlank { item.quality })
+                    if (formattedBadge.isNotBlank()) {
+                        Text(
+                            text = formattedBadge,
+                            color = Color(0xFFFBBF24),
+                            fontSize = 10.sp,
+                            maxLines = 1
+                        )
+                    }
                 }
             }
 
-            // 3. Size on Left, Copy & Hide/Unhide Buttons on Right
+            // Size on Left, Copy & Hide/Unhide Buttons on Right
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1816,7 +2121,6 @@ private fun MovieStreamItemRow(
                 Text(
                     text = item.formattedSize,
                     color = Color(0xFF94A3B8),
-                    fontFamily = NdotFont,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Medium
                 )
@@ -1840,15 +2144,15 @@ private fun MovieStreamItemRow(
                     // Hide / Unhide Button
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(7.dp))
                             .background(if (isHidden) Color(0xFF3F1318) else Color(0xFF232532))
                             .border(
                                 1.dp,
                                 if (isHidden) Color(0xFFDC2626) else Color(0xFF3E4358),
-                                RoundedCornerShape(8.dp)
+                                RoundedCornerShape(7.dp)
                             )
                             .clickable { onToggleHide(item) }
-                            .padding(horizontal = 9.dp, vertical = 4.5.dp)
+                            .padding(horizontal = 9.dp, vertical = 4.dp)
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -1858,13 +2162,12 @@ private fun MovieStreamItemRow(
                                 imageVector = if (isHidden) Icons.Default.VisibilityOff else Icons.Default.Visibility,
                                 contentDescription = if (isHidden) "Unhide" else "Hide",
                                 tint = if (isHidden) Color(0xFFFCA5A5) else Color(0xFFCBD5E1),
-                                modifier = Modifier.size(13.dp)
+                                modifier = Modifier.size(12.dp)
                             )
                             Text(
                                 text = if (isHidden) "UNHIDE" else "HIDE",
                                 color = if (isHidden) Color(0xFFFCA5A5) else Color(0xFFCBD5E1),
-                                fontFamily = NdotFont,
-                                fontSize = 9.5.sp,
+                                fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }

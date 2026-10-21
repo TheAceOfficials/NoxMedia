@@ -52,6 +52,11 @@ object WhatsNewRepository {
         items = listOf(
             WhatsNewItem(
                 category = ChangeCategory.NEW,
+                title = "Apple TV+ Style Content Management Redesign",
+                description = "Scratched-and-rebuilt Content Details screen with immersive hero backdrop, transparent ClearLogo artwork, 16:9 episode thumbnails, horizontal season selector, and expandable server file accordions."
+            ),
+            WhatsNewItem(
+                category = ChangeCategory.NEW,
                 title = "Telegram Cloud Backup & Scheduled Auto-Sync",
                 description = "Automatically backs up connected channels, playback settings, and automation rules directly to your Telegram Saved Messages (#NoxMediaBackup) with scheduled intervals (1h – 24h)."
             ),
