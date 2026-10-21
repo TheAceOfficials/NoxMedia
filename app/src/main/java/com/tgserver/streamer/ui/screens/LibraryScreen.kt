@@ -1737,11 +1737,19 @@ private fun EpisodeGroupAccordionRow(
     val anyHidden = epItems.any { it.isHidden }
 
     // Resolve 16:9 Episode Thumbnail URL
-    val epThumbUrl = remember(epNum, primary.season, groupImdbId) {
-        primary.episodeThumbnailUrl?.takeIf { it.isNotBlank() }
-            ?: groupImdbId?.takeIf { it.startsWith("tt") }?.let { id ->
-                "https://episodes.metahub.space/$id/${primary.season ?: 1}/$epNum/w780.jpg"
-            } ?: groupBackdropUrl ?: groupPosterUrl
+    val epThumbUrl: String? = remember(epNum, primary.season, groupImdbId, groupBackdropUrl, groupPosterUrl) {
+        val directThumb = primary.episodeThumbnailUrl
+        if (!directThumb.isNullOrBlank()) {
+            directThumb
+        } else if (!groupImdbId.isNullOrBlank() && groupImdbId.startsWith("tt")) {
+            "https://episodes.metahub.space/$groupImdbId/${primary.season ?: 1}/$epNum/w780.jpg"
+        } else if (!primary.backdropUrl.isNullOrBlank()) {
+            primary.backdropUrl
+        } else if (!groupBackdropUrl.isNullOrBlank()) {
+            groupBackdropUrl
+        } else {
+            groupPosterUrl
+        }
     }
 
     val totalEpBytes = remember(epItems) { epItems.sumOf { it.sizeBytes } }

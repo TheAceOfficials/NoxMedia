@@ -58,6 +58,7 @@ data class MediaItem(
     var imdbId: String? = null,
     var tmdbId: Int? = null,
     var kitsuId: Int? = null,
+    var episodeThumbnailUrl: String? = null,
     val isSplit: Boolean = false,
     val parts: List<SplitPart> = emptyList(),
     var isHidden: Boolean = false,
