@@ -47,7 +47,7 @@ object WhatsNewRepository {
 
     val currentRelease: WhatsNewRelease = WhatsNewRelease(
         version = "1.1-beta",
-        releaseTitle = "Metadata Fix & Tactile Physics",
+        releaseTitle = "True Cloud Sync & Metadata Fix",
         releaseDate = "October 2026",
         items = listOf(
             WhatsNewItem(
@@ -62,12 +62,17 @@ object WhatsNewRepository {
             ),
             WhatsNewItem(
                 category = ChangeCategory.NEW,
+                title = "Direct IMDb & TMDB ID Search",
+                description = "Paste any IMDb ID (e.g. tt14173636), TMDB ID, or web link directly into Fix Metadata Match to instantly resolve hard-to-find titles."
+            ),
+            WhatsNewItem(
+                category = ChangeCategory.NEW,
                 title = "Movie ↔ Series Category Switching",
                 description = "Easily convert misplaced media between Movie and Series. Automatically sets up season and episode numbering and fetches episode-specific metadata."
             ),
             WhatsNewItem(
                 category = ChangeCategory.NEW,
-                title = "Beta Release Update Channel",
+                title = "Early Beta Access Update Channel",
                 description = "New setting toggle allows opting into bleeding-edge GitHub pre-release beta builds with automatic in-app updates."
             ),
             WhatsNewItem(
