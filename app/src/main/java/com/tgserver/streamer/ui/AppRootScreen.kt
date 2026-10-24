@@ -2,6 +2,7 @@ package com.tgserver.streamer.ui
 
 import android.graphics.BitmapFactory
 import androidx.compose.animation.*
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
