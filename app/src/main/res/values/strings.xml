@@ -3,4 +3,8 @@
     <string name="tile_server_toggle">NoxMedia</string>
     <string name="tile_server_running">Running</string>
     <string name="tile_server_stopped">Stopped</string>
+    <string name="tile_standby_toggle">Alexa Standby</string>
+    <string name="tile_standby_active">Listening</string>
+    <string name="tile_standby_server_streaming">Streaming Active</string>
+    <string name="tile_standby_off">Off</string>
 </resources>

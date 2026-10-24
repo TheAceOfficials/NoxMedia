@@ -1027,6 +1027,9 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             }
         } catch (_: Exception) {}
 
+        com.tgserver.streamer.service.StandbyQuickSettingsTileService.updateTileState(context)
+        com.tgserver.streamer.service.ServerQuickSettingsTileService.updateTileState(context)
+
         val msg = if (enabled) {
             "✓ Alexa Voice Control active for \"$cleanName\". Say 'Alexa, discover devices'."
         } else {

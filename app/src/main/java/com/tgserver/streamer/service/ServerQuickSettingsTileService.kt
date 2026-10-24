@@ -64,6 +64,7 @@ class ServerQuickSettingsTileService : TileService() {
 
         // Optimistically update the tile immediately for reactive touch response
         updateTileVisual(isRunning = start)
+        StandbyQuickSettingsTileService.updateTileState(this)
     }
 
     private fun refreshTile() {
@@ -85,7 +86,11 @@ class ServerQuickSettingsTileService : TileService() {
         } else {
             tile.state = Tile.STATE_INACTIVE
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                tile.subtitle = getString(R.string.tile_server_stopped)
+                tile.subtitle = if (StreamerForegroundService.isStandbyMode) {
+                    "Standby (Alexa)"
+                } else {
+                    getString(R.string.tile_server_stopped)
+                }
             }
         }
 

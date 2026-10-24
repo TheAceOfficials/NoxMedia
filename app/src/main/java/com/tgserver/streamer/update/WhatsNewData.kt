@@ -81,6 +81,11 @@ object WhatsNewRepository {
                 description = "Choose between Seasonal TVDB/TMDB (recommended for Nuvio & Season 2+ stream matching) and Absolute Kitsu numbering with real-time pipeline visualization and workflow explainer."
             ),
             WhatsNewItem(
+                category = ChangeCategory.NEW,
+                title = "Alexa Standby Quick Settings Tile",
+                description = "Toggle Alexa Standby mode directly from your phone's notification shade / control center. Shows live listening status, connected device name, and seamless transition between streaming and standby."
+            ),
+            WhatsNewItem(
                 category = ChangeCategory.IMPROVEMENT,
                 title = "3D Depth Parallax Hero Banner",
                 description = "Apple TV+ inspired multi-layer scroll motion: hero backdrop scrolls with 0.45x depth velocity and subtle scale transition, layered behind foreground title elements with an adaptive frosted glass top bar."

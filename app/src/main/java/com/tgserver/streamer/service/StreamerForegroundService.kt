@@ -33,6 +33,8 @@ class StreamerForegroundService : Service() {
         const val ACTION_STOP = "ACTION_STOP"
         const val ACTION_RESTART = "ACTION_RESTART"
         const val ACTION_UPDATE_ALEXA = "ACTION_UPDATE_ALEXA"
+        const val ACTION_STANDBY = "ACTION_STANDBY"
+        const val ACTION_EXIT_STANDBY = "ACTION_EXIT_STANDBY"
 
         var isServiceRunning = false
             private set
@@ -58,8 +60,40 @@ class StreamerForegroundService : Service() {
     private var monitorJob: Job? = null
     private var alexaBridge: AlexaVoiceBridge? = null
 
+    private fun loadConfigFromPrefs() {
+        val prefs = applicationContext.getSharedPreferences("tg_server_prefs", Context.MODE_PRIVATE)
+        activeConfig = ServerConfig(
+            port = prefs.getInt("server_port", 8080),
+            bufferChunkSizeKb = prefs.getInt("buffer_chunk_kb", 512),
+            diskCacheMb = prefs.getInt("disk_cache_mb", 500),
+            bufferPipelineMb = prefs.getInt("buffer_pipeline_mb", 64),
+            customPosterUrl = prefs.getString("custom_poster_url", "") ?: "",
+            customPosterApiKey = prefs.getString("custom_poster_api_key", "") ?: "",
+            tmdbApiKey = prefs.getString("tmdb_api_key", "") ?: "",
+            tvdbApiKey = prefs.getString("tvdb_api_key", "") ?: "",
+            preferredQuality = prefs.getString("preferred_quality", "Original") ?: "Original",
+            hideCamTs = prefs.getBoolean("hide_cam_ts", true),
+            remotePublicUrl = prefs.getString("remote_public_url", "") ?: "",
+            startOnBoot = prefs.getBoolean("start_on_boot", false),
+            autoScanNewContent = prefs.getBoolean("auto_scan_new_content", true),
+            replaceSameQuality = prefs.getBoolean("replace_same_quality", false),
+            skipExactDuplicates = prefs.getBoolean("skip_exact_duplicates", true),
+            autoBackupEnabled = prefs.getBoolean("auto_backup_enabled", false),
+            autoBackupIntervalHours = prefs.getInt("auto_backup_interval_hours", 24),
+            autoSleepEnabled = prefs.getBoolean("auto_sleep_enabled", false),
+            autoSleepTimeoutMinutes = prefs.getInt("auto_sleep_timeout_minutes", 30),
+            alexaVoiceControlEnabled = prefs.getBoolean("alexa_voice_control_enabled", false),
+            alexaDeviceName = prefs.getString("alexa_device_name", "NoxMedia") ?: "NoxMedia",
+            receiveBetaUpdates = prefs.getBoolean("receive_beta_updates", false),
+            animeMetadataPreference = prefs.getString("anime_metadata_preference", "seasonal") ?: "seasonal",
+            backupDestination = prefs.getString("backup_destination", "") ?: "",
+            cloudSyncLibrary = prefs.getBoolean("cloud_sync_library", true)
+        )
+    }
+
     override fun onCreate() {
         super.onCreate()
+        loadConfigFromPrefs()
         // Only initialize the TG client — do NOT auto-start the HTTP server.
         // The server is started explicitly by the user via the toggle in HomeScreen.
         if (activeTgClient == null) {
@@ -81,6 +115,28 @@ class StreamerForegroundService : Service() {
                     stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf()
                     return START_NOT_STICKY
+                }
+            }
+            ACTION_STANDBY -> {
+                loadConfigFromPrefs()
+                activeConfig.alexaVoiceControlEnabled = true
+                enterStandbyMode()
+                return START_STICKY
+            }
+            ACTION_EXIT_STANDBY -> {
+                activeConfig.alexaVoiceControlEnabled = false
+                if (isStandbyMode) {
+                    stopAlexaBridge()
+                    isStandbyMode = false
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                    ServerQuickSettingsTileService.updateTileState(applicationContext)
+                    StandbyQuickSettingsTileService.updateTileState(applicationContext)
+                    return START_NOT_STICKY
+                } else if (isServiceRunning) {
+                    stopAlexaBridge()
+                    ServerQuickSettingsTileService.updateTileState(applicationContext)
+                    StandbyQuickSettingsTileService.updateTileState(applicationContext)
                 }
             }
             ACTION_UPDATE_ALEXA -> {
@@ -169,6 +225,8 @@ class StreamerForegroundService : Service() {
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
+        ServerQuickSettingsTileService.updateTileState(applicationContext)
+        StandbyQuickSettingsTileService.updateTileState(applicationContext)
     }
 
     private fun startServer() {
@@ -218,6 +276,7 @@ class StreamerForegroundService : Service() {
             com.tgserver.streamer.server.StreamTrafficStats.resetSession()
             com.tgserver.streamer.server.StreamTrafficStats.notifyActivity()
             ServerQuickSettingsTileService.updateTileState(applicationContext)
+            StandbyQuickSettingsTileService.updateTileState(applicationContext)
 
             val ip = server?.getLocalIpAddress() ?: "127.0.0.1"
             com.tgserver.streamer.server.StreamLog.i("StreamerService", "Server started at http://$ip:${activeConfig.port}/manifest.json")
@@ -240,6 +299,7 @@ class StreamerForegroundService : Service() {
             serverStartTime = 0L
             com.tgserver.streamer.server.StreamTrafficStats.resetSession()
             ServerQuickSettingsTileService.updateTileState(applicationContext)
+            StandbyQuickSettingsTileService.updateTileState(applicationContext)
 
             if (wakeLock?.isHeld == true) wakeLock?.release()
             if (wifiLock?.isHeld == true) wifiLock?.release()
@@ -368,6 +428,10 @@ class StreamerForegroundService : Service() {
     override fun onDestroy() {
         stopAlexaBridge()
         stopServer()
+        isStandbyMode = false
+        isServiceRunning = false
+        ServerQuickSettingsTileService.updateTileState(applicationContext)
+        StandbyQuickSettingsTileService.updateTileState(applicationContext)
         super.onDestroy()
     }
 
