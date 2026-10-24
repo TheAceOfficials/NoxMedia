@@ -2241,7 +2241,7 @@ private fun RescanMetadataDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
-                    text = "Search TMDB / Cinemeta or enter IMDb ID (e.g. tt14173636) to re-sync correct title, poster, and stream mappings.",
+                    text = "Search by title, IMDb ID (e.g. tt14173636), or TMDB ID (e.g. 109445) to match metadata.",
                     color = Color(0xFF8E909A),
                     fontSize = 11.sp,
                     lineHeight = 15.sp
@@ -2307,7 +2307,7 @@ private fun RescanMetadataDialog(
                     )
 
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("movie" to "🎬 Movie", "series" to "📺 Series").forEach { (typeKey, label) ->
+                        listOf("movie" to "Movie", "series" to "Series").forEach { (typeKey, label) ->
                             val isSel = searchType == typeKey
                             Box(
                                 modifier = Modifier

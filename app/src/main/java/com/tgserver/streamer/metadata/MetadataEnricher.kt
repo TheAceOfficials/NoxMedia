@@ -851,42 +851,187 @@ class MetadataEnricher {
         val seenTitleYear = mutableSetOf<String>()
         val cType = if (type == "movie") "movie" else "series"
 
-        // 1. Direct IMDb ID lookup if input looks like tt1234567
-        if (cleanQuery.matches(Regex("(?i)^tt\\d+$"))) {
-            try {
-                val url = "https://v3-cinemeta.strem.io/meta/$cType/$cleanQuery.json"
-                val req = Request.Builder().url(url).header("User-Agent", "NoxMedia/1.0").build()
-                httpClient.newCall(req).execute().use { resp ->
-                    if (resp.isSuccessful) {
-                        val body = resp.body?.string()
-                        if (!body.isNullOrBlank()) {
-                            val root = JsonParser.parseString(body).asJsonObject
-                            val metaObj = root.getAsJsonObject("meta")
-                            if (metaObj != null) {
-                                val name = metaObj.get("name")?.asString
-                                val rawYear = metaObj.get("year")?.asString ?: metaObj.get("releaseInfo")?.asString
-                                val year = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(rawYear ?: "")?.groupValues?.get(1) ?: rawYear
-                                val poster = metaObj.get("poster")?.asString
-                                val bg = metaObj.get("background")?.asString
-                                val desc = metaObj.get("description")?.asString
-                                val imdbId = metaObj.get("imdb_id")?.asString ?: cleanQuery
-                                val candidate = EnrichedMetadata(
-                                    title = name,
-                                    type = type,
-                                    year = year,
-                                    overview = desc,
-                                    posterUrl = poster,
-                                    backdropUrl = bg,
-                                    imdbId = imdbId
-                                )
-                                results.add(candidate)
-                                seenImdb.add(imdbId.lowercase())
-                                if (name != null) seenTitleYear.add("${name.lowercase().trim()}:${year ?: ""}")
+        // 1. Direct ID Detection (IMDb ID or TMDB ID / URL)
+        val imdbMatch = Regex("(?i)(?:^|/|title/)(tt\\d{5,11})(?:/|\\?|$)").find(cleanQuery)?.groupValues?.get(1)
+            ?: if (cleanQuery.matches(Regex("(?i)^tt\\d+$"))) cleanQuery else null
+
+        val tmdbMatch = Regex("(?i)themoviedb\\.org/(?:movie|tv)/(\\d+)").find(cleanQuery)?.groupValues?.get(1)
+            ?: Regex("(?i)^tmdb[:/\\-](\\d+)$").find(cleanQuery)?.groupValues?.get(1)
+            ?: if (imdbMatch == null && cleanQuery.matches(Regex("^\\d{2,9}$"))) cleanQuery else null
+
+        // 1A. Direct IMDb ID Lookup (TMDB Find API + Cinemeta)
+        if (imdbMatch != null) {
+            val targetImdb = imdbMatch.lowercase()
+            // Priority 1: TMDB /find endpoint using IMDb ID
+            if (tmdbKey.isNotBlank()) {
+                try {
+                    val url = "https://api.themoviedb.org/3/find/$targetImdb?api_key=$tmdbKey&external_source=imdb_id"
+                    val req = Request.Builder().url(url).build()
+                    httpClient.newCall(req).execute().use { resp ->
+                        if (resp.isSuccessful) {
+                            val body = resp.body?.string()
+                            if (!body.isNullOrBlank()) {
+                                val root = JsonParser.parseString(body).asJsonObject
+                                val priList = if (type == "movie") root.getAsJsonArray("movie_results") else root.getAsJsonArray("tv_results")
+                                val secList = if (type == "movie") root.getAsJsonArray("tv_results") else root.getAsJsonArray("movie_results")
+                                val targetArray = if (priList != null && priList.size() > 0) priList else secList
+                                if (targetArray != null && targetArray.size() > 0) {
+                                    val obj = targetArray[0].asJsonObject
+                                    val tId = obj.get("id").asInt
+                                    val name = if (obj.has("title")) obj.get("title")?.asString else obj.get("name")?.asString
+                                    val relDate = if (obj.has("release_date")) obj.get("release_date")?.asString else obj.get("first_air_date")?.asString
+                                    val year = relDate?.split("-")?.firstOrNull()
+                                    val overview = obj.get("overview")?.asString
+                                    val posterPath = obj.get("poster_path")?.asString
+                                    val bgPath = obj.get("backdrop_path")?.asString
+
+                                    val candidate = EnrichedMetadata(
+                                        title = name,
+                                        type = type,
+                                        year = year,
+                                        overview = overview,
+                                        posterUrl = posterPath?.let { "https://image.tmdb.org/t/p/w500$it" },
+                                        backdropUrl = bgPath?.let { "https://image.tmdb.org/t/p/original$it" },
+                                        imdbId = targetImdb,
+                                        tmdbId = tId
+                                    )
+                                    results.add(candidate)
+                                    seenImdb.add(targetImdb)
+                                    seenTmdb.add(tId)
+                                    if (name != null) seenTitleYear.add("${name.lowercase().trim()}:${year ?: ""}")
+                                }
                             }
                         }
                     }
+                } catch (_: Exception) {}
+            }
+
+            // Priority 2: Cinemeta direct meta lookup
+            if (!seenImdb.contains(targetImdb)) {
+                try {
+                    val url = "https://v3-cinemeta.strem.io/meta/$cType/$targetImdb.json"
+                    val req = Request.Builder().url(url).header("User-Agent", "NoxMedia/1.0").build()
+                    httpClient.newCall(req).execute().use { resp ->
+                        if (resp.isSuccessful) {
+                            val body = resp.body?.string()
+                            if (!body.isNullOrBlank()) {
+                                val root = JsonParser.parseString(body).asJsonObject
+                                val metaObj = root.getAsJsonObject("meta")
+                                if (metaObj != null) {
+                                    val name = metaObj.get("name")?.asString
+                                    val rawYear = metaObj.get("year")?.asString ?: metaObj.get("releaseInfo")?.asString
+                                    val year = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(rawYear ?: "")?.groupValues?.get(1) ?: rawYear
+                                    val poster = metaObj.get("poster")?.asString
+                                    val bg = metaObj.get("background")?.asString
+                                    val desc = metaObj.get("description")?.asString
+                                    val candidate = EnrichedMetadata(
+                                        title = name,
+                                        type = type,
+                                        year = year,
+                                        overview = desc,
+                                        posterUrl = poster,
+                                        backdropUrl = bg,
+                                        imdbId = targetImdb
+                                    )
+                                    results.add(candidate)
+                                    seenImdb.add(targetImdb)
+                                    if (name != null) seenTitleYear.add("${name.lowercase().trim()}:${year ?: ""}")
+                                }
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+
+        // 1B. Direct TMDB ID Lookup (TMDB API /movie/{id} or /tv/{id} + Cinemeta)
+        if (tmdbMatch != null) {
+            val tId = tmdbMatch.toIntOrNull()
+            if (tId != null && tId > 0 && !seenTmdb.contains(tId)) {
+                if (tmdbKey.isNotBlank()) {
+                    try {
+                        val endpoints = if (type == "movie") listOf("movie", "tv") else listOf("tv", "movie")
+                        for (ep in endpoints) {
+                            if (seenTmdb.contains(tId)) break
+                            val url = "https://api.themoviedb.org/3/$ep/$tId?api_key=$tmdbKey&append_to_response=external_ids"
+                            val req = Request.Builder().url(url).build()
+                            httpClient.newCall(req).execute().use { resp ->
+                                if (resp.isSuccessful) {
+                                    val body = resp.body?.string()
+                                    if (!body.isNullOrBlank()) {
+                                        val obj = JsonParser.parseString(body).asJsonObject
+                                        val name = if (obj.has("title")) obj.get("title")?.asString else obj.get("name")?.asString
+                                        if (!name.isNullOrBlank()) {
+                                            val relDate = if (obj.has("release_date")) obj.get("release_date")?.asString else obj.get("first_air_date")?.asString
+                                            val year = relDate?.split("-")?.firstOrNull()
+                                            val overview = obj.get("overview")?.asString
+                                            val posterPath = obj.get("poster_path")?.asString
+                                            val bgPath = obj.get("backdrop_path")?.asString
+                                            val extIds = obj.getAsJsonObject("external_ids")
+                                            val resolvedImdb = extIds?.get("imdb_id")?.asString
+
+                                            val candidate = EnrichedMetadata(
+                                                title = name,
+                                                type = type,
+                                                year = year,
+                                                overview = overview,
+                                                posterUrl = posterPath?.let { "https://image.tmdb.org/t/p/w500$it" },
+                                                backdropUrl = bgPath?.let { "https://image.tmdb.org/t/p/original$it" },
+                                                imdbId = resolvedImdb,
+                                                tmdbId = tId
+                                            )
+                                            results.add(candidate)
+                                            seenTmdb.add(tId)
+                                            if (resolvedImdb != null) seenImdb.add(resolvedImdb.lowercase())
+                                            seenTitleYear.add("${name.lowercase().trim()}:${year ?: ""}")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {}
                 }
-            } catch (_: Exception) {}
+
+                // Fallback: Cinemeta supports tmdb:$tId
+                if (!seenTmdb.contains(tId)) {
+                    try {
+                        val url = "https://v3-cinemeta.strem.io/meta/$cType/tmdb:$tId.json"
+                        val req = Request.Builder().url(url).header("User-Agent", "NoxMedia/1.0").build()
+                        httpClient.newCall(req).execute().use { resp ->
+                            if (resp.isSuccessful) {
+                                val body = resp.body?.string()
+                                if (!body.isNullOrBlank()) {
+                                    val root = JsonParser.parseString(body).asJsonObject
+                                    val metaObj = root.getAsJsonObject("meta")
+                                    if (metaObj != null) {
+                                        val name = metaObj.get("name")?.asString
+                                        val rawYear = metaObj.get("year")?.asString ?: metaObj.get("releaseInfo")?.asString
+                                        val year = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(rawYear ?: "")?.groupValues?.get(1) ?: rawYear
+                                        val poster = metaObj.get("poster")?.asString
+                                        val bg = metaObj.get("background")?.asString
+                                        val desc = metaObj.get("description")?.asString
+                                        val resolvedImdb = metaObj.get("imdb_id")?.asString
+                                        val candidate = EnrichedMetadata(
+                                            title = name,
+                                            type = type,
+                                            year = year,
+                                            overview = desc,
+                                            posterUrl = poster,
+                                            backdropUrl = bg,
+                                            imdbId = resolvedImdb,
+                                            tmdbId = tId
+                                        )
+                                        results.add(candidate)
+                                        seenTmdb.add(tId)
+                                        if (resolvedImdb != null) seenImdb.add(resolvedImdb.lowercase())
+                                        if (name != null) seenTitleYear.add("${name.lowercase().trim()}:${year ?: ""}")
+                                    }
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
         }
 
         // 2. High-speed TMDB search (Priority 1 ~50ms)
@@ -998,7 +1143,9 @@ class MetadataEnricher {
             }
         } catch (_: Exception) {}
 
-        results.sortByDescending { calculateSimilarity(cleanQuery, it.title ?: "") }
+        if (imdbMatch == null && tmdbMatch == null) {
+            results.sortByDescending { calculateSimilarity(cleanQuery, it.title ?: "") }
+        }
         return results
     }
 
