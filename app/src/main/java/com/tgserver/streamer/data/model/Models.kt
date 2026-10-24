@@ -328,7 +328,8 @@ data class ServerConfig(
     var autoSleepTimeoutMinutes: Int = 30,
     var alexaVoiceControlEnabled: Boolean = false,
     var alexaDeviceName: String = "NoxMedia",
-    var receiveBetaUpdates: Boolean = false
+    var receiveBetaUpdates: Boolean = false,
+    var animeMetadataPreference: String = "seasonal"
 )
 
 data class AuthSession(

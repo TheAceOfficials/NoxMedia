@@ -37,9 +37,10 @@ class MetadataEnricher {
             item: MediaItem,
             isAnimeChannel: Boolean = false,
             tmdbKey: String = "",
-            tvdbKey: String = ""
+            tvdbKey: String = "",
+            animePreference: String = "seasonal"
         ): MediaItem {
-            defaultInstance.enrich(item, isAnimeChannel, tmdbKey, tvdbKey)
+            defaultInstance.enrich(item, isAnimeChannel, tmdbKey, tvdbKey, animePreference)
             return item
         }
 
@@ -253,12 +254,13 @@ class MetadataEnricher {
         item: MediaItem,
         isAnimeChannel: Boolean = false,
         tmdbKey: String = "",
-        tvdbKey: String = ""
+        tvdbKey: String = "",
+        animePreference: String = "seasonal"
     ) {
         val queryTitle = sanitizeTitle(item.title)
         if (queryTitle.isBlank()) return
 
-        val cacheKey = "$queryTitle:${item.type}:${item.season}:${item.episode}:${isAnimeChannel}"
+        val cacheKey = "$queryTitle:${item.type}:${item.season}:${item.episode}:${isAnimeChannel}:$animePreference"
         cache[cacheKey]?.let { cached ->
             applyMetadata(item, cached)
             return
@@ -281,50 +283,64 @@ class MetadataEnricher {
 
         var result: EnrichedMetadata? = null
 
-        // 1. Anime Pipeline: Kitsu first
+        // Anime Pipeline respecting user preference (Seasonal TVDB/TMDB vs Absolute Kitsu)
         if (isAnimeChannel) {
-            result = tryKitsu(queryTitle)
-        }
-
-        // 2. TVDB Pipeline (if API key configured and series/anime)
-        if (tvdbKey.isNotBlank() && (item.type == "series" || item.type == "anime" || isAnimeChannel)) {
-            val tvdbRes = tryTvdb(queryTitle, item.type, tvdbKey)
-            if (tvdbRes != null) {
-                result = if (result != null) {
-                    result.copy(
-                        title = tvdbRes.title ?: result.title,
-                        posterUrl = tvdbRes.posterUrl ?: result.posterUrl,
-                        overview = if (result.overview.isNullOrBlank()) tvdbRes.overview else result.overview,
-                        year = tvdbRes.year ?: result.year
-                    )
-                } else {
-                    tvdbRes
+            if (animePreference == "seasonal") {
+                // Seasonal Pipeline: TVDB -> TMDB -> Kitsu -> Cinemeta
+                // 1. TVDB (Seasonal Western numbering S01, S02)
+                if (tvdbKey.isNotBlank()) {
+                    val tvdbRes = tryTvdb(queryTitle, item.type, tvdbKey)
+                    if (tvdbRes != null) result = tvdbRes
+                }
+                // 2. TMDB (Free seasonal metadata + episode guides)
+                if (result == null && tmdbKey.isNotBlank()) {
+                    val tmdbRes = tryTmdb(queryTitle, item.type, item.season, item.episode, tmdbKey)
+                    if (tmdbRes != null) result = tmdbRes
+                }
+                // 3. Kitsu fallback
+                if (result == null) {
+                    val kitsuRes = tryKitsu(queryTitle)
+                    if (kitsuRes != null) result = kitsuRes
+                }
+            } else {
+                // Absolute Pipeline: Kitsu first
+                val kitsuRes = tryKitsu(queryTitle)
+                if (kitsuRes != null) result = kitsuRes
+                if (result == null && tvdbKey.isNotBlank()) {
+                    val tvdbRes = tryTvdb(queryTitle, item.type, tvdbKey)
+                    if (tvdbRes != null) result = tvdbRes
+                }
+                if (result == null && tmdbKey.isNotBlank()) {
+                    val tmdbRes = tryTmdb(queryTitle, item.type, item.season, item.episode, tmdbKey)
+                    if (tmdbRes != null) result = tmdbRes
+                }
+            }
+        } else {
+            // Standard Series/Movie Pipeline
+            if (tvdbKey.isNotBlank() && item.type == "series") {
+                val tvdbRes = tryTvdb(queryTitle, item.type, tvdbKey)
+                if (tvdbRes != null) result = tvdbRes
+            }
+            if (tmdbKey.isNotBlank()) {
+                val tmdbRes = tryTmdb(queryTitle, item.type, item.season, item.episode, tmdbKey)
+                if (tmdbRes != null) {
+                    result = if (result != null) {
+                        result.copy(
+                            title = tmdbRes.title ?: result.title,
+                            posterUrl = tmdbRes.posterUrl ?: result.posterUrl,
+                            backdropUrl = tmdbRes.backdropUrl ?: result.backdropUrl,
+                            overview = tmdbRes.overview ?: result.overview,
+                            episodeTitle = tmdbRes.episodeTitle ?: result.episodeTitle,
+                            tmdbId = tmdbRes.tmdbId,
+                            imdbId = tmdbRes.imdbId ?: result.imdbId,
+                            year = tmdbRes.year ?: result.year
+                        )
+                    } else tmdbRes
                 }
             }
         }
 
-        // 3. TMDB Pipeline (if API key configured)
-        if (tmdbKey.isNotBlank()) {
-            val tmdbRes = tryTmdb(queryTitle, item.type, item.season, item.episode, tmdbKey)
-            if (tmdbRes != null) {
-                result = if (result != null) {
-                    result.copy(
-                        title = tmdbRes.title ?: result.title,
-                        posterUrl = tmdbRes.posterUrl ?: result.posterUrl,
-                        backdropUrl = tmdbRes.backdropUrl ?: result.backdropUrl,
-                        overview = tmdbRes.overview ?: result.overview,
-                        episodeTitle = tmdbRes.episodeTitle ?: result.episodeTitle,
-                        tmdbId = tmdbRes.tmdbId,
-                        imdbId = tmdbRes.imdbId ?: result.imdbId,
-                        year = tmdbRes.year ?: result.year
-                    )
-                } else {
-                    tmdbRes
-                }
-            }
-        }
-
-        // 4. Cinemeta Fallback & IMDb ID Resolver (Free, no key needed)
+        // Cinemeta Fallback & IMDb ID Resolver (Free, no key needed)
         if (result == null || result.imdbId.isNullOrBlank()) {
             val cinemetaRes = tryCinemeta(queryTitle, item.type)
             if (cinemetaRes != null) {
@@ -336,9 +352,7 @@ class MetadataEnricher {
                         overview = if (result.overview.isNullOrBlank()) cinemetaRes.overview else result.overview,
                         year = result.year ?: cinemetaRes.year
                     )
-                } else {
-                    cinemetaRes
-                }
+                } else cinemetaRes
             }
         }
 

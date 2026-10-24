@@ -66,6 +66,11 @@ object WhatsNewRepository {
                 description = "New setting toggle allows opting into bleeding-edge GitHub pre-release beta builds with automatic in-app updates."
             ),
             WhatsNewItem(
+                category = ChangeCategory.NEW,
+                title = "Anime Indexing Preference (Seasonal vs Absolute)",
+                description = "Choose between Seasonal TVDB/TMDB (recommended for Nuvio & Season 2+ stream matching) and Absolute Kitsu numbering with real-time pipeline visualization and workflow explainer."
+            ),
+            WhatsNewItem(
                 category = ChangeCategory.IMPROVEMENT,
                 title = "Tactile Press Physics & Emil Kowalski Micro-Animations",
                 description = "Snappy 180ms spring switches, physical 0.96x press depression on posters and cards, organic dialog popups, and fluid 160ms bottom tab crossfades."

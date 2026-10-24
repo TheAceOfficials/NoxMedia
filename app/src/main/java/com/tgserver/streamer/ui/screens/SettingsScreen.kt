@@ -113,6 +113,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
     var showArtworkInfo by remember { mutableStateOf(false) }
     var showServerEngineInfo by remember { mutableStateOf(false) }
     var showRemoteAccessInfo by remember { mutableStateOf(false) }
+    var showAnimeWorkflowInfo by remember { mutableStateOf(false) }
 
     // Dialogs state
     var showLogoutDialog by remember { mutableStateOf(false) }
@@ -634,6 +635,166 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
 
                 Spacer(modifier = Modifier.height(12.dp))
 
+                // Anime Indexing Preference Card
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF161820))
+                        .border(1.dp, Color(0xFF242732), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { showAnimeWorkflowInfo = !showAnimeWorkflowInfo }
+                                .padding(vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "ANIME NUMBERING & SOURCE",
+                                color = Color(0xFFA0A3B0),
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                letterSpacing = 0.5.sp
+                            )
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = "Anime Workflow Details",
+                                tint = if (showAnimeWorkflowInfo) Color.White else TextTertiary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+
+                        // Pill indicating active mode
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = if (config.animeMetadataPreference == "kitsu") Color(0x22F59E0B) else Color(0x22A855F7),
+                            border = BorderStroke(0.5.dp, if (config.animeMetadataPreference == "kitsu") Color(0x40F59E0B) else Color(0x40A855F7))
+                        ) {
+                            Text(
+                                text = if (config.animeMetadataPreference == "kitsu") "ABSOLUTE" else "SEASONAL",
+                                color = if (config.animeMetadataPreference == "kitsu") Color(0xFFFBBF24) else Color(0xFFC084FC),
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.5.sp,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    // Expandable Info Workflow Explainer
+                    AnimatedVisibility(
+                        visible = showAnimeWorkflowInfo,
+                        enter = fadeIn(tween(150)) + expandVertically(),
+                        exit = fadeOut(tween(120)) + shrinkVertically()
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF101217))
+                                .border(1.dp, Color(0xFF1F222B), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 10.dp, vertical = 9.dp)
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = "Anime Indexing Workflow:",
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "• Seasonal (TVDB / TMDB) — Recommended:\nOrganizes multi-season anime into S1, S2, etc. (Western TV standard). Matches Nuvio and Stremio Cinemeta catalogs so Season 2 onwards streams play without conflict.\n\n• Absolute Numbering (Kitsu):\nIndexes episodes continuously (Episode 1 to 1000+). Select this ONLY if you exclusively browse anime using the Stremio Kitsu Addon.",
+                                    color = Color(0xFFA0A3B0),
+                                    fontSize = 10.5.sp,
+                                    lineHeight = 15.sp
+                                )
+                            }
+                        }
+                    }
+
+                    // Selector Chips
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        val isSeasonal = config.animeMetadataPreference != "kitsu"
+                        // Seasonal Chip
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSeasonal) Color(0xFFA855F7) else Color(0xFF111218))
+                                .border(
+                                    1.dp,
+                                    if (isSeasonal) Color(0xFFC084FC) else Color(0xFF262934),
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .clickable {
+                                    if (!isSeasonal) viewModel.updateAnimeMetadataPreference("seasonal")
+                                }
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = "Seasonal (TVDB / TMDB)",
+                                    color = if (isSeasonal) Color.White else Color(0xFF94A3B8),
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = "Best for Nuvio & S2+ play",
+                                    color = if (isSeasonal) Color(0xFFE9D5FF) else Color(0xFF64748B),
+                                    fontSize = 9.5.sp
+                                )
+                            }
+                        }
+
+                        // Absolute Chip
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (!isSeasonal) Color(0xFFA855F7) else Color(0xFF111218))
+                                .border(
+                                    1.dp,
+                                    if (!isSeasonal) Color(0xFFC084FC) else Color(0xFF262934),
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .clickable {
+                                    if (isSeasonal) viewModel.updateAnimeMetadataPreference("kitsu")
+                                }
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = "Absolute (Kitsu)",
+                                    color = if (!isSeasonal) Color.White else Color(0xFF94A3B8),
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = "Ep 1..1000 continuous",
+                                    color = if (!isSeasonal) Color(0xFFE9D5FF) else Color(0xFF64748B),
+                                    fontSize = 9.5.sp
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
                 // Cascade Fallback Engine Container
                 Column(
                     modifier = Modifier
@@ -653,7 +814,14 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     )
                     FallbackPipelineRow(category = "Movies", steps = listOf("TMDB", "Cinemeta"))
                     FallbackPipelineRow(category = "Series", steps = listOf("TVDB", "TMDB", "Cinemeta"))
-                    FallbackPipelineRow(category = "Anime", steps = listOf("Kitsu", "TVDB", "TMDB", "Cinemeta"))
+                    FallbackPipelineRow(
+                        category = "Anime",
+                        steps = if (config.animeMetadataPreference == "kitsu") {
+                            listOf("Kitsu", "TVDB", "TMDB", "Cinemeta")
+                        } else {
+                            listOf("TVDB", "TMDB", "Kitsu", "Cinemeta")
+                        }
+                    )
                     Text(
                         text = "• Missing keys fallback automatically to next provider.",
                         color = TextTertiary,

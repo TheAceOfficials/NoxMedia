@@ -996,6 +996,7 @@ class TelegramClientManager(private val context: Context) {
         managerScope.launch {
             val tmdbKey = prefs.getString("tmdb_api_key", "") ?: ""
             val tvdbKey = prefs.getString("tvdb_api_key", "") ?: ""
+            val animePref = prefs.getString("anime_metadata_preference", "seasonal") ?: "seasonal"
             var changed = false
             itemsToEnrich.chunked(8).forEach { chunk ->
                 chunk.map { item ->
@@ -1006,7 +1007,8 @@ class TelegramClientManager(private val context: Context) {
                             item = item,
                             isAnimeChannel = isAnime,
                             tmdbKey = tmdbKey,
-                            tvdbKey = tvdbKey
+                            tvdbKey = tvdbKey,
+                            animePreference = animePref
                         )
                         if (!item.posterUrl.isNullOrBlank()) {
                             changed = true
@@ -1815,12 +1817,14 @@ class TelegramClientManager(private val context: Context) {
         val existing = mediaIndex[itemId] ?: return@withContext null
         val tmdbKey = prefs.getString("tmdb_api_key", "") ?: ""
         val tvdbKey = prefs.getString("tvdb_api_key", "") ?: ""
+        val animePref = prefs.getString("anime_metadata_preference", "seasonal") ?: "seasonal"
         val ch = channels[existing.channelId]
         metadataEnricher.enrich(
             item = existing,
             isAnimeChannel = ch?.isAnime ?: false,
             tmdbKey = tmdbKey,
-            tvdbKey = tvdbKey
+            tvdbKey = tvdbKey,
+            animePreference = animePref
         )
         mediaIndex[itemId] = existing
         saveMediaIndex()
@@ -1871,6 +1875,7 @@ class TelegramClientManager(private val context: Context) {
             val isAnime = ch?.isAnime ?: false
             val tmdbKey = prefs.getString("tmdb_api_key", "") ?: ""
             val tvdbKey = prefs.getString("tvdb_api_key", "") ?: ""
+            val animePref = prefs.getString("anime_metadata_preference", "seasonal") ?: "seasonal"
 
             val minMsgId = if (incremental) getMaxKnownMessageId(channelId) else 0
             var newestEncounteredMsgId = 0
@@ -2020,7 +2025,8 @@ class TelegramClientManager(private val context: Context) {
                             item = item,
                             isAnimeChannel = isAnime,
                             tmdbKey = tmdbKey,
-                            tvdbKey = tvdbKey
+                            tvdbKey = tvdbKey,
+                            animePreference = animePref
                         )
 
                         val isMatched = !item.posterUrl.isNullOrBlank() ||
@@ -2129,7 +2135,8 @@ class TelegramClientManager(private val context: Context) {
                             item = splitItem,
                             isAnimeChannel = isAnime,
                             tmdbKey = tmdbKey,
-                            tvdbKey = tvdbKey
+                            tvdbKey = tvdbKey,
+                            animePreference = animePref
                         )
 
                         val isMatched = !splitItem.posterUrl.isNullOrBlank() ||

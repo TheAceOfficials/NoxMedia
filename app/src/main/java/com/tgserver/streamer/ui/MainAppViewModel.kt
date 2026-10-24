@@ -748,7 +748,8 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             autoSleepTimeoutMinutes = prefs.getInt("auto_sleep_timeout_minutes", 30),
             alexaVoiceControlEnabled = prefs.getBoolean("alexa_voice_control_enabled", false),
             alexaDeviceName = prefs.getString("alexa_device_name", "NoxMedia") ?: "NoxMedia",
-            receiveBetaUpdates = prefs.getBoolean("receive_beta_updates", false)
+            receiveBetaUpdates = prefs.getBoolean("receive_beta_updates", false),
+            animeMetadataPreference = prefs.getString("anime_metadata_preference", "seasonal") ?: "seasonal"
         )
     }
 
@@ -776,6 +777,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             putBoolean("alexa_voice_control_enabled", cfg.alexaVoiceControlEnabled)
             putString("alexa_device_name", cfg.alexaDeviceName)
             putBoolean("receive_beta_updates", cfg.receiveBetaUpdates)
+            putString("anime_metadata_preference", cfg.animeMetadataPreference)
             apply()
         }
         _config.value = cfg
@@ -957,6 +959,13 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         val msg = if (enabled) "✓ Enrolled in Beta Updates" else "✓ Switched to Stable Updates only"
         Toast.makeText(getApplication(), msg, Toast.LENGTH_SHORT).show()
         checkForAppUpdate(manual = false)
+    }
+
+    fun updateAnimeMetadataPreference(pref: String) {
+        val updated = _config.value.copy(animeMetadataPreference = pref)
+        saveStoredConfig(updated)
+        val label = if (pref == "seasonal") "Seasonal (TVDB / TMDB)" else "Absolute (Kitsu)"
+        Toast.makeText(getApplication(), "✓ Anime indexing set to $label", Toast.LENGTH_SHORT).show()
     }
 
     fun detectTailscaleIp(): String? {
