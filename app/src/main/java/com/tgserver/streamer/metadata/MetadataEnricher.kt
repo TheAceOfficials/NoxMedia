@@ -106,6 +106,78 @@ class MetadataEnricher {
         var resultMeta = meta
         val cType = if (meta.type == "movie") "movie" else "series"
 
+        // 0. If Kitsu ID is available, fetch anime details and episode names from Kitsu
+        val kitsuId = meta.kitsuId
+        if (kitsuId != null && kitsuId > 0) {
+            try {
+                val animeUrl = "https://kitsu.io/api/edge/anime/$kitsuId"
+                val req = Request.Builder().url(animeUrl).header("User-Agent", "NoxMedia/1.0").build()
+                httpClient.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string()
+                        if (!body.isNullOrBlank()) {
+                            val root = JsonParser.parseString(body).asJsonObject
+                            val dataObj = root.getAsJsonObject("data")
+                            val attr = dataObj?.getAsJsonObject("attributes")
+                            if (attr != null) {
+                                val cTitle = attr.get("canonicalTitle")?.asString
+                                val synopsis = attr.get("synopsis")?.asString
+                                val startDate = attr.get("startDate")?.asString
+                                val cleanYear = startDate?.split("-")?.firstOrNull()
+                                val posterObj = attr.getAsJsonObject("posterImage")
+                                val poster = posterObj?.get("medium")?.asString ?: posterObj?.get("original")?.asString
+                                val coverObj = attr.getAsJsonObject("coverImage")
+                                val bg = coverObj?.get("original")?.asString ?: coverObj?.get("large")?.asString
+
+                                resultMeta = resultMeta.copy(
+                                    title = resultMeta.title ?: cTitle,
+                                    year = cleanYear ?: resultMeta.year,
+                                    overview = if (resultMeta.overview.isNullOrBlank()) synopsis else resultMeta.overview,
+                                    posterUrl = resultMeta.posterUrl ?: poster,
+                                    backdropUrl = resultMeta.backdropUrl ?: bg,
+                                    kitsuId = kitsuId
+                                )
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.d(TAG, "Kitsu anime detail fetch failed: ${e.message}")
+            }
+
+            try {
+                val epUrl = "https://kitsu.io/api/edge/anime/$kitsuId/episodes?page[limit]=50"
+                val epReq = Request.Builder().url(epUrl).header("User-Agent", "NoxMedia/1.0").build()
+                httpClient.newCall(epReq).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string()
+                        if (!body.isNullOrBlank()) {
+                            val root = JsonParser.parseString(body).asJsonObject
+                            val data = root.getAsJsonArray("data")
+                            if (data != null) {
+                                for (epElem in data) {
+                                    val epObj = epElem.asJsonObject
+                                    val epAttr = epObj.getAsJsonObject("attributes") ?: continue
+                                    val epNum = epAttr.get("number")?.asInt ?: epAttr.get("relativeNumber")?.asInt
+                                    val seasonNum = epAttr.get("seasonNumber")?.asInt ?: 1
+                                    val titlesObj = epAttr.getAsJsonObject("titles")
+                                    val epTitle = epAttr.get("canonicalTitle")?.asString
+                                        ?: titlesObj?.get("en_us")?.asString
+                                        ?: titlesObj?.get("en_jp")?.asString
+                                        ?: titlesObj?.get("ja_jp")?.asString
+                                    if (epNum != null && !epTitle.isNullOrBlank()) {
+                                        episodeMap[Pair(seasonNum, epNum)] = epTitle
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.d(TAG, "Kitsu episode fetch failed: ${e.message}")
+            }
+        }
+
         // 1. If IMDb ID is available, fetch full Cinemeta metadata + all episode names
         val imdbId = meta.imdbId
         if (!imdbId.isNullOrBlank() && imdbId.matches(Regex("(?i)^tt\\d+$"))) {
@@ -862,18 +934,68 @@ class MetadataEnricher {
         val results = mutableListOf<EnrichedMetadata>()
         val seenImdb = mutableSetOf<String>()
         val seenTmdb = mutableSetOf<Int>()
+        val seenKitsu = mutableSetOf<Int>()
         val seenTitleYear = mutableSetOf<String>()
+        val isAnime = (type.lowercase() == "anime")
         val cType = if (type == "movie") "movie" else "series"
 
-        // 1. Direct ID Detection (IMDb ID or TMDB ID / URL)
+        // 1. Direct ID Detection (IMDb ID, TMDB ID / URL, or Kitsu ID / URL)
         val imdbMatch = Regex("(?i)(?:^|/|title/)(tt\\d{5,11})(?:/|\\?|$)").find(cleanQuery)?.groupValues?.get(1)
             ?: if (cleanQuery.matches(Regex("(?i)^tt\\d+$"))) cleanQuery else null
 
         val tmdbMatch = Regex("(?i)themoviedb\\.org/(?:movie|tv)/(\\d+)").find(cleanQuery)?.groupValues?.get(1)
             ?: Regex("(?i)^tmdb[:/\\-](\\d+)$").find(cleanQuery)?.groupValues?.get(1)
-            ?: if (imdbMatch == null && cleanQuery.matches(Regex("^\\d{2,9}$"))) cleanQuery else null
+            ?: if (!isAnime && imdbMatch == null && cleanQuery.matches(Regex("^\\d{2,9}$"))) cleanQuery else null
 
-        // 1A. Direct IMDb ID Lookup (TMDB Find API + Cinemeta)
+        val kitsuMatch = Regex("(?i)kitsu\\.io/anime/(\\d+)").find(cleanQuery)?.groupValues?.get(1)
+            ?: Regex("(?i)^kitsu[:/\\-](\\d+)$").find(cleanQuery)?.groupValues?.get(1)
+            ?: if (isAnime && imdbMatch == null && cleanQuery.matches(Regex("^\\d{1,8}$"))) cleanQuery else null
+
+        // 1A. Direct Kitsu Anime Lookup
+        if (kitsuMatch != null) {
+            val kId = kitsuMatch.toIntOrNull()
+            if (kId != null && kId > 0 && !seenKitsu.contains(kId)) {
+                try {
+                    val url = "https://kitsu.io/api/edge/anime/$kId"
+                    val req = Request.Builder().url(url).header("User-Agent", "NoxMedia/1.0").build()
+                    httpClient.newCall(req).execute().use { resp ->
+                        if (resp.isSuccessful) {
+                            val body = resp.body?.string()
+                            if (!body.isNullOrBlank()) {
+                                val root = JsonParser.parseString(body).asJsonObject
+                                val dataObj = root.getAsJsonObject("data")
+                                if (dataObj != null) {
+                                    val attr = dataObj.getAsJsonObject("attributes")
+                                    val name = attr?.get("canonicalTitle")?.asString
+                                    val startDate = attr?.get("startDate")?.asString
+                                    val year = startDate?.split("-")?.firstOrNull()
+                                    val overview = attr?.get("synopsis")?.asString
+                                    val posterObj = attr?.getAsJsonObject("posterImage")
+                                    val posterUrl = posterObj?.get("medium")?.asString ?: posterObj?.get("original")?.asString
+                                    val coverObj = attr?.getAsJsonObject("coverImage")
+                                    val bgUrl = coverObj?.get("original")?.asString ?: coverObj?.get("large")?.asString
+
+                                    val candidate = EnrichedMetadata(
+                                        title = name,
+                                        type = "anime",
+                                        year = year,
+                                        overview = overview,
+                                        posterUrl = posterUrl,
+                                        backdropUrl = bgUrl,
+                                        kitsuId = kId
+                                    )
+                                    results.add(candidate)
+                                    seenKitsu.add(kId)
+                                    if (name != null) seenTitleYear.add("${name.lowercase().trim()}:${year ?: ""}")
+                                }
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+
+        // 1B. Direct IMDb ID Lookup (TMDB Find API + Cinemeta)
         if (imdbMatch != null) {
             val targetImdb = imdbMatch.lowercase()
             // Priority 1: TMDB /find endpoint using IMDb ID
@@ -958,7 +1080,7 @@ class MetadataEnricher {
             }
         }
 
-        // 1B. Direct TMDB ID Lookup (TMDB API /movie/{id} or /tv/{id} + Cinemeta)
+        // 1C. Direct TMDB ID Lookup (TMDB API /movie/{id} or /tv/{id} + Cinemeta)
         if (tmdbMatch != null) {
             val tId = tmdbMatch.toIntOrNull()
             if (tId != null && tId > 0 && !seenTmdb.contains(tId)) {
@@ -1048,8 +1170,65 @@ class MetadataEnricher {
             }
         }
 
-        // 2. High-speed TMDB search (Priority 1 ~50ms)
-        if (tmdbKey.isNotBlank()) {
+        // 2. Kitsu Anime Search (Primary for type == "anime")
+        if (isAnime) {
+            try {
+                val enc = URLEncoder.encode(cleanQuery, "UTF-8")
+                val url = "https://kitsu.io/api/edge/anime?filter[text]=$enc&page[limit]=15"
+                val req = Request.Builder().url(url).header("User-Agent", "NoxMedia/1.0").build()
+                httpClient.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string()
+                        if (!body.isNullOrBlank()) {
+                            val root = JsonParser.parseString(body).asJsonObject
+                            val data = root.getAsJsonArray("data")
+                            if (data != null) {
+                                for (i in 0 until data.size()) {
+                                    val itemObj = data[i].asJsonObject
+                                    val kId = itemObj.get("id")?.asString?.toIntOrNull()
+                                    if (kId != null && seenKitsu.contains(kId)) continue
+
+                                    val attr = itemObj.getAsJsonObject("attributes") ?: continue
+                                    val name = attr.get("canonicalTitle")?.asString ?: ""
+                                    if (name.isBlank()) continue
+
+                                    val startDate = attr.get("startDate")?.asString
+                                    val year = startDate?.split("-")?.firstOrNull()
+                                    val overview = attr.get("synopsis")?.asString
+
+                                    val posterObj = attr.getAsJsonObject("posterImage")
+                                    val posterUrl = posterObj?.get("medium")?.asString ?: posterObj?.get("original")?.asString
+
+                                    val coverObj = attr.getAsJsonObject("coverImage")
+                                    val bgUrl = coverObj?.get("original")?.asString ?: coverObj?.get("large")?.asString
+
+                                    val normKey = "${name.lowercase().trim()}:${year ?: ""}"
+                                    if (seenTitleYear.contains(normKey)) continue
+
+                                    if (kId != null) seenKitsu.add(kId)
+                                    seenTitleYear.add(normKey)
+
+                                    results.add(
+                                        EnrichedMetadata(
+                                            title = name,
+                                            type = "anime",
+                                            year = year,
+                                            overview = overview,
+                                            posterUrl = posterUrl,
+                                            backdropUrl = bgUrl,
+                                            kitsuId = kId
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        // 3. High-speed TMDB search (Priority for Movie/Series, Fallback for Anime)
+        if (tmdbKey.isNotBlank() && (!isAnime || results.size < 3)) {
             try {
                 val enc = URLEncoder.encode(cleanQuery, "UTF-8")
                 val endpoint = if (type == "movie") "search/movie" else "search/tv"
@@ -1098,66 +1277,68 @@ class MetadataEnricher {
             } catch (_: Exception) {}
         }
 
-        // 3. Cinemeta catalog search (Fallback, deduplicating against TMDB results)
-        try {
-            val enc = URLEncoder.encode(cleanQuery, "UTF-8")
-            val url = "https://v3-cinemeta.strem.io/catalog/$cType/top/search=$enc.json"
-            val req = Request.Builder().url(url).header("User-Agent", "NoxMedia/1.0").build()
-            httpClient.newCall(req).execute().use { resp ->
-                if (resp.isSuccessful) {
-                    val body = resp.body?.string()
-                    if (!body.isNullOrBlank()) {
-                        val root = JsonParser.parseString(body).asJsonObject
-                        val metas = root.getAsJsonArray("metas")
-                        if (metas != null) {
-                            for (i in 0 until minOf(metas.size(), 12)) {
-                                val obj = metas[i].asJsonObject
-                                val name = obj.get("name")?.asString ?: continue
-                                val rawYear = obj.get("year")?.asString ?: obj.get("releaseInfo")?.asString
-                                val year = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(rawYear ?: "")?.groupValues?.get(1) ?: rawYear
-                                val poster = obj.get("poster")?.asString
-                                val bg = obj.get("background")?.asString
-                                val desc = obj.get("description")?.asString
-                                val imdbId = obj.get("imdb_id")?.asString ?: obj.get("id")?.asString
+        // 4. Cinemeta catalog search (Fallback, deduplicating against TMDB results)
+        if (!isAnime || results.size < 3) {
+            try {
+                val enc = URLEncoder.encode(cleanQuery, "UTF-8")
+                val url = "https://v3-cinemeta.strem.io/catalog/$cType/top/search=$enc.json"
+                val req = Request.Builder().url(url).header("User-Agent", "NoxMedia/1.0").build()
+                httpClient.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string()
+                        if (!body.isNullOrBlank()) {
+                            val root = JsonParser.parseString(body).asJsonObject
+                            val metas = root.getAsJsonArray("metas")
+                            if (metas != null) {
+                                for (i in 0 until minOf(metas.size(), 12)) {
+                                    val obj = metas[i].asJsonObject
+                                    val name = obj.get("name")?.asString ?: continue
+                                    val rawYear = obj.get("year")?.asString ?: obj.get("releaseInfo")?.asString
+                                    val year = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(rawYear ?: "")?.groupValues?.get(1) ?: rawYear
+                                    val poster = obj.get("poster")?.asString
+                                    val bg = obj.get("background")?.asString
+                                    val desc = obj.get("description")?.asString
+                                    val imdbId = obj.get("imdb_id")?.asString ?: obj.get("id")?.asString
 
-                                // Check if already seen via IMDb ID or exact Title+Year from TMDB
-                                val normKey = "${name.lowercase().trim()}:${year ?: ""}"
-                                if (imdbId != null && seenImdb.contains(imdbId.lowercase())) continue
-                                if (seenTitleYear.contains(normKey)) {
-                                    // If we already have this from TMDB, enrich the existing item with imdbId if missing
-                                    if (!imdbId.isNullOrBlank()) {
-                                        val idx = results.indexOfFirst {
-                                            it.title.equals(name, ignoreCase = true) && (it.year == year || it.year == null)
+                                    // Check if already seen via IMDb ID or exact Title+Year from TMDB
+                                    val normKey = "${name.lowercase().trim()}:${year ?: ""}"
+                                    if (imdbId != null && seenImdb.contains(imdbId.lowercase())) continue
+                                    if (seenTitleYear.contains(normKey)) {
+                                        // If we already have this from TMDB, enrich the existing item with imdbId if missing
+                                        if (!imdbId.isNullOrBlank()) {
+                                            val idx = results.indexOfFirst {
+                                                it.title.equals(name, ignoreCase = true) && (it.year == year || it.year == null)
+                                            }
+                                            if (idx >= 0 && results[idx].imdbId.isNullOrBlank()) {
+                                                results[idx] = results[idx].copy(imdbId = imdbId)
+                                            }
                                         }
-                                        if (idx >= 0 && results[idx].imdbId.isNullOrBlank()) {
-                                            results[idx] = results[idx].copy(imdbId = imdbId)
-                                        }
+                                        continue
                                     }
-                                    continue
-                                }
 
-                                if (imdbId != null) seenImdb.add(imdbId.lowercase())
-                                seenTitleYear.add(normKey)
+                                    if (imdbId != null) seenImdb.add(imdbId.lowercase())
+                                    seenTitleYear.add(normKey)
 
-                                results.add(
-                                    EnrichedMetadata(
-                                        title = name,
-                                        type = type,
-                                        year = year,
-                                        overview = desc,
-                                        posterUrl = poster,
-                                        backdropUrl = bg,
-                                        imdbId = imdbId
+                                    results.add(
+                                        EnrichedMetadata(
+                                            title = name,
+                                            type = type,
+                                            year = year,
+                                            overview = desc,
+                                            posterUrl = poster,
+                                            backdropUrl = bg,
+                                            imdbId = imdbId
+                                        )
                                     )
-                                )
+                                }
                             }
                         }
                     }
                 }
-            }
-        } catch (_: Exception) {}
+            } catch (_: Exception) {}
+        }
 
-        if (imdbMatch == null && tmdbMatch == null) {
+        if (imdbMatch == null && tmdbMatch == null && kitsuMatch == null) {
             results.sortByDescending { calculateSimilarity(cleanQuery, it.title ?: "") }
         }
         return results

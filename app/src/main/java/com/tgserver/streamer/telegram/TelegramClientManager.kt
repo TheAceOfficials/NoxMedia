@@ -1695,12 +1695,15 @@ class TelegramClientManager(private val context: Context) {
 
     suspend fun matchUnmatchedItem(
         unmatchedId: String,
-        matchedMeta: com.tgserver.streamer.metadata.EnrichedMetadata
+        matchedMeta: com.tgserver.streamer.metadata.EnrichedMetadata,
+        targetType: String? = null
     ): MediaItem? = withContext(Dispatchers.IO) {
         val unmatched = unmatchedIndex[unmatchedId] ?: return@withContext null
         val origItem = unmatched.parsedMediaItem
         val resolvedType = when {
-            matchedMeta.kitsuId != null -> "series"
+            targetType == "anime" || matchedMeta.kitsuId != null -> "series"
+            targetType == "movie" -> "movie"
+            targetType == "series" -> "series"
             origItem?.season != null || origItem?.episode != null -> "series"
             origItem != null && origItem.type.isNotBlank() -> origItem.type
             else -> "movie"
@@ -1725,6 +1728,9 @@ class TelegramClientManager(private val context: Context) {
         if (!matchedMeta.imdbId.isNullOrBlank()) baseItem.imdbId = matchedMeta.imdbId
         if (matchedMeta.tmdbId != null && matchedMeta.tmdbId > 0) baseItem.tmdbId = matchedMeta.tmdbId
         if (matchedMeta.kitsuId != null && matchedMeta.kitsuId > 0) baseItem.kitsuId = matchedMeta.kitsuId
+
+        baseItem.isManuallyMatched = true
+        baseItem.lastModified = System.currentTimeMillis()
 
         mediaIndex[baseItem.id] = baseItem
         saveMediaIndex()

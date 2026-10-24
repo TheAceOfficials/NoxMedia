@@ -520,10 +520,36 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         Toast.makeText(getApplication(), "Cleared unmatched items", Toast.LENGTH_SHORT).show()
     }
 
-    fun matchUnmatchedItem(unmatchedId: String, matchedMeta: EnrichedMetadata, onDone: (Boolean) -> Unit = {}) {
+    fun matchUnmatchedItem(
+        unmatchedId: String,
+        matchedMeta: EnrichedMetadata,
+        targetType: String? = null,
+        onDone: (Boolean) -> Unit = {}
+    ) {
         viewModelScope.launch {
-            val item = tgClient.matchUnmatchedItem(unmatchedId, matchedMeta)
+            val tmdbKey = prefs.getString("tmdb_api_key", "") ?: ""
+            val (enriched, episodeMap) = withContext(Dispatchers.IO) {
+                MetadataEnricher.fetchFullMetadataDetails(matchedMeta, tmdbKey)
+            }
+            val finalMeta = matchedMeta.copy(
+                title = enriched.title ?: matchedMeta.title,
+                year = enriched.year ?: matchedMeta.year,
+                overview = enriched.overview ?: matchedMeta.overview,
+                posterUrl = enriched.posterUrl ?: matchedMeta.posterUrl,
+                backdropUrl = enriched.backdropUrl ?: matchedMeta.backdropUrl,
+                imdbId = enriched.imdbId ?: matchedMeta.imdbId,
+                tmdbId = enriched.tmdbId ?: matchedMeta.tmdbId,
+                kitsuId = enriched.kitsuId ?: matchedMeta.kitsuId
+            )
+            val item = tgClient.matchUnmatchedItem(unmatchedId, finalMeta, targetType)
             if (item != null) {
+                val s = item.season ?: 1
+                val e = item.episode
+                if (e != null && episodeMap.containsKey(Pair(s, e))) {
+                    item.episodeTitle = episodeMap[Pair(s, e)]
+                    tgClient.saveMediaIndex()
+                }
+                triggerAutoCloudBackupDebounced(4000L)
                 Toast.makeText(getApplication(), "✓ Matched: ${item.title}", Toast.LENGTH_SHORT).show()
                 onDone(true)
             } else {
@@ -594,7 +620,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch(Dispatchers.IO) {
             val tmdbKey = prefs.getString("tmdb_api_key", "") ?: ""
             val (enriched, episodeMap) = MetadataEnricher.fetchFullMetadataDetails(meta, tmdbKey)
-            val effectiveType = targetType ?: meta.type ?: groupItems.firstOrNull()?.type ?: "movie"
+            val effectiveType = if (targetType == "anime" || meta.kitsuId != null) "series" else (targetType ?: meta.type ?: groupItems.firstOrNull()?.type ?: "movie")
 
             val updated = groupItems.mapIndexed { index, item ->
                 // If switching from movie to series and item had no season/episode, default to S01 E(index+1)
@@ -617,6 +643,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                     episodeTitle = newEpTitle,
                     imdbId = enriched.imdbId ?: meta.imdbId,
                     tmdbId = enriched.tmdbId ?: meta.tmdbId,
+                    kitsuId = enriched.kitsuId ?: meta.kitsuId ?: item.kitsuId,
                     isManuallyMatched = true,
                     lastModified = System.currentTimeMillis()
                 )

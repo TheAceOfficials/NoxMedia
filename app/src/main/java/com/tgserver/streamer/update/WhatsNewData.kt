@@ -47,23 +47,23 @@ object WhatsNewRepository {
 
     val currentRelease: WhatsNewRelease = WhatsNewRelease(
         version = "1.1-beta",
-        releaseTitle = "True Cloud Sync & Metadata Fix",
+        releaseTitle = "Anime Kitsu Match & True Cloud Sync",
         releaseDate = "October 2026",
         items = listOf(
             WhatsNewItem(
                 category = ChangeCategory.NEW,
+                title = "Anime (Kitsu) Metadata Matching",
+                description = "Dedicated Anime toggle in both Fix Metadata Match and Unmatched Content dialogs. Searches Kitsu anime database with full episode names, artwork, and direct Kitsu ID support."
+            ),
+            WhatsNewItem(
+                category = ChangeCategory.NEW,
+                title = "Overhauled Unmatched Content Rematch",
+                description = "Rematching unmatched files now features snappy 350ms debounced live search, Nothing OS aesthetics, clear query icon, and direct IMDb/TMDB/Kitsu ID lookup."
+            ),
+            WhatsNewItem(
+                category = ChangeCategory.NEW,
                 title = "True Multi-Device Cloud Sync",
                 description = "Bi-directional true sync across all your phones, Android TVs, and tablets. Pre-indexed library and manual rematch fixes are compressed with Gzip (~90% smaller) and synced automatically without re-scanning. Supports custom Telegram backup channels."
-            ),
-            WhatsNewItem(
-                category = ChangeCategory.NEW,
-                title = "Fix Metadata Match & Instant Live Search",
-                description = "Interactive candidate search now delivers live results within 350ms as you type without waiting or tapping search. Features inline loading indicator and instant query clearing."
-            ),
-            WhatsNewItem(
-                category = ChangeCategory.NEW,
-                title = "Direct IMDb & TMDB ID Search",
-                description = "Paste any IMDb ID (e.g. tt14173636), TMDB ID, or web link directly into Fix Metadata Match to instantly resolve hard-to-find titles."
             ),
             WhatsNewItem(
                 category = ChangeCategory.NEW,

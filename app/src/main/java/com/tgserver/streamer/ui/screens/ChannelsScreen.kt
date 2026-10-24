@@ -53,6 +53,7 @@ import com.tgserver.streamer.metadata.EnrichedMetadata
 import com.tgserver.streamer.theme.*
 import com.tgserver.streamer.ui.MainAppViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -1706,9 +1707,7 @@ private fun UnmatchedItemCard(
 }
 
 /**
- * Interactive Candidate Search Dialog to manually match an unmatched item with TMDB / Kitsu
- */
-@Composable
+ * Interactive Candidate Search Dialog to manually match an unmatched item with@Composable
 private fun ManualMatchCandidateDialog(
     unmatched: UnmatchedItem,
     viewModel: MainAppViewModel,
@@ -1724,7 +1723,10 @@ private fun ManualMatchCandidateDialog(
     }
     val initialType = remember(unmatched) {
         val parsed = unmatched.parsedMediaItem
+        val ch = viewModel.channels.value.find { it.id == unmatched.channelId }
         when {
+            ch?.isAnime == true -> "anime"
+            parsed?.kitsuId != null -> "anime"
             parsed?.type == "series" -> "series"
             parsed?.season != null || parsed?.episode != null -> "series"
             else -> "movie"
@@ -1732,210 +1734,287 @@ private fun ManualMatchCandidateDialog(
     }
     var searchTitle by remember { mutableStateOf(initialTitle) }
     var searchType by remember { mutableStateOf(initialType) }
-    var isSearching by remember { mutableStateOf(false) }
-    var candidates by remember { mutableStateOf<List<EnrichedMetadata>>(emptyList()) }
-    val coroutineScope = rememberCoroutineScope()
+    var isLoading by remember { mutableStateOf(false) }
+    var results by remember { mutableStateOf<List<EnrichedMetadata>>(emptyList()) }
+    var searchAttempted by remember { mutableStateOf(false) }
 
-    fun doSearch() {
-        if (searchTitle.isBlank()) return
-        isSearching = true
-        coroutineScope.launch {
-            candidates = viewModel.searchMetadataCandidates(searchTitle.trim(), searchType)
-            isSearching = false
+    // Live Instant Search with 350ms debounce (matches Fix Metadata Match snappiness)
+    LaunchedEffect(searchTitle, searchType) {
+        val q = searchTitle.trim()
+        if (q.isBlank()) {
+            results = emptyList()
+            isLoading = false
+            return@LaunchedEffect
         }
-    }
-
-    LaunchedEffect(Unit) {
-        doSearch()
+        delay(350)
+        isLoading = true
+        searchAttempted = true
+        results = viewModel.searchMetadataCandidates(q, searchType)
+        isLoading = false
     }
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        containerColor = Color(0xFF13141B),
+        titleContentColor = Color.White,
+        shape = RoundedCornerShape(18.dp),
         title = {
-            Text(
-                text = "Match Media Metadata",
-                color = Color.White,
-                fontFamily = FontFamily.Default,
-                fontWeight = FontWeight.Bold,
-                fontSize = 16.sp
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Match Media Metadata",
+                    color = Color.White,
+                    fontFamily = NdotFont,
+                    fontSize = 17.sp,
+                    letterSpacing = 0.5.sp
+                )
+                IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close",
+                        tint = Color(0xFF888B98),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
         },
         text = {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 450.dp),
+                    .heightIn(max = 500.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Search Input Box
+                Text(
+                    text = "Search by title, IMDb ID (e.g. tt14173636), TMDB ID (e.g. 109445), or Kitsu Anime ID to match metadata.",
+                    color = Color(0xFF8E909A),
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp
+                )
+
+                // Search field + Search indicator
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .height(42.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFF14151D))
-                        .border(1.dp, Color(0xFF282B3A), RoundedCornerShape(10.dp))
-                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                        .background(Color(0xFF1A1C25))
+                        .border(1.dp, Color(0xFF2E3242), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.CenterStart
                 ) {
-                    BasicTextField(
-                        value = searchTitle,
-                        onValueChange = { searchTitle = it },
-                        singleLine = true,
-                        cursorBrush = SolidColor(Color(0xFFC084FC)),
-                        textStyle = TextStyle(color = Color.White, fontSize = 13.sp),
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        BasicTextField(
+                            value = searchTitle,
+                            onValueChange = { searchTitle = it },
+                            singleLine = true,
+                            textStyle = TextStyle(
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontFamily = FontFamily.Default
+                            ),
+                            cursorBrush = SolidColor(Color(0xFFA855F7)),
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                color = Color(0xFFA855F7),
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else if (searchTitle.isNotBlank()) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Clear",
+                                tint = Color(0xFF717482),
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .clickable { searchTitle = "" }
+                            )
+                        }
+                    }
                 }
 
-                // Type toggles + Search Button
+                // Type Toggle: Switch between Movie, Series, and Anime!
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Text(
+                        text = "Content Type:",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("movie" to "Movie", "series" to "Series").forEach { (typeKey, label) ->
+                        listOf("movie" to "Movie", "series" to "Series", "anime" to "Anime").forEach { (typeKey, label) ->
                             val isSel = searchType == typeKey
                             Box(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(if (isSel) Color(0xFF7C3AED) else Color(0xFF1A1C26))
-                                    .clickable {
-                                        searchType = typeKey
-                                        doSearch()
-                                    }
-                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSel) Color(0xFFA855F7) else Color(0xFF1E202B))
+                                    .border(
+                                        1.dp,
+                                        if (isSel) Color(0xFFC084FC) else Color(0xFF2C2F3C),
+                                        RoundedCornerShape(8.dp)
+                                    )
+                                    .clickable { searchType = typeKey }
+                                    .padding(horizontal = 10.dp, vertical = 5.dp)
                             ) {
                                 Text(
                                     text = label,
                                     color = if (isSel) Color.White else Color(0xFF94A3B8),
-                                    fontSize = 10.sp,
-                                    fontFamily = NdotFont,
-                                    fontWeight = FontWeight.Bold
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
                                 )
                             }
                         }
                     }
-
-                    Box(
-                        modifier = Modifier
-                            .height(26.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color(0xFF7C3AED))
-                            .clickable { doSearch() }
-                            .padding(horizontal = 10.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "SEARCH",
-                            color = Color.White,
-                            fontFamily = NdotFont,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
                 }
 
-                HorizontalDivider(color = Color(0xFF252837), thickness = 1.dp)
-
-                // Candidates List
-                if (isSearching) {
+                // Results list
+                if (isLoading && results.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(150.dp),
+                            .height(140.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         CircularProgressIndicator(
-                            strokeWidth = 2.dp,
-                            color = Color(0xFFC084FC),
-                            modifier = Modifier.size(24.dp)
+                            color = Color(0xFFA855F7),
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.dp
                         )
                     }
-                } else if (candidates.isEmpty()) {
+                } else if (results.isEmpty() && searchAttempted && !isLoading) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(120.dp),
+                            .height(100.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "No candidates found. Try adjusting title query.",
-                            color = Color(0xFF94A3B8),
-                            fontSize = 12.sp
+                            text = "No matches found for \"$searchTitle\" in ${searchType.uppercase()}.\nTry entering an IMDb ID, TMDB ID, or Kitsu ID",
+                            color = Color(0xFF717482),
+                            fontSize = 11.5.sp,
+                            textAlign = TextAlign.Center,
+                            lineHeight = 16.sp
                         )
                     }
                 } else {
                     LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 300.dp),
+                        modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(candidates) { cand ->
-                            Row(
+                        items(results) { cand ->
+                            Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color(0xFF181A24))
-                                    .border(1.dp, Color(0xFF282B3A), RoundedCornerShape(8.dp))
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFF181A22))
+                                    .border(1.dp, Color(0xFF282A36), RoundedCornerShape(12.dp))
                                     .clickable {
-                                        viewModel.matchUnmatchedItem(unmatched.id, cand) { success ->
+                                        viewModel.matchUnmatchedItem(unmatched.id, cand, targetType = searchType) { success ->
                                             if (success) onDismiss()
                                         }
                                     }
-                                    .padding(8.dp),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                    .padding(10.dp)
                             ) {
-                                // Poster Thumbnail
-                                RemoteImage(
-                                    url = cand.posterUrl,
-                                    contentDescription = cand.title,
-                                    modifier = Modifier
-                                        .size(width = 36.dp, height = 52.dp)
-                                        .clip(RoundedCornerShape(4.dp))
-                                )
-
-                                Column(
-                                    modifier = Modifier.weight(1f),
-                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(
-                                        text = cand.title ?: "Unknown",
-                                        color = Color.White,
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontSize = 12.5.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                    // Poster thumbnail
+                                    RemoteImage(
+                                        url = cand.posterUrl,
+                                        contentDescription = cand.title,
+                                        modifier = Modifier
+                                            .width(42.dp)
+                                            .height(60.dp)
+                                            .clip(RoundedCornerShape(6.dp))
                                     )
 
-                                    if (!cand.year.isNullOrBlank()) {
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                                    ) {
                                         Text(
-                                            text = cand.year,
-                                            color = Color(0xFFC084FC),
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = 10.sp
+                                            text = cand.title ?: "Unknown",
+                                            color = Color.White,
+                                            fontFamily = FontFamily.Default,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 13.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
+
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            if (!cand.year.isNullOrBlank()) {
+                                                Text(
+                                                    text = cand.year,
+                                                    color = Color(0xFFA855F7),
+                                                    fontFamily = NdotFont,
+                                                    fontSize = 10.sp
+                                                )
+                                            }
+                                            if (cand.kitsuId != null && cand.kitsuId > 0) {
+                                                Text(
+                                                    text = "KITSU #${cand.kitsuId}",
+                                                    color = Color(0xFFFF7A00),
+                                                    fontFamily = NdotFont,
+                                                    fontSize = 10.sp
+                                                )
+                                            }
+                                            if (!cand.imdbId.isNullOrBlank()) {
+                                                Text(
+                                                    text = cand.imdbId,
+                                                    color = Color(0xFFFBBF24),
+                                                    fontFamily = NdotFont,
+                                                    fontSize = 10.sp
+                                                )
+                                            }
+                                        }
+
+                                        if (!cand.overview.isNullOrBlank()) {
+                                            Text(
+                                                text = cand.overview,
+                                                color = Color(0xFF888A96),
+                                                fontSize = 10.5.sp,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis,
+                                                lineHeight = 14.sp
+                                            )
+                                        }
                                     }
 
-                                    if (!cand.overview.isNullOrBlank()) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(Color(0xFF2E1547))
+                                            .border(1.dp, Color(0xFFA855F7), RoundedCornerShape(6.dp))
+                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
                                         Text(
-                                            text = cand.overview,
-                                            color = Color(0xFF94A3B8),
-                                            fontSize = 10.sp,
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis,
-                                            lineHeight = 13.sp
+                                            text = "MATCH",
+                                            color = Color(0xFFD8B4FE),
+                                            fontFamily = NdotFont,
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Bold
                                         )
                                     }
                                 }
-
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = "Select",
-                                    tint = Color(0xFF10B981),
-                                    modifier = Modifier.size(16.dp)
-                                )
                             }
                         }
                     }
@@ -1947,7 +2026,6 @@ private fun ManualMatchCandidateDialog(
             TextButton(onClick = onDismiss) {
                 Text("Cancel", color = Color(0xFF94A3B8))
             }
-        },
-        containerColor = Color(0xFF1E202B)
+        }
     )
 }

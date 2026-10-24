@@ -2185,7 +2185,11 @@ private fun RescanMetadataDialog(
     onSynced: (EnrichedMetadata) -> Unit
 ) {
     var searchQuery by remember { mutableStateOf(group.title) }
-    var searchType by remember { mutableStateOf(group.type) } // "movie" or "series"
+    var searchType by remember {
+        mutableStateOf(
+            if (group.items.any { it.kitsuId != null && it.kitsuId > 0 }) "anime" else group.type
+        )
+    } // "movie", "series", or "anime"
     var isLoading by remember { mutableStateOf(false) }
     var results by remember { mutableStateOf<List<EnrichedMetadata>>(emptyList()) }
     var searchAttempted by remember { mutableStateOf(false) }
@@ -2242,7 +2246,7 @@ private fun RescanMetadataDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
-                    text = "Search by title, IMDb ID (e.g. tt14173636), or TMDB ID (e.g. 109445) to match metadata.",
+                    text = "Search by title, IMDb ID (e.g. tt14173636), TMDB ID (e.g. 109445), or Kitsu Anime ID to match metadata.",
                     color = Color(0xFF8E909A),
                     fontSize = 11.sp,
                     lineHeight = 15.sp
@@ -2294,7 +2298,7 @@ private fun RescanMetadataDialog(
                     }
                 }
 
-                // Type Toggle: Switch between Movie and Series!
+                // Type Toggle: Switch between Movie, Series, and Anime!
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -2308,7 +2312,7 @@ private fun RescanMetadataDialog(
                     )
 
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("movie" to "Movie", "series" to "Series").forEach { (typeKey, label) ->
+                        listOf("movie" to "Movie", "series" to "Series", "anime" to "Anime").forEach { (typeKey, label) ->
                             val isSel = searchType == typeKey
                             Box(
                                 modifier = Modifier
@@ -2355,7 +2359,7 @@ private fun RescanMetadataDialog(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "No matches found for \"$searchQuery\" in ${searchType.uppercase()}.\nTry entering an IMDb ID (e.g. tt1234567)",
+                            text = "No matches found for \"$searchQuery\" in ${searchType.uppercase()}.\nTry entering an IMDb ID, TMDB ID, or Kitsu ID",
                             color = Color(0xFF717482),
                             fontSize = 11.5.sp,
                             textAlign = TextAlign.Center,
@@ -2435,6 +2439,14 @@ private fun CandidateCard(
                         Text(
                             text = candidate.year,
                             color = Color(0xFFA855F7),
+                            fontFamily = NdotFont,
+                            fontSize = 10.sp
+                        )
+                    }
+                    if (candidate.kitsuId != null && candidate.kitsuId > 0) {
+                        Text(
+                            text = "KITSU #${candidate.kitsuId}",
+                            color = Color(0xFFFF7A00),
                             fontFamily = NdotFont,
                             fontSize = 10.sp
                         )
