@@ -1023,7 +1023,7 @@ class TelegramClientManager(private val context: Context) {
         }
     }
 
-    private fun saveMediaIndex() {
+    fun saveMediaIndex() {
         val list = mediaIndex.values.toList()
         val json = gson.toJson(list)
         try {

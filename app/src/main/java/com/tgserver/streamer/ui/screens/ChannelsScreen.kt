@@ -1707,7 +1707,9 @@ private fun UnmatchedItemCard(
 }
 
 /**
- * Interactive Candidate Search Dialog to manually match an unmatched item with@Composable
+ * Interactive Candidate Search Dialog to manually match an unmatched item
+ */
+@Composable
 private fun ManualMatchCandidateDialog(
     unmatched: UnmatchedItem,
     viewModel: MainAppViewModel,
