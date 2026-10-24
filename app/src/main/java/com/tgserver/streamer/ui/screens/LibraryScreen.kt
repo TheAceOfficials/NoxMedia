@@ -396,6 +396,7 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                         IconButton(
                             onClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                viewModel.syncFromCloud(silent = false)
                                 viewModel.refreshAllLibraryMetadata()
                             },
                             modifier = Modifier

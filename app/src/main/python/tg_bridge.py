@@ -1730,6 +1730,10 @@ def _parse_backup_target_chat(chat_val: str):
     c = str(chat_val).strip()
     if not c or c.lower() in ("me", "self", "saved", "saved messages"):
         return "me"
+    if "t.me/" in c:
+        c = c.split("t.me/")[-1].replace("+", "").replace("/", "").strip()
+        if not c.startswith("@") and not c.startswith("-100"):
+            c = "@" + c
     try:
         return int(c)
     except ValueError:
@@ -1742,9 +1746,17 @@ def upload_backup_file(api_id: int, api_hash: str, session_str: str, file_path: 
         client = await _get_connected_stream_client(int(api_id), str(api_hash), str(session_str))
         target_chat = _parse_backup_target_chat(destination)
         if target_chat != "me":
-            target_chat = await _ensure_channel_peer(client, target_chat)
+            if isinstance(target_chat, int):
+                target_chat = await _ensure_channel_peer(client, target_chat)
+            else:
+                try:
+                    c = await client.get_chat(target_chat)
+                    if c:
+                        target_chat = c.id
+                except Exception as ex:
+                    _log_stream(f"Notice resolving backup target chat {target_chat}: {ex}", "W")
 
-        # 1. Clean up older backup messages to keep Saved Messages tidy
+        # 1. Clean up older backup messages to keep target chat tidy
         try:
             old_ids = []
             async for m in client.search_messages(target_chat, query="#NoxMediaBackup", limit=10):
@@ -1781,7 +1793,15 @@ def fetch_latest_backup_file(api_id: int, api_hash: str, session_str: str, targe
         client = await _get_connected_stream_client(int(api_id), str(api_hash), str(session_str))
         target_chat = _parse_backup_target_chat(source)
         if target_chat != "me":
-            target_chat = await _ensure_channel_peer(client, target_chat)
+            if isinstance(target_chat, int):
+                target_chat = await _ensure_channel_peer(client, target_chat)
+            else:
+                try:
+                    c = await client.get_chat(target_chat)
+                    if c:
+                        target_chat = c.id
+                except Exception as ex:
+                    _log_stream(f"Notice resolving backup target chat {target_chat}: {ex}", "W")
 
         latest_msg = None
         # 1. Try search by hashtag

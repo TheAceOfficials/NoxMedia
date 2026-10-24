@@ -37,9 +37,13 @@ import com.tgserver.streamer.update.AppReleaseInfo
 import com.tgserver.streamer.update.AppUpdateManager
 import com.tgserver.streamer.update.UpdateUiState
 import java.io.File
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 import org.json.JSONArray
 import org.json.JSONObject
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
+import kotlinx.coroutines.Job
 
 enum class AppTab {
     HOME, CHANNELS, LIBRARY, SETTINGS
@@ -141,6 +145,62 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     private val _isRestoringFromCloud = MutableStateFlow(false)
     val isRestoringFromCloud: StateFlow<Boolean> = _isRestoringFromCloud.asStateFlow()
 
+    val syncDeviceId: String by lazy {
+        var id = prefs.getString("device_sync_id", null)
+        if (id.isNullOrBlank()) {
+            id = UUID.randomUUID().toString().take(8)
+            prefs.edit().putString("device_sync_id", id).apply()
+        }
+        id
+    }
+
+    val syncDeviceName: String
+        get() {
+            val model = Build.MODEL ?: "Device"
+            val brand = Build.MANUFACTURER ?: ""
+            return if (model.startsWith(brand, ignoreCase = true)) model else "$brand $model".trim()
+        }
+
+    private var autoBackupJob: Job? = null
+
+    fun triggerAutoCloudBackupDebounced(delayMs: Long = 4000L) {
+        val cfg = _config.value
+        if (!cfg.autoBackupEnabled && !cfg.cloudSyncLibrary) {
+            return
+        }
+        if (!session.value.isLoggedIn) return
+        autoBackupJob?.cancel()
+        autoBackupJob = viewModelScope.launch(Dispatchers.IO) {
+            delay(delayMs)
+            try {
+                val dest = cfg.backupDestination.ifBlank { "me" }
+                val backupJson = exportBackupJson()
+                val chCount = channels.value.size
+                val medCount = tgClient.getAllMediaItems().size
+                Log.d("MainAppViewModel", "Auto-pushing cloud backup snapshot ($medCount items) to $dest...")
+                val res = tgClient.uploadBackupToTelegram(
+                    backupJson = backupJson,
+                    destination = dest,
+                    channelCount = chCount,
+                    mediaCount = medCount,
+                    originDevice = syncDeviceName
+                )
+                if (res.isSuccess) {
+                    val now = System.currentTimeMillis()
+                    prefs.edit()
+                        .putLong("last_auto_backup_timestamp", now)
+                        .putLong("last_cloud_sync_timestamp", now)
+                        .apply()
+                    Log.i("MainAppViewModel", "Auto-backup pushed successfully to Telegram ($dest)")
+                } else {
+                    Log.w("MainAppViewModel", "Auto-backup push failed: ${res.exceptionOrNull()?.message}")
+                }
+            } catch (e: Exception) {
+                Log.w("MainAppViewModel", "Auto-backup error: ${e.message}")
+            }
+        }
+    }
+
     private val startTime = System.currentTimeMillis()
 
     init {
@@ -152,6 +212,9 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             tgClient.cleanupSplitDuplicates()
             if (session.value.isLoggedIn) {
                 tgClient.refreshUserProfile()
+                if (loaded.cloudSyncLibrary || loaded.autoBackupEnabled) {
+                    syncFromCloud(silent = true)
+                }
             }
             // Auto-check for GitHub app updates in background
             updateManager.checkForUpdate(manual = false, includeBeta = loaded.receiveBetaUpdates)
@@ -377,6 +440,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                 val newCount = res.getOrDefault(0)
                 val totalCount = channels.value.find { it.id == channelId }?.videoCount ?: newCount
                 if (newCount > 0) {
+                    triggerAutoCloudBackupDebounced(4000L)
                     Toast.makeText(getApplication(), "✓ Synced: $newCount new video(s) added (${ch?.title ?: "channel"})", Toast.LENGTH_SHORT).show()
                 } else {
                     Toast.makeText(getApplication(), "✓ ${ch?.title ?: "Channel"} is up to date ($totalCount videos)", Toast.LENGTH_SHORT).show()
@@ -413,6 +477,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             }
             _isScanningAll.value = false
             if (totalNew > 0) {
+                triggerAutoCloudBackupDebounced(4000L)
                 Toast.makeText(getApplication(), "✓ Sync complete: $totalNew new video(s) added across active channels", Toast.LENGTH_SHORT).show()
             } else {
                 Toast.makeText(getApplication(), "✓ All channels are up to date", Toast.LENGTH_SHORT).show()
@@ -428,6 +493,9 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             _scanningChannelIds.value = _scanningChannelIds.value - channelId
             if (res.isSuccess) {
                 val count = res.getOrDefault(0)
+                if (count > 0) {
+                    triggerAutoCloudBackupDebounced(4000L)
+                }
                 Toast.makeText(getApplication(), "✓ Clean rescan: $count videos found for ${ch?.title ?: "channel"}", Toast.LENGTH_SHORT).show()
             } else {
                 Toast.makeText(getApplication(), "Rescan failed: ${res.exceptionOrNull()?.message}", Toast.LENGTH_SHORT).show()
@@ -548,7 +616,9 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                     backdropUrl = enriched.backdropUrl ?: meta.backdropUrl ?: item.backdropUrl,
                     episodeTitle = newEpTitle,
                     imdbId = enriched.imdbId ?: meta.imdbId,
-                    tmdbId = enriched.tmdbId ?: meta.tmdbId
+                    tmdbId = enriched.tmdbId ?: meta.tmdbId,
+                    isManuallyMatched = true,
+                    lastModified = System.currentTimeMillis()
                 )
             }
 
@@ -563,6 +633,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             StreamerForegroundService.activeServer?.clearTitleCache()
 
             tgClient.updateMediaItems(updated)
+            triggerAutoCloudBackupDebounced(4000L)
             withContext(Dispatchers.Main) {
                 Toast.makeText(
                     getApplication(),
@@ -691,27 +762,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun autoRestoreCloudBackupSilently() {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                Log.d("MainAppViewModel", "Checking Telegram Saved Messages for cloud backup after login...")
-                val res = tgClient.fetchLatestBackupFromTelegram("me")
-                val json = res.getOrNull()
-                if (!json.isNullOrBlank()) {
-                    withContext(Dispatchers.Main) {
-                        val (settingsRestored, channelsRestored) = importBackupJsonDetailed(json)
-                        if (settingsRestored || channelsRestored > 0) {
-                            val msg = "✓ Cloud backup restored: $channelsRestored channels & settings synced!"
-                            Toast.makeText(getApplication(), msg, Toast.LENGTH_LONG).show()
-                            if (channelsRestored > 0) {
-                                syncAllChannels()
-                            }
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                Log.w("MainAppViewModel", "Silent auto-restore on login: ${e.message}")
-            }
-        }
+        syncFromCloud(silent = false)
     }
 
     fun logout() {
@@ -749,7 +800,9 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             alexaVoiceControlEnabled = prefs.getBoolean("alexa_voice_control_enabled", false),
             alexaDeviceName = prefs.getString("alexa_device_name", "NoxMedia") ?: "NoxMedia",
             receiveBetaUpdates = prefs.getBoolean("receive_beta_updates", false),
-            animeMetadataPreference = prefs.getString("anime_metadata_preference", "seasonal") ?: "seasonal"
+            animeMetadataPreference = prefs.getString("anime_metadata_preference", "seasonal") ?: "seasonal",
+            backupDestination = prefs.getString("backup_destination", "") ?: "",
+            cloudSyncLibrary = prefs.getBoolean("cloud_sync_library", true)
         )
     }
 
@@ -778,6 +831,8 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             putString("alexa_device_name", cfg.alexaDeviceName)
             putBoolean("receive_beta_updates", cfg.receiveBetaUpdates)
             putString("anime_metadata_preference", cfg.animeMetadataPreference)
+            putString("backup_destination", cfg.backupDestination)
+            putBoolean("cloud_sync_library", cfg.cloudSyncLibrary)
             apply()
         }
         _config.value = cfg
@@ -987,15 +1042,24 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         Toast.makeText(getApplication(), "✓ Channel automation rules updated", Toast.LENGTH_SHORT).show()
     }
 
-    fun updateBackupSettings(enabled: Boolean, intervalHours: Int) {
+    fun updateBackupSettings(
+        enabled: Boolean,
+        intervalHours: Int,
+        destination: String = _config.value.backupDestination,
+        cloudSyncLibrary: Boolean = _config.value.cloudSyncLibrary
+    ) {
         val updated = _config.value.copy(
             autoBackupEnabled = enabled,
-            autoBackupIntervalHours = intervalHours
+            autoBackupIntervalHours = intervalHours,
+            backupDestination = destination,
+            cloudSyncLibrary = cloudSyncLibrary
         )
         saveStoredConfig(updated)
+        prefs.edit().putString("backup_destination", destination).apply()
         if (enabled) {
             tgClient.startAutoBackupLoop { exportBackupJson() }
-            Toast.makeText(getApplication(), "✓ Auto-backup scheduled every ${intervalHours}h to Telegram", Toast.LENGTH_SHORT).show()
+            val targetName = if (destination.isNotBlank()) destination else "Saved Messages"
+            Toast.makeText(getApplication(), "✓ Auto-backup scheduled every ${intervalHours}h to $targetName", Toast.LENGTH_SHORT).show()
         } else {
             tgClient.stopAutoBackupLoop()
             Toast.makeText(getApplication(), "✓ Auto-backup disabled", Toast.LENGTH_SHORT).show()
@@ -1093,24 +1157,35 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             put("skipExactDuplicates", cfg.skipExactDuplicates)
             put("autoBackupEnabled", cfg.autoBackupEnabled)
             put("autoBackupIntervalHours", cfg.autoBackupIntervalHours)
+            put("animeMetadataPreference", cfg.animeMetadataPreference)
+            put("backupDestination", cfg.backupDestination)
+            put("cloudSyncLibrary", cfg.cloudSyncLibrary)
         }
 
+        val mediaList = tgClient.getAllMediaItems()
         val root = JSONObject().apply {
-            put("version", 2)
+            put("version", 3)
             put("appName", "NoxMedia")
+            put("deviceId", syncDeviceId)
+            put("deviceName", syncDeviceName)
             put("timestamp", System.currentTimeMillis())
             put("settings", settingsObj)
             put("channels", channelsJsonArray)
+            put("mediaCount", mediaList.size)
+            if (cfg.cloudSyncLibrary && mediaList.isNotEmpty()) {
+                put("mediaItems", JSONArray(Gson().toJson(mediaList)))
+            }
         }
 
-        return root.toString(2)
+        return root.toString()
     }
 
-    fun importBackupJsonDetailed(json: String): Pair<Boolean, Int> {
+    fun importBackupJsonDetailed(json: String): Triple<Boolean, Int, Int> {
         return try {
             val root = JSONObject(json)
             var settingsRestored = false
             var channelsRestoredCount = 0
+            var mediaRestoredCount = 0
 
             val settingsObj = when {
                 root.has("settings") -> root.getJSONObject("settings")
@@ -1132,7 +1207,10 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                     replaceSameQuality = settingsObj.optBoolean("replaceSameQuality", cur.replaceSameQuality),
                     skipExactDuplicates = settingsObj.optBoolean("skipExactDuplicates", cur.skipExactDuplicates),
                     autoBackupEnabled = settingsObj.optBoolean("autoBackupEnabled", cur.autoBackupEnabled),
-                    autoBackupIntervalHours = settingsObj.optInt("autoBackupIntervalHours", cur.autoBackupIntervalHours)
+                    autoBackupIntervalHours = settingsObj.optInt("autoBackupIntervalHours", cur.autoBackupIntervalHours),
+                    animeMetadataPreference = settingsObj.optString("animeMetadataPreference", cur.animeMetadataPreference),
+                    backupDestination = settingsObj.optString("backupDestination", cur.backupDestination),
+                    cloudSyncLibrary = settingsObj.optBoolean("cloudSyncLibrary", cur.cloudSyncLibrary)
                 )
                 saveStoredConfig(updated)
                 settingsRestored = true
@@ -1167,30 +1245,41 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                 }
             }
 
-            Pair(settingsRestored, channelsRestoredCount)
+            if (root.has("mediaItems")) {
+                val mediaArr = root.getJSONArray("mediaItems")
+                if (mediaArr.length() > 0) {
+                    val type = object : TypeToken<List<MediaItem>>() {}.type
+                    val list: List<MediaItem> = Gson().fromJson(mediaArr.toString(), type) ?: emptyList()
+                    if (list.isNotEmpty()) {
+                        mediaRestoredCount = tgClient.mergeMediaItems(list)
+                    }
+                }
+            }
+
+            Triple(settingsRestored, channelsRestoredCount, mediaRestoredCount)
         } catch (e: Exception) {
             Log.e("MainAppViewModel", "Failed to parse backup JSON: ${e.message}", e)
-            Pair(false, 0)
+            Triple(false, 0, 0)
         }
     }
 
     fun importBackupJson(json: String): Boolean {
-        val (settingsRestored, channelsRestored) = importBackupJsonDetailed(json)
-        return if (settingsRestored || channelsRestored > 0) {
-            val msg = if (channelsRestored > 0) {
-                "✓ Restored settings and $channelsRestored channel(s) from backup!"
-            } else {
-                "✓ Settings successfully restored from backup!"
-            }
+        val (settingsRestored, channelsRestored, mediaRestored) = importBackupJsonDetailed(json)
+        return if (settingsRestored || channelsRestored > 0 || mediaRestored > 0) {
+            val parts = mutableListOf<String>()
+            if (mediaRestored > 0) parts.add("$mediaRestored media items")
+            if (channelsRestored > 0) parts.add("$channelsRestored channels")
+            if (settingsRestored) parts.add("settings")
+            val msg = "✓ Restored from backup: ${parts.joinToString(", ")}"
             Toast.makeText(getApplication(), msg, Toast.LENGTH_LONG).show()
             true
         } else {
-            Toast.makeText(getApplication(), "Invalid backup JSON: No settings or channels found", Toast.LENGTH_SHORT).show()
+            Toast.makeText(getApplication(), "Invalid backup JSON: No valid data found", Toast.LENGTH_SHORT).show()
             false
         }
     }
 
-    fun backupToTelegramCloud(destination: String = "me", onDone: ((Boolean, String?) -> Unit)? = null) {
+    fun backupToTelegramCloud(destination: String? = null, onDone: ((Boolean, String?) -> Unit)? = null) {
         viewModelScope.launch {
             if (!session.value.isLoggedIn) {
                 Toast.makeText(getApplication(), "Telegram is not connected", Toast.LENGTH_SHORT).show()
@@ -1198,11 +1287,26 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                 return@launch
             }
             _isBackingUpToCloud.value = true
+            val target = destination ?: _config.value.backupDestination.ifBlank { "me" }
             val backupJson = exportBackupJson()
-            val res = tgClient.uploadBackupToTelegram(backupJson, destination)
+            val chCount = channels.value.size
+            val medCount = tgClient.getAllMediaItems().size
+            val res = tgClient.uploadBackupToTelegram(
+                backupJson = backupJson,
+                destination = target,
+                channelCount = chCount,
+                mediaCount = medCount,
+                originDevice = syncDeviceName
+            )
             _isBackingUpToCloud.value = false
             if (res.isSuccess) {
-                Toast.makeText(getApplication(), "✓ Backup saved to Telegram Saved Messages!", Toast.LENGTH_SHORT).show()
+                val now = System.currentTimeMillis()
+                prefs.edit()
+                    .putLong("last_auto_backup_timestamp", now)
+                    .putLong("last_cloud_sync_timestamp", now)
+                    .apply()
+                val targetName = if (target == "me") "Saved Messages" else target
+                Toast.makeText(getApplication(), "✓ Cloud backup saved to $targetName!", Toast.LENGTH_SHORT).show()
                 onDone?.invoke(true, null)
             } else {
                 val err = res.exceptionOrNull()?.message ?: "Upload failed"
@@ -1212,41 +1316,65 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun restoreFromTelegramCloud(source: String = "me", onDone: ((Boolean, String?) -> Unit)? = null) {
+    fun restoreFromTelegramCloud(source: String? = null, onDone: ((Boolean, String?) -> Unit)? = null) {
+        syncFromCloud(silent = false, onDone = onDone)
+    }
+
+    fun syncFromCloud(silent: Boolean = true, onDone: ((Boolean, String?) -> Unit)? = null) {
         viewModelScope.launch {
             if (!session.value.isLoggedIn) {
-                Toast.makeText(getApplication(), "Telegram is not connected", Toast.LENGTH_SHORT).show()
+                if (!silent) Toast.makeText(getApplication(), "Telegram is not connected", Toast.LENGTH_SHORT).show()
                 onDone?.invoke(false, "Telegram not connected")
                 return@launch
             }
-            _isRestoringFromCloud.value = true
-            val res = tgClient.fetchLatestBackupFromTelegram(source)
-            _isRestoringFromCloud.value = false
+            if (!silent) _isRestoringFromCloud.value = true
+            val target = _config.value.backupDestination.ifBlank { "me" }
+            val res = tgClient.fetchLatestBackupFromTelegram(target)
+            if (!silent) _isRestoringFromCloud.value = false
             if (res.isSuccess) {
                 val json = res.getOrNull()
                 if (json.isNullOrBlank()) {
-                    Toast.makeText(getApplication(), "No backup found in Telegram", Toast.LENGTH_SHORT).show()
+                    if (!silent) Toast.makeText(getApplication(), "No backup found in Telegram $target", Toast.LENGTH_SHORT).show()
                     onDone?.invoke(false, "No backup found")
-                } else {
-                    val (settingsRestored, channelsRestored) = importBackupJsonDetailed(json)
-                    if (settingsRestored || channelsRestored > 0) {
-                        Toast.makeText(
-                            getApplication(),
-                            "✓ Cloud backup restored: $channelsRestored channels & settings synced!",
-                            Toast.LENGTH_LONG
-                        ).show()
-                        if (channelsRestored > 0) {
+                    return@launch
+                }
+                try {
+                    val root = JSONObject(json)
+                    val originDeviceId = root.optString("deviceId", "")
+                    val backupTs = root.optLong("timestamp", 0L)
+                    val lastSyncTs = prefs.getLong("last_cloud_sync_timestamp", 0L)
+
+                    // If silent check and uploaded by this device or older than last sync, skip
+                    if (silent && (originDeviceId == syncDeviceId || backupTs <= lastSyncTs)) {
+                        onDone?.invoke(true, "Already up to date")
+                        return@launch
+                    }
+
+                    val (settingsRestored, channelsRestored, mediaRestored) = importBackupJsonDetailed(json)
+                    if (settingsRestored || channelsRestored > 0 || mediaRestored > 0) {
+                        prefs.edit().putLong("last_cloud_sync_timestamp", backupTs).apply()
+                        val origin = root.optString("deviceName", "Cloud")
+                        val summary = mutableListOf<String>()
+                        if (mediaRestored > 0) summary.add("$mediaRestored media")
+                        if (channelsRestored > 0) summary.add("$channelsRestored channels")
+                        if (settingsRestored) summary.add("settings")
+                        val msg = "✓ Synced from $origin: ${summary.joinToString(", ")}"
+                        Toast.makeText(getApplication(), msg, Toast.LENGTH_LONG).show()
+                        if (channelsRestored > 0 && mediaRestored == 0) {
                             syncAllChannels()
                         }
                         onDone?.invoke(true, null)
                     } else {
-                        Toast.makeText(getApplication(), "Backup file did not contain valid settings", Toast.LENGTH_SHORT).show()
-                        onDone?.invoke(false, "Invalid format")
+                        if (!silent) Toast.makeText(getApplication(), "Backup file did not contain new data", Toast.LENGTH_SHORT).show()
+                        onDone?.invoke(false, "No new data")
                     }
+                } catch (e: Exception) {
+                    if (!silent) Toast.makeText(getApplication(), "Error parsing backup: ${e.message}", Toast.LENGTH_LONG).show()
+                    onDone?.invoke(false, e.message)
                 }
             } else {
                 val err = res.exceptionOrNull()?.message ?: "Fetch failed"
-                Toast.makeText(getApplication(), "Failed to fetch backup: $err", Toast.LENGTH_LONG).show()
+                if (!silent) Toast.makeText(getApplication(), "Failed to fetch backup: $err", Toast.LENGTH_LONG).show()
                 onDone?.invoke(false, err)
             }
         }

@@ -272,7 +272,8 @@ class TelegramClientManager(private val context: Context) {
                             Log.d(TAG, "Triggering scheduled auto-backup to Telegram Saved Messages...")
                             val json = backupJsonProvider?.invoke()
                             if (!json.isNullOrBlank()) {
-                                val res = uploadBackupToTelegram(json, "me")
+                                val dest = prefs.getString("backup_destination", "me")?.ifBlank { "me" } ?: "me"
+                                val res = uploadBackupToTelegram(json, dest)
                                 if (res.isSuccess) {
                                     prefs.edit().putLong("last_auto_backup_timestamp", now).apply()
                                     Log.i(TAG, "Scheduled auto-backup to Telegram succeeded")
@@ -1031,7 +1032,9 @@ class TelegramClientManager(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "Error saving media_index.json: ${e.message}")
         }
-        prefs.edit().putString("media_index", json).apply()
+        if (json.length < 500_000) {
+            prefs.edit().putString("media_index", json).apply()
+        }
         _mediaState.value = list
     }
 
@@ -1802,6 +1805,34 @@ class TelegramClientManager(private val context: Context) {
     fun updateMediaItems(items: List<MediaItem>) {
         items.forEach { mediaIndex[it.id] = it }
         saveMediaIndex()
+    }
+
+    fun getAllMediaItems(): List<MediaItem> {
+        return mediaIndex.values.toList()
+    }
+
+    fun mergeMediaItems(incoming: List<MediaItem>): Int {
+        var updatedCount = 0
+        incoming.forEach { item ->
+            val existing = mediaIndex[item.id]
+            if (existing == null) {
+                mediaIndex[item.id] = item
+                updatedCount++
+            } else {
+                val shouldOverwrite = (item.isManuallyMatched && !existing.isManuallyMatched) ||
+                        (item.isManuallyMatched == existing.isManuallyMatched && (item.lastModified > existing.lastModified || item.dateAdded >= existing.dateAdded)) ||
+                        (!item.imdbId.isNullOrBlank() && existing.imdbId.isNullOrBlank())
+                if (shouldOverwrite) {
+                    mediaIndex[item.id] = item
+                    updatedCount++
+                }
+            }
+        }
+        if (updatedCount > 0) {
+            cleanupSplitDuplicates()
+            saveMediaIndex()
+        }
+        return updatedCount
     }
 
     fun toggleHideMediaItem(itemId: String): Boolean {
@@ -2660,9 +2691,28 @@ class TelegramClientManager(private val context: Context) {
         }
     }
 
+    private fun readBackupFileContent(file: File): String {
+        return try {
+            val bytes = file.readBytes()
+            if (bytes.size >= 2 && bytes[0] == 0x1f.toByte() && bytes[1] == 0x8b.toByte()) {
+                java.util.zip.GZIPInputStream(java.io.ByteArrayInputStream(bytes)).bufferedReader(Charsets.UTF_8).use {
+                    it.readText()
+                }
+            } else {
+                String(bytes, Charsets.UTF_8)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to decompress backup: ${e.message}", e)
+            file.readText()
+        }
+    }
+
     suspend fun uploadBackupToTelegram(
         backupJson: String,
-        destination: String = "me"
+        destination: String = "me",
+        channelCount: Int = channels.size,
+        mediaCount: Int = mediaIndex.size,
+        originDevice: String = android.os.Build.MODEL ?: "Device"
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
             if (!_sessionState.value.isLoggedIn) {
@@ -2678,12 +2728,13 @@ class TelegramClientManager(private val context: Context) {
             }
 
             val timestamp = System.currentTimeMillis()
-            val tempFile = File(context.cacheDir, "NoxMedia_backup_${timestamp}.json")
-            tempFile.writeText(backupJson)
+            val tempFile = File(context.cacheDir, "NoxMedia_backup_${timestamp}.json.gz")
+            java.util.zip.GZIPOutputStream(java.io.FileOutputStream(tempFile)).use { gz ->
+                gz.write(backupJson.toByteArray(Charsets.UTF_8))
+            }
 
-            val channelCount = channels.size
             val dateStr = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(timestamp))
-            val caption = "#NoxMediaBackup\n📺 NoxMedia Backup Snapshot\nChannels: $channelCount\nDate: $dateStr"
+            val caption = "#NoxMediaBackup\n📺 NoxMedia True Sync Snapshot\nChannels: $channelCount | Items: $mediaCount\nOrigin: $originDevice\nDate: $dateStr"
 
             val resStr = bridge.callAttr(
                 "upload_backup_file",
@@ -2726,7 +2777,7 @@ class TelegramClientManager(private val context: Context) {
                 return@withContext Result.failure(IllegalStateException("Missing Telegram credentials"))
             }
 
-            val tempFile = File(context.cacheDir, "temp_cloud_backup_${System.currentTimeMillis()}.json")
+            val tempFile = File(context.cacheDir, "temp_cloud_backup_${System.currentTimeMillis()}")
             val resStr = bridge.callAttr(
                 "fetch_latest_backup_file",
                 apiId,
@@ -2742,7 +2793,7 @@ class TelegramClientManager(private val context: Context) {
                     val downloadedPath = json.optString("file_path")
                     val file = File(downloadedPath)
                     if (file.exists() && file.length() > 0) {
-                        val content = file.readText()
+                        val content = readBackupFileContent(file)
                         try { file.delete() } catch (_: Exception) {}
                         Result.success(content)
                     } else {

@@ -63,7 +63,9 @@ data class MediaItem(
     val parts: List<SplitPart> = emptyList(),
     var isHidden: Boolean = false,
     var dateAdded: Long = 0L,
-    var rating: Double = 0.0
+    var rating: Double = 0.0,
+    var isManuallyMatched: Boolean = false,
+    var lastModified: Long = 0L
 ) {
     val formattedSize: String
         get() {
@@ -329,7 +331,9 @@ data class ServerConfig(
     var alexaVoiceControlEnabled: Boolean = false,
     var alexaDeviceName: String = "NoxMedia",
     var receiveBetaUpdates: Boolean = false,
-    var animeMetadataPreference: String = "seasonal"
+    var animeMetadataPreference: String = "seasonal",
+    var backupDestination: String = "",
+    var cloudSyncLibrary: Boolean = true
 )
 
 data class AuthSession(

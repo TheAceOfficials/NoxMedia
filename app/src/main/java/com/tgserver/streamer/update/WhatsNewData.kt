@@ -52,6 +52,11 @@ object WhatsNewRepository {
         items = listOf(
             WhatsNewItem(
                 category = ChangeCategory.NEW,
+                title = "True Multi-Device Cloud Sync",
+                description = "Bi-directional true sync across all your phones, Android TVs, and tablets. Pre-indexed library and manual rematch fixes are compressed with Gzip (~90% smaller) and synced automatically without re-scanning. Supports custom Telegram backup channels."
+            ),
+            WhatsNewItem(
+                category = ChangeCategory.NEW,
                 title = "Fix Metadata Match & Instant Live Search",
                 description = "Interactive candidate search now delivers live results within 350ms as you type without waiting or tapping search. Features inline loading indicator and instant query clearing."
             ),

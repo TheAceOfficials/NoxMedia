@@ -80,6 +80,8 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
     var skipExactDuplicates by remember(config.skipExactDuplicates) { mutableStateOf(config.skipExactDuplicates) }
     var autoBackupEnabled by remember(config.autoBackupEnabled) { mutableStateOf(config.autoBackupEnabled) }
     var autoBackupHours by remember(config.autoBackupIntervalHours) { mutableIntStateOf(config.autoBackupIntervalHours) }
+    var backupDestinationInput by remember(config.backupDestination) { mutableStateOf(config.backupDestination) }
+    var cloudSyncLibrary by remember(config.cloudSyncLibrary) { mutableStateOf(config.cloudSyncLibrary) }
     var autoSleepEnabled by remember(config.autoSleepEnabled) { mutableStateOf(config.autoSleepEnabled) }
     var autoSleepMinutes by remember(config.autoSleepTimeoutMinutes) { mutableIntStateOf(config.autoSleepTimeoutMinutes) }
     var alexaVoiceControlEnabled by remember(config.alexaVoiceControlEnabled) { mutableStateOf(config.alexaVoiceControlEnabled) }
@@ -1863,18 +1865,18 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
             // ==================== 8. BACKUP ====================
             MinimalSettingsCard(
                 icon = Icons.Default.Backup,
-                title = "Cloud & Local Backup",
-                subtitle = if (autoBackupEnabled) "Auto-sync to Telegram (${autoBackupHours}h)" else "Manual & Cloud backup",
+                title = "Cloud Sync & Multi-Device Backup",
+                subtitle = if (autoBackupEnabled) "Live sync active (${autoBackupHours}h / auto-push)" else "Manual & Cloud backup",
                 isExpanded = expandedBackup,
                 onToggleExpand = { expandedBackup = !expandedBackup }
             ) {
                 SettingToggleRow(
-                    title = "Auto-Backup to Telegram",
-                    description = "Periodically saves cloud backup snapshots of all settings & connected channels to your Telegram Saved Messages.",
+                    title = "Auto-Backup & True Sync",
+                    description = "Pushes compressed Gzip snapshots to Telegram when new videos are scanned or metadata matches are fixed.",
                     checked = autoBackupEnabled,
                     onCheckedChange = {
                         autoBackupEnabled = it
-                        viewModel.updateBackupSettings(it, autoBackupHours)
+                        viewModel.updateBackupSettings(it, autoBackupHours, backupDestinationInput, cloudSyncLibrary)
                     }
                 )
 
@@ -1908,7 +1910,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                                         .border(1.dp, if (isSelected) Color.Transparent else Color(0xFF2C2F3A), RoundedCornerShape(8.dp))
                                         .clickable {
                                             autoBackupHours = h
-                                            viewModel.updateBackupSettings(autoBackupEnabled, h)
+                                            viewModel.updateBackupSettings(autoBackupEnabled, h, backupDestinationInput, cloudSyncLibrary)
                                         }
                                 ) {
                                     Text(
@@ -1927,9 +1929,94 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(Color(0xFF22242D)))
                 Spacer(modifier = Modifier.height(14.dp))
 
+                // Full Library & Metadata Match Sync Toggle
+                SettingToggleRow(
+                    title = "Full Library & Metadata Match Sync",
+                    description = "Includes all indexed movies, series, posters, and your manual rematch fixes in cloud snapshots. Instant multi-device sync without re-scanning.",
+                    checked = cloudSyncLibrary,
+                    onCheckedChange = {
+                        cloudSyncLibrary = it
+                        viewModel.updateBackupSettings(autoBackupEnabled, autoBackupHours, backupDestinationInput, it)
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+                Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(Color(0xFF22242D)))
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Backup Destination Chat Input
+                Text(
+                    text = "Backup Destination Chat (Optional)",
+                    color = TextPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Leave empty to use Telegram Saved Messages, or enter a dedicated Channel ID (-100...) or @username.",
+                    color = TextSecondary,
+                    fontSize = 11.5.sp,
+                    lineHeight = 15.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        NothingTextField(
+                            value = backupDestinationInput,
+                            onValueChange = { backupDestinationInput = it },
+                            placeholder = "Saved Messages (default)",
+                            isMonospace = true,
+                            singleLine = true,
+                            trailingIcon = if (backupDestinationInput.isNotBlank()) {
+                                {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Clear",
+                                        tint = TextTertiary,
+                                        modifier = Modifier
+                                            .size(16.dp)
+                                            .clickable {
+                                                backupDestinationInput = ""
+                                                viewModel.updateBackupSettings(
+                                                    autoBackupEnabled,
+                                                    autoBackupHours,
+                                                    "",
+                                                    cloudSyncLibrary
+                                                )
+                                            }
+                                    )
+                                }
+                            } else null
+                        )
+                    }
+
+                    NothingPillButton(
+                        text = "Save",
+                        onClick = {
+                            viewModel.updateBackupSettings(
+                                autoBackupEnabled,
+                                autoBackupHours,
+                                backupDestinationInput.trim(),
+                                cloudSyncLibrary
+                            )
+                        },
+                        variant = NothingButtonVariant.Secondary,
+                        height = 48.dp,
+                        modifier = Modifier.width(76.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+                Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(Color(0xFF22242D)))
+                Spacer(modifier = Modifier.height(14.dp))
+
                 // Primary Cloud Row
                 Text(
-                    text = "Telegram Cloud Sync",
+                    text = "Telegram Cloud Actions",
                     color = TextPrimary,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold
@@ -1940,7 +2027,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     NothingPillButton(
-                        text = if (isBackingUpToCloud) "Uploading..." else "Backup to TG",
+                        text = if (isBackingUpToCloud) "Uploading..." else "Push Cloud Backup",
                         onClick = { viewModel.backupToTelegramCloud() },
                         enabled = !isBackingUpToCloud && !isRestoringFromCloud,
                         variant = NothingButtonVariant.Primary,
@@ -1952,8 +2039,8 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     )
 
                     NothingPillButton(
-                        text = if (isRestoringFromCloud) "Restoring..." else "Restore from TG",
-                        onClick = { viewModel.restoreFromTelegramCloud() },
+                        text = if (isRestoringFromCloud) "Syncing..." else "Pull & Sync",
+                        onClick = { viewModel.syncFromCloud(silent = false) },
                         enabled = !isBackingUpToCloud && !isRestoringFromCloud,
                         variant = NothingButtonVariant.Secondary,
                         height = 42.dp,
@@ -2023,7 +2110,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Cross-Device Auto-Sync",
+                                text = "Bi-Directional Multi-Device True Sync",
                                 color = TextPrimary,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold
@@ -2031,7 +2118,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Logging in to another device automatically syncs all your connected channels, playback settings, metadata keys, and automations.\nDevice-specific hardware limits (cache, buffer, port) and Alexa settings are kept unique per device.",
+                            text = "All your phones, Android TVs, and tablets automatically stay in true sync. When you scan channels or fix metadata matches on any device, snapshots are compressed (~90% smaller) and synced across all your connected screens without re-scanning.",
                             color = TextSecondary,
                             fontSize = 11.sp,
                             lineHeight = 15.sp
