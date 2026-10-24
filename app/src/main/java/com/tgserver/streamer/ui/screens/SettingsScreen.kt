@@ -2079,6 +2079,56 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     }
                 }
 
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Beta Channel Enrollment Toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "🧪 Early Beta Channel",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            if (config.receiveBetaUpdates) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(Color(0xFFE50914).copy(alpha = 0.2f))
+                                        .border(BorderStroke(0.5.dp, Color(0xFFE50914).copy(alpha = 0.4f)), RoundedCornerShape(4.dp))
+                                        .padding(horizontal = 5.dp, vertical = 1.dp)
+                                ) {
+                                    Text("BETA ACTIVE", color = Color(0xFFFF6B6B), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Receive experimental features and pre-release updates before official rollout.",
+                            color = TextSecondary,
+                            fontSize = 10.5.sp,
+                            lineHeight = 14.sp
+                        )
+                    }
+
+                    Switch(
+                        checked = config.receiveBetaUpdates,
+                        onCheckedChange = { viewModel.updateReceiveBetaUpdates(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Color(0xFFE50914),
+                            uncheckedThumbColor = Color.Gray,
+                            uncheckedTrackColor = Color(0xFF1E1F27)
+                        )
+                    )
+                }
+
                 // ==================== WHAT'S NEW SECTION ====================
                 Spacer(modifier = Modifier.height(14.dp))
                 Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(Color(0xFF22242D)))

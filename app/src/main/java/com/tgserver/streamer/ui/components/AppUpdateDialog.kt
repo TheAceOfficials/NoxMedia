@@ -282,14 +282,28 @@ fun AppUpdateDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(0.92f)
-                .clip(RoundedCornerShape(26.dp))
-                .background(Color(0xFF111216))
-                .border(BorderStroke(1.dp, Color(0xFF2E3038)), RoundedCornerShape(26.dp))
-                .padding(22.dp)
+        // Emil Kowalski Principle: Never animate from scale(0). Start from scale(0.94f) + fadeIn for organic materialization.
+        AnimatedVisibility(
+            visible = true,
+            enter = fadeIn(animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing)) +
+                    scaleIn(
+                        initialScale = 0.94f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                            stiffness = Spring.StiffnessMedium
+                        )
+                    ),
+            exit = fadeOut(animationSpec = tween(durationMillis = 150)) +
+                   scaleOut(targetScale = 0.94f)
         ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.92f)
+                    .clip(RoundedCornerShape(26.dp))
+                    .background(Color(0xFF111216))
+                    .border(BorderStroke(1.dp, Color(0xFF2E3038)), RoundedCornerShape(26.dp))
+                    .padding(22.dp)
+            ) {
             Column(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
@@ -511,6 +525,7 @@ fun AppUpdateDialog(
                     )
                 }
             }
+        }
         }
     }
 }

@@ -327,7 +327,8 @@ data class ServerConfig(
     var autoSleepEnabled: Boolean = false,
     var autoSleepTimeoutMinutes: Int = 30,
     var alexaVoiceControlEnabled: Boolean = false,
-    var alexaDeviceName: String = "NoxMedia"
+    var alexaDeviceName: String = "NoxMedia",
+    var receiveBetaUpdates: Boolean = false
 )
 
 data class AuthSession(

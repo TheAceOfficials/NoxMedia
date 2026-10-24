@@ -154,7 +154,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                 tgClient.refreshUserProfile()
             }
             // Auto-check for GitHub app updates in background
-            updateManager.checkForUpdate(manual = false)
+            updateManager.checkForUpdate(manual = false, includeBeta = loaded.receiveBetaUpdates)
         }
         // Ensure Alexa voice bridge is active if enabled in preferences
         if (loaded.alexaVoiceControlEnabled) {
@@ -180,7 +180,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
 
     fun checkForAppUpdate(manual: Boolean = true) {
         viewModelScope.launch {
-            updateManager.checkForUpdate(manual = manual)
+            updateManager.checkForUpdate(manual = manual, includeBeta = _config.value.receiveBetaUpdates)
         }
     }
 
@@ -743,7 +743,8 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             autoSleepEnabled = prefs.getBoolean("auto_sleep_enabled", false),
             autoSleepTimeoutMinutes = prefs.getInt("auto_sleep_timeout_minutes", 30),
             alexaVoiceControlEnabled = prefs.getBoolean("alexa_voice_control_enabled", false),
-            alexaDeviceName = prefs.getString("alexa_device_name", "NoxMedia") ?: "NoxMedia"
+            alexaDeviceName = prefs.getString("alexa_device_name", "NoxMedia") ?: "NoxMedia",
+            receiveBetaUpdates = prefs.getBoolean("receive_beta_updates", false)
         )
     }
 
@@ -770,6 +771,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             putInt("auto_sleep_timeout_minutes", cfg.autoSleepTimeoutMinutes)
             putBoolean("alexa_voice_control_enabled", cfg.alexaVoiceControlEnabled)
             putString("alexa_device_name", cfg.alexaDeviceName)
+            putBoolean("receive_beta_updates", cfg.receiveBetaUpdates)
             apply()
         }
         _config.value = cfg
@@ -943,6 +945,14 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             "✓ Alexa Voice Control disabled"
         }
         Toast.makeText(getApplication(), msg, Toast.LENGTH_LONG).show()
+    }
+
+    fun updateReceiveBetaUpdates(enabled: Boolean) {
+        val updated = _config.value.copy(receiveBetaUpdates = enabled)
+        saveStoredConfig(updated)
+        val msg = if (enabled) "✓ Enrolled in Beta Updates" else "✓ Switched to Stable Updates only"
+        Toast.makeText(getApplication(), msg, Toast.LENGTH_SHORT).show()
+        checkForAppUpdate(manual = false)
     }
 
     fun detectTailscaleIp(): String? {

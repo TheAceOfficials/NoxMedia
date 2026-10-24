@@ -130,15 +130,15 @@ fun AppRootScreen(viewModel: MainAppViewModel) {
                 AnimatedContent(
                     targetState = selectedTab,
                     transitionSpec = {
-                        val initialIdx = NAV_TABS.indexOfFirst { it.tab == initialState }
-                        val targetIdx = NAV_TABS.indexOfFirst { it.tab == targetState }
-                        if (targetIdx >= initialIdx) {
-                            (slideInHorizontally(spring(dampingRatio = 0.82f, stiffness = 420f)) { width -> width / 3 } + fadeIn(tween(220))) togetherWith
-                            (slideOutHorizontally(spring(dampingRatio = 0.82f, stiffness = 420f)) { width -> -width / 3 } + fadeOut(tween(180)))
-                        } else {
-                            (slideInHorizontally(spring(dampingRatio = 0.82f, stiffness = 420f)) { width -> -width / 3 } + fadeIn(tween(220))) togetherWith
-                            (slideOutHorizontally(spring(dampingRatio = 0.82f, stiffness = 420f)) { width -> width / 3 } + fadeOut(tween(180)))
-                        }
+                        // Emil Kowalski Principle: Navigation tabs are high-frequency actions (50+ times/day).
+                        // Full horizontal sliding causes visual exhaustion.
+                        // Subtle scale (0.982f -> 1.0f) + snappy 160ms crossfade feels instant, calm and responsive.
+                        (fadeIn(animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing)) +
+                         scaleIn(initialScale = 0.982f, animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing)))
+                            .togetherWith(
+                                fadeOut(animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing)) +
+                                scaleOut(targetScale = 0.982f, animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing))
+                            )
                     },
                     label = "tab_content_switch"
                 ) { tab ->

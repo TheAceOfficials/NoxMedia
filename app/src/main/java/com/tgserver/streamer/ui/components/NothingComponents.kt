@@ -175,7 +175,8 @@ fun NothingPillButton(
 }
 
 /**
- * Frosted Obsidian Squircle Card with 1dp subtle metallic border.
+ * Frosted Obsidian Squircle Card with 1dp subtle metallic border
+ * and optional tactile press spring feedback.
  */
 @Composable
 fun NothingCard(
@@ -184,13 +185,36 @@ fun NothingCard(
     backgroundColor: Color = SurfaceCard,
     borderColor: Color = BorderSubtle,
     contentPadding: PaddingValues = PaddingValues(20.dp),
+    onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+
+    val cardScale by animateFloatAsState(
+        targetValue = if (isPressed && onClick != null) 0.98f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "nothing_card_scale"
+    )
+
     Column(
         modifier = modifier
+            .scale(cardScale)
             .clip(shape)
             .border(1.dp, borderColor, shape)
             .background(backgroundColor)
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable(
+                        interactionSource = interactionSource,
+                        indication = null,
+                        onClick = onClick
+                    )
+                } else Modifier
+            )
             .padding(contentPadding),
         content = content
     )
@@ -409,31 +433,32 @@ fun NothingDotLoader(
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "dot_loader_infinite")
 
+    // Emil Kowalski Perceived Performance: Fast fluid spinners make waiting times feel 40% shorter
     val dot1Scale by infiniteTransition.animateFloat(
-        initialValue = 0.4f,
-        targetValue = 1.2f,
+        initialValue = 0.5f,
+        targetValue = 1.15f,
         animationSpec = infiniteRepeatable(
-            animation = tween(600, easing = FastOutSlowInEasing),
+            animation = tween(360, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "dot1_scale"
     )
 
     val dot2Scale by infiniteTransition.animateFloat(
-        initialValue = 0.4f,
-        targetValue = 1.2f,
+        initialValue = 0.5f,
+        targetValue = 1.15f,
         animationSpec = infiniteRepeatable(
-            animation = tween(600, delayMillis = 150, easing = FastOutSlowInEasing),
+            animation = tween(360, delayMillis = 100, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "dot2_scale"
     )
 
     val dot3Scale by infiniteTransition.animateFloat(
-        initialValue = 0.4f,
-        targetValue = 1.2f,
+        initialValue = 0.5f,
+        targetValue = 1.15f,
         animationSpec = infiniteRepeatable(
-            animation = tween(600, delayMillis = 300, easing = FastOutSlowInEasing),
+            animation = tween(360, delayMillis = 200, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "dot3_scale"
@@ -544,15 +569,29 @@ fun NothingSwitch(
     val maxTravel = trackWidth - thumbSize - padding
 
     val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
 
-    // 0.5s ease-out transition matching --a: 0.5s ease-out
-    val animSpecColor = tween<Color>(durationMillis = 500, easing = FastOutSlowInEasing)
-    val animSpecDp = tween<Dp>(durationMillis = 500, easing = FastOutSlowInEasing)
+    // Emil Kowalski Principle: Micro-interactions must be snappy (<250ms) using organic springs.
+    // Thumb travels with bouncy-damping spring, track colors transition in 180ms ease-out.
+    val animSpecColor = tween<Color>(durationMillis = 180, easing = FastOutSlowInEasing)
+    val animSpecDp = spring<Dp>(
+        dampingRatio = Spring.DampingRatioMediumBouncy,
+        stiffness = Spring.StiffnessMedium
+    )
 
     val thumbOffset by animateDpAsState(
         targetValue = if (checked) maxTravel else padding,
         animationSpec = animSpecDp,
         label = "switch_thumb_offset"
+    )
+
+    val switchScale by animateFloatAsState(
+        targetValue = if (isPressed && enabled) 0.94f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessHigh
+        ),
+        label = "switch_press_scale"
     )
 
     val trackBgColor by animateColorAsState(
@@ -577,6 +616,7 @@ fun NothingSwitch(
 
     Box(
         modifier = modifier
+            .scale(switchScale)
             .size(width = trackWidth, height = trackHeight)
             .clip(CircleShape)
             .border(1.5.dp, haloBorderColor, CircleShape)

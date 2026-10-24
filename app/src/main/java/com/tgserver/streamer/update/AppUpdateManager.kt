@@ -36,6 +36,7 @@ data class GitHubReleaseResponse(
     @SerializedName("name") val name: String = "",
     @SerializedName("body") val body: String = "",
     @SerializedName("published_at") val publishedAt: String = "",
+    @SerializedName("prerelease") val prerelease: Boolean = false,
     @SerializedName("assets") val assets: List<GitHubReleaseAsset> = emptyList()
 )
 
@@ -147,10 +148,9 @@ class AppUpdateManager(private val context: Context) {
 
     /**
      * Checks for new release on GitHub.
-     * Uses web release redirect first (zero rate limits, works reliably on all cellular carriers),
-     * and falls back to GitHub REST API.
+     * If user is on beta build or includeBeta is true, checks for latest pre-release as well.
      */
-    suspend fun checkForUpdate(manual: Boolean = false): Boolean = withContext(Dispatchers.IO) {
+    suspend fun checkForUpdate(manual: Boolean = false, includeBeta: Boolean = false): Boolean = withContext(Dispatchers.IO) {
         if (!manual && _updateState.value is UpdateUiState.Downloading) {
             return@withContext false
         }
@@ -158,15 +158,25 @@ class AppUpdateManager(private val context: Context) {
         _updateState.value = UpdateUiState.Checking
 
         try {
-            // 1. Fetch release: First try Web Redirect (bypasses GitHub REST API 60 req/hr IP rate limit completely)
-            var release = fetchReleaseViaWebRedirect()
+            val currentVersion = getAppCurrentVersion()
+            val isCurrentBeta = currentVersion.contains("beta", ignoreCase = true) || includeBeta
 
-            // 2. Fallback to GitHub REST API if web redirect didn't resolve
-            if (release == null) {
-                release = fetchRelease(RELEASES_API_URL)
-            }
-            if (release == null) {
-                release = fetchFirstReleaseFromList(ALL_RELEASES_URL)
+            var release: GitHubReleaseResponse? = null
+
+            if (isCurrentBeta) {
+                // Fetch latest pre-release or stable release from releases list
+                release = fetchLatestBetaOrStableRelease(ALL_RELEASES_URL)
+            } else {
+                // 1. Stable: First try Web Redirect (bypasses GitHub REST API 60 req/hr IP rate limit completely)
+                release = fetchReleaseViaWebRedirect()
+
+                // 2. Fallback to GitHub REST API if web redirect didn't resolve
+                if (release == null) {
+                    release = fetchRelease(RELEASES_API_URL)
+                }
+                if (release == null) {
+                    release = fetchFirstReleaseFromList(ALL_RELEASES_URL, allowBeta = false)
+                }
             }
 
             if (release == null || release.assets.isEmpty()) {
@@ -184,7 +194,6 @@ class AppUpdateManager(private val context: Context) {
             }
 
             // 4. Compare versions
-            val currentVersion = getAppCurrentVersion()
             val isNewer = isRemoteNewer(release, currentVersion)
 
             if (isNewer) {
@@ -283,7 +292,7 @@ class AppUpdateManager(private val context: Context) {
         }
     }
 
-    private fun fetchFirstReleaseFromList(url: String): GitHubReleaseResponse? {
+    private fun fetchLatestBetaOrStableRelease(url: String): GitHubReleaseResponse? {
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", "NoxMedia-Android-App")
@@ -296,7 +305,33 @@ class AppUpdateManager(private val context: Context) {
                 if (response.isSuccessful) {
                     val body = response.body?.string() ?: return null
                     val list = gson.fromJson(body, Array<GitHubReleaseResponse>::class.java)
-                    list.firstOrNull()
+                    // Return the first valid release (could be pre-release or stable)
+                    list.firstOrNull { it.assets.isNotEmpty() }
+                } else null
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun fetchFirstReleaseFromList(url: String, allowBeta: Boolean = false): GitHubReleaseResponse? {
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", "NoxMedia-Android-App")
+            .header("Accept", "application/vnd.github.v3+json")
+            .get()
+            .build()
+
+        return try {
+            httpClient.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: return null
+                    val list = gson.fromJson(body, Array<GitHubReleaseResponse>::class.java)
+                    if (allowBeta) {
+                        list.firstOrNull { it.assets.isNotEmpty() }
+                    } else {
+                        list.firstOrNull { !it.prerelease && it.assets.isNotEmpty() }
+                    }
                 } else null
             }
         } catch (e: Exception) {
@@ -344,14 +379,17 @@ class AppUpdateManager(private val context: Context) {
      * Compares remote release version against current installed app.
      */
     private fun isRemoteNewer(release: GitHubReleaseResponse, currentVersion: String): Boolean {
-        val rawTag = release.tagName.removePrefix("v").removePrefix("V").trim()
-        val rawCurrent = currentVersion.removePrefix("v").removePrefix("V").trim()
+        val cleanTag = release.tagName.removePrefix("v").removePrefix("V").trim()
+        val cleanCurrent = currentVersion.removePrefix("v").removePrefix("V").trim()
 
-        if (rawTag.equals(rawCurrent, ignoreCase = true)) return false
+        if (cleanTag.equals(cleanCurrent, ignoreCase = true)) return false
 
-        // Check semantic numbers if both are versions like 1.1 vs 1.0
-        val remoteParts = rawTag.split(".").mapNotNull { it.toIntOrNull() }
-        val currentParts = rawCurrent.split(".").mapNotNull { it.toIntOrNull() }
+        // Extract base semantic numbers (e.g., "1.1.25" from "1.1.25-beta")
+        val remoteCore = cleanTag.substringBefore("-")
+        val currentCore = cleanCurrent.substringBefore("-")
+
+        val remoteParts = remoteCore.split(".").mapNotNull { it.toIntOrNull() }
+        val currentParts = currentCore.split(".").mapNotNull { it.toIntOrNull() }
 
         if (remoteParts.isNotEmpty() && currentParts.isNotEmpty()) {
             for (i in 0 until maxOf(remoteParts.size, currentParts.size)) {
@@ -360,6 +398,21 @@ class AppUpdateManager(private val context: Context) {
                 if (r > c) return true
                 if (r < c) return false
             }
+
+            // If numerical parts are identical (e.g. 1.1.25 vs 1.1.25-beta)
+            // Stable (no "-beta") is newer than Beta
+            val remoteIsBeta = cleanTag.contains("beta", ignoreCase = true)
+            val currentIsBeta = cleanCurrent.contains("beta", ignoreCase = true)
+
+            if (currentIsBeta && !remoteIsBeta) {
+                // Switching from beta to final stable release of the same version
+                return true
+            }
+            if (!currentIsBeta && remoteIsBeta) {
+                // Stable should not downgrade to same beta
+                return false
+            }
+
             return false
         }
 

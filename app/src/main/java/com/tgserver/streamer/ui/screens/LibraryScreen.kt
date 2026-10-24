@@ -772,11 +772,29 @@ private fun PosterCard(
     group: MediaGroup,
     onClick: () -> Unit
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+
+    // Emil Kowalski Principle: Pressable media cards must have active scale feedback (0.965f)
+    val cardScale by animateFloatAsState(
+        targetValue = if (isPressed) 0.962f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "poster_card_press"
+    )
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .scale(cardScale)
             .clip(RoundedCornerShape(14.dp))
-            .clickable { onClick() },
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            ),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         // Clean Poster art (Overlay quality pills removed as requested to avoid messy look)
