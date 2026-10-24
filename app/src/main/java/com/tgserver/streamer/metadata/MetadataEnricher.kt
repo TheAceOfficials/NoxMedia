@@ -847,6 +847,8 @@ class MetadataEnricher {
 
         val results = mutableListOf<EnrichedMetadata>()
         val seenImdb = mutableSetOf<String>()
+        val seenTmdb = mutableSetOf<Int>()
+        val seenTitleYear = mutableSetOf<String>()
         val cType = if (type == "movie") "movie" else "series"
 
         // 1. Direct IMDb ID lookup if input looks like tt1234567
@@ -870,6 +872,7 @@ class MetadataEnricher {
                                 val imdbId = metaObj.get("imdb_id")?.asString ?: cleanQuery
                                 val candidate = EnrichedMetadata(
                                     title = name,
+                                    type = type,
                                     year = year,
                                     overview = desc,
                                     posterUrl = poster,
@@ -878,6 +881,7 @@ class MetadataEnricher {
                                 )
                                 results.add(candidate)
                                 seenImdb.add(imdbId.lowercase())
+                                if (name != null) seenTitleYear.add("${name.lowercase().trim()}:${year ?: ""}")
                             }
                         }
                     }
@@ -885,7 +889,7 @@ class MetadataEnricher {
             } catch (_: Exception) {}
         }
 
-        // 2. High-speed TMDB search if api key available (Priority 1 ~50ms)
+        // 2. High-speed TMDB search (Priority 1 ~50ms)
         if (tmdbKey.isNotBlank()) {
             try {
                 val enc = URLEncoder.encode(cleanQuery, "UTF-8")
@@ -899,7 +903,7 @@ class MetadataEnricher {
                             val root = JsonParser.parseString(body).asJsonObject
                             val items = root.getAsJsonArray("results")
                             if (items != null) {
-                                for (i in 0 until minOf(items.size(), 8)) {
+                                for (i in 0 until minOf(items.size(), 10)) {
                                     val obj = items[i].asJsonObject
                                     val tmdbId = obj.get("id").asInt
                                     val name = if (type == "movie") obj.get("title")?.asString else obj.get("name")?.asString
@@ -913,9 +917,13 @@ class MetadataEnricher {
                                     val posterUrl = if (!posterPath.isNullOrBlank()) "https://image.tmdb.org/t/p/w500$posterPath" else null
                                     val bgUrl = if (!bgPath.isNullOrBlank()) "https://image.tmdb.org/t/p/original$bgPath" else null
 
+                                    seenTmdb.add(tmdbId)
+                                    seenTitleYear.add("${name.lowercase().trim()}:${year ?: ""}")
+
                                     results.add(
                                         EnrichedMetadata(
                                             title = name,
+                                            type = type,
                                             year = year,
                                             overview = overview,
                                             posterUrl = posterUrl,
@@ -931,7 +939,7 @@ class MetadataEnricher {
             } catch (_: Exception) {}
         }
 
-        // 3. Cinemeta catalog search (Fallback)
+        // 3. Cinemeta catalog search (Fallback, deduplicating against TMDB results)
         try {
             val enc = URLEncoder.encode(cleanQuery, "UTF-8")
             val url = "https://v3-cinemeta.strem.io/catalog/$cType/top/search=$enc.json"
@@ -952,12 +960,30 @@ class MetadataEnricher {
                                 val bg = obj.get("background")?.asString
                                 val desc = obj.get("description")?.asString
                                 val imdbId = obj.get("imdb_id")?.asString ?: obj.get("id")?.asString
-                                if (imdbId != null && !seenImdb.add(imdbId.lowercase())) {
+
+                                // Check if already seen via IMDb ID or exact Title+Year from TMDB
+                                val normKey = "${name.lowercase().trim()}:${year ?: ""}"
+                                if (imdbId != null && seenImdb.contains(imdbId.lowercase())) continue
+                                if (seenTitleYear.contains(normKey)) {
+                                    // If we already have this from TMDB, enrich the existing item with imdbId if missing
+                                    if (!imdbId.isNullOrBlank()) {
+                                        val idx = results.indexOfFirst {
+                                            it.title.equals(name, ignoreCase = true) && (it.year == year || it.year == null)
+                                        }
+                                        if (idx >= 0 && results[idx].imdbId.isNullOrBlank()) {
+                                            results[idx] = results[idx].copy(imdbId = imdbId)
+                                        }
+                                    }
                                     continue
                                 }
+
+                                if (imdbId != null) seenImdb.add(imdbId.lowercase())
+                                seenTitleYear.add(normKey)
+
                                 results.add(
                                     EnrichedMetadata(
                                         title = name,
+                                        type = type,
                                         year = year,
                                         overview = desc,
                                         posterUrl = poster,

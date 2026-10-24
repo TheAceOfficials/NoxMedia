@@ -1314,62 +1314,19 @@ private fun ContentDetailsScreen(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // ==================== 2. APPLE TV ACTION BUTTONS ROW ====================
+        // ==================== 2. PRIMARY ACTION BUTTON: FIX METADATA MATCH ====================
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Left Action: Rescan / Match Metadata
+            // Clear Labeled Primary Button: Fix Metadata Match
             Surface(
                 onClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     showRescanDialog = true
-                },
-                shape = CircleShape,
-                color = Color(0xFF191B24),
-                border = BorderStroke(0.8.dp, Color(0x33FFFFFF)),
-                modifier = Modifier.size(44.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = "Rescan",
-                        tint = Color.White,
-                        modifier = Modifier.size(19.dp)
-                    )
-                }
-            }
-
-            // Center Primary: Apple TV Signature White Pill Button
-            val primaryStreamItem = remember(group.items, selectedSeason, isSeries) {
-                if (isSeries) {
-                    val seasonItems = seasonMap[selectedSeason] ?: group.items
-                    seasonItems.firstOrNull { !it.isHidden } ?: seasonItems.firstOrNull() ?: group.items.firstOrNull()
-                } else {
-                    group.items.firstOrNull { !it.isHidden } ?: group.items.firstOrNull()
-                }
-            }
-
-            val playButtonLabel = if (isSeries) {
-                val epNum = primaryStreamItem?.episode ?: 1
-                "Play S$selectedSeason : E$epNum"
-            } else {
-                "Play / Stream"
-            }
-
-            Surface(
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    if (primaryStreamItem != null) {
-                        val encodedName = try {
-                            URLEncoder.encode(primaryStreamItem.fileName.ifBlank { "video.mp4" }, "UTF-8").replace("+", "%20")
-                        } catch (_: Exception) { "video.mp4" }
-                        val streamUrl = "$streamBaseUrl/stream/video/${primaryStreamItem.channelId}/${primaryStreamItem.messageId}/$encodedName"
-                        onCopyStream(streamUrl)
-                    }
                 },
                 shape = CircleShape,
                 color = Color.White,
@@ -1383,14 +1340,14 @@ private fun ContentDetailsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "Play",
+                        imageVector = Icons.Default.Search,
+                        contentDescription = "Fix Match",
                         tint = Color.Black,
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(18.dp)
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = playButtonLabel,
+                        text = "Fix Metadata Match",
                         color = Color.Black,
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.5.sp
@@ -2227,15 +2184,24 @@ private fun RescanMetadataDialog(
     onSynced: (EnrichedMetadata) -> Unit
 ) {
     var searchQuery by remember { mutableStateOf(group.title) }
+    var searchType by remember { mutableStateOf(group.type) } // "movie" or "series"
     var isLoading by remember { mutableStateOf(false) }
     var results by remember { mutableStateOf<List<EnrichedMetadata>>(emptyList()) }
     var searchAttempted by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(Unit) {
+    // Live Instant Search with 350ms debounce (no waiting 5-6s, snappy as user types)
+    LaunchedEffect(searchQuery, searchType) {
+        val q = searchQuery.trim()
+        if (q.isBlank()) {
+            results = emptyList()
+            isLoading = false
+            return@LaunchedEffect
+        }
+        delay(350)
         isLoading = true
         searchAttempted = true
-        results = viewModel.searchMetadataCandidates(searchQuery, group.type)
+        results = viewModel.searchMetadataCandidates(q, searchType)
         isLoading = false
     }
 
@@ -2251,7 +2217,7 @@ private fun RescanMetadataDialog(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Rescan Metadata",
+                    text = "Fix Metadata Match",
                     color = Color.White,
                     fontFamily = NdotFont,
                     fontSize = 17.sp,
@@ -2271,31 +2237,30 @@ private fun RescanMetadataDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 460.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                    .heightIn(max = 500.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
-                    text = "Search Cinemeta or enter IMDb ID (e.g. tt39395275) to re-sync correct title, poster, and stream mappings.",
+                    text = "Search TMDB / Cinemeta or enter IMDb ID (e.g. tt14173636) to re-sync correct title, poster, and stream mappings.",
                     color = Color(0xFF8E909A),
-                    fontSize = 11.5.sp,
-                    lineHeight = 16.sp
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp
                 )
 
-                // Search field + Search button
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                // Search field + Search indicator
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(42.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF1A1C25))
+                        .border(1.dp, Color(0xFF2E3242), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.CenterStart
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(40.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(Color(0xFF1A1C25))
-                            .border(1.dp, Color(0xFF2E3242), RoundedCornerShape(10.dp))
-                            .padding(horizontal = 10.dp),
-                        contentAlignment = Alignment.CenterStart
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         BasicTextField(
                             value = searchQuery,
@@ -2303,40 +2268,72 @@ private fun RescanMetadataDialog(
                             singleLine = true,
                             textStyle = androidx.compose.ui.text.TextStyle(
                                 color = Color.White,
-                                fontSize = 12.5.sp,
+                                fontSize = 13.sp,
                                 fontFamily = FontFamily.Default
                             ),
                             cursorBrush = androidx.compose.ui.graphics.SolidColor(Color(0xFFA855F7)),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.weight(1f)
                         )
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                color = Color(0xFFA855F7),
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else if (searchQuery.isNotBlank()) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Clear",
+                                tint = Color(0xFF717482),
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .clickable { searchQuery = "" }
+                            )
+                        }
                     }
+                }
 
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                isLoading = true
-                                searchAttempted = true
-                                results = viewModel.searchMetadataCandidates(searchQuery, group.type)
-                                isLoading = false
+                // Type Toggle: Switch between Movie and Series!
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Content Type:",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("movie" to "🎬 Movie", "series" to "📺 Series").forEach { (typeKey, label) ->
+                            val isSel = searchType == typeKey
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSel) Color(0xFFA855F7) else Color(0xFF1E202B))
+                                    .border(
+                                        1.dp,
+                                        if (isSel) Color(0xFFC084FC) else Color(0xFF2C2F3C),
+                                        RoundedCornerShape(8.dp)
+                                    )
+                                    .clickable { searchType = typeKey }
+                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                            ) {
+                                Text(
+                                    text = label,
+                                    color = if (isSel) Color.White else Color(0xFF94A3B8),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
                             }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFA855F7)),
-                        shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                        modifier = Modifier.height(40.dp)
-                    ) {
-                        Text(
-                            text = "SEARCH",
-                            color = Color.White,
-                            fontFamily = NdotFont,
-                            fontSize = 10.sp,
-                            letterSpacing = 0.5.sp
-                        )
+                        }
                     }
                 }
 
                 // Results list
-                if (isLoading) {
+                if (isLoading && results.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -2349,7 +2346,7 @@ private fun RescanMetadataDialog(
                             strokeWidth = 2.dp
                         )
                     }
-                } else if (results.isEmpty() && searchAttempted) {
+                } else if (results.isEmpty() && searchAttempted && !isLoading) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -2357,10 +2354,11 @@ private fun RescanMetadataDialog(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "No matches found. Try entering an IMDb ID (e.g. tt1234567)",
+                            text = "No matches found for \"$searchQuery\" in ${searchType.uppercase()}.\nTry entering an IMDb ID (e.g. tt1234567)",
                             color = Color(0xFF717482),
                             fontSize = 11.5.sp,
-                            textAlign = TextAlign.Center
+                            textAlign = TextAlign.Center,
+                            lineHeight = 16.sp
                         )
                     }
                 } else {
@@ -2372,7 +2370,7 @@ private fun RescanMetadataDialog(
                             CandidateCard(
                                 candidate = candidate,
                                 onSelect = {
-                                    viewModel.applyManualMetadata(group.items, candidate)
+                                    viewModel.applyManualMetadata(group.items, candidate, targetType = searchType)
                                     onSynced(candidate)
                                 }
                             )

@@ -522,23 +522,27 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         MetadataEnricher.searchCandidates(query, type, tmdbKey)
     }
 
-    fun applyManualMetadata(groupItems: List<MediaItem>, meta: EnrichedMetadata) {
+    fun applyManualMetadata(groupItems: List<MediaItem>, meta: EnrichedMetadata, targetType: String? = null) {
         viewModelScope.launch(Dispatchers.IO) {
             val tmdbKey = prefs.getString("tmdb_api_key", "") ?: ""
             val (enriched, episodeMap) = MetadataEnricher.fetchFullMetadataDetails(meta, tmdbKey)
+            val effectiveType = targetType ?: meta.type ?: groupItems.firstOrNull()?.type ?: "movie"
 
-            val updated = groupItems.map { item ->
-                val s = item.season
-                val e = item.episode
+            val updated = groupItems.mapIndexed { index, item ->
+                // If switching from movie to series and item had no season/episode, default to S01 E(index+1)
+                val s = if (effectiveType == "series") (item.season ?: 1) else null
+                val e = if (effectiveType == "series") (item.episode ?: (index + 1)) else null
+
                 val newEpTitle = if (s != null && e != null) {
-                    episodeMap[Pair(s, e)] ?: item.episodeTitle
-                } else {
-                    item.episodeTitle
-                }
+                    episodeMap[Pair(s, e)] ?: item.episodeTitle ?: "Episode $e"
+                } else null
 
                 item.copy(
                     title = enriched.title ?: meta.title ?: item.title,
+                    type = effectiveType,
                     year = enriched.year ?: meta.year ?: item.year,
+                    season = s,
+                    episode = e,
                     overview = enriched.overview ?: meta.overview ?: item.overview,
                     posterUrl = enriched.posterUrl ?: meta.posterUrl ?: item.posterUrl,
                     backdropUrl = enriched.backdropUrl ?: meta.backdropUrl ?: item.backdropUrl,
@@ -562,7 +566,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             withContext(Dispatchers.Main) {
                 Toast.makeText(
                     getApplication(),
-                    "✓ Metadata synced: ${enriched.title ?: meta.title} (${enriched.year ?: meta.year})",
+                    "✓ Metadata synced: ${enriched.title ?: meta.title} (${enriched.year ?: meta.year}) • ${effectiveType.uppercase()}",
                     Toast.LENGTH_SHORT
                 ).show()
             }
