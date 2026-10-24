@@ -2090,7 +2090,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "🧪 Early Beta Channel",
+                                text = "Early Beta Access",
                                 color = Color.White,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold
@@ -2173,21 +2173,12 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                                 )
                             }
 
-                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text(
-                                    text = "What's New!",
-                                    color = TextPrimary,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = "${WhatsNewRepository.currentRelease.releaseTitle} • v${WhatsNewRepository.currentRelease.version}",
-                                    color = TextSecondary,
-                                    fontSize = 11.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
+                            Text(
+                                text = "What's New!",
+                                color = TextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
 
                         Row(
@@ -2237,7 +2228,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                                         modifier = Modifier.fillMaxWidth(),
                                         verticalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
-                                        // Category Pill
+                                        // Category Pill (Premium Clean Dot without emojis)
                                         Surface(
                                             shape = RoundedCornerShape(6.dp),
                                             color = Color(category.hexColor).copy(alpha = 0.12f),
@@ -2246,11 +2237,12 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                                             Row(
                                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                                                 verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                                             ) {
-                                                Text(
-                                                    text = category.emoji,
-                                                    fontSize = 11.sp
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(5.dp)
+                                                        .background(Color(category.hexColor), CircleShape)
                                                 )
                                                 Text(
                                                     text = "${category.label.uppercase()} (${items.size})",
