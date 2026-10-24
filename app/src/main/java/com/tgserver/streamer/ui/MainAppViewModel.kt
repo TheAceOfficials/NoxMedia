@@ -15,6 +15,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.tgserver.streamer.data.model.AuthSession
 import com.tgserver.streamer.data.model.ChannelInfo
+import com.tgserver.streamer.data.model.MediaGroup
 import com.tgserver.streamer.data.model.MediaItem
 import com.tgserver.streamer.data.model.ServerConfig
 import com.tgserver.streamer.metadata.EnrichedMetadata
