@@ -2768,7 +2768,8 @@ class TelegramClientManager(private val context: Context) {
     }
 
     suspend fun fetchLatestBackupFromTelegram(
-        source: String = "me"
+        source: String = "me",
+        lastSyncTimestamp: Long = 0L
     ): Result<String?> = withContext(Dispatchers.IO) {
         try {
             if (!_sessionState.value.isLoggedIn) {
@@ -2790,7 +2791,8 @@ class TelegramClientManager(private val context: Context) {
                 apiHash,
                 sessionStr,
                 tempFile.absolutePath,
-                source.ifBlank { "me" }
+                source.ifBlank { "me" },
+                lastSyncTimestamp
             ).toString()
 
             val json = JSONObject(resStr)
@@ -2805,6 +2807,9 @@ class TelegramClientManager(private val context: Context) {
                     } else {
                         Result.failure(Exception("Downloaded backup file is empty or missing"))
                     }
+                }
+                "up_to_date" -> {
+                    Result.success(null)
                 }
                 "not_found" -> {
                     Result.success(null)

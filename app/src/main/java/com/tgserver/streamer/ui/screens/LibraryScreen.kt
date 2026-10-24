@@ -38,6 +38,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Movie
@@ -345,6 +346,7 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                 // FULL SCREEN CONTENT DETAILS VIEW
                 ContentDetailsScreen(
                     group = currentGroup,
+                    allGroups = mediaGroups,
                     viewModel = viewModel,
                     streamBaseUrl = streamBaseUrl,
                     onBack = {
@@ -959,6 +961,7 @@ private fun RemoteLogoOrTitle(
 @OptIn(ExperimentalLayoutApi::class)
 private fun ContentDetailsScreen(
     group: MediaGroup,
+    allGroups: List<MediaGroup> = emptyList(),
     viewModel: MainAppViewModel,
     streamBaseUrl: String,
     onBack: () -> Unit,
@@ -968,6 +971,7 @@ private fun ContentDetailsScreen(
     val haptic = LocalHapticFeedback.current
     val isSeries = group.type == "series" || group.type == "anime"
     var showRescanDialog by remember { mutableStateOf(false) }
+    var showMergeDialog by remember { mutableStateOf(false) }
     var showPosterZoomDialog by remember { mutableStateOf(false) }
     var isOverviewExpanded by remember { mutableStateOf(false) }
 
@@ -1006,6 +1010,18 @@ private fun ContentDetailsScreen(
             onDismiss = { showRescanDialog = false },
             onSynced = {
                 showRescanDialog = false
+            }
+        )
+    }
+
+    if (showMergeDialog) {
+        MergeTitlesDialog(
+            currentGroup = group,
+            allGroups = allGroups,
+            onDismiss = { showMergeDialog = false },
+            onMerge = { target ->
+                showMergeDialog = false
+                viewModel.mergeMediaGroups(sourceGroup = group, targetGroup = target)
             }
         )
     }
@@ -1269,12 +1285,12 @@ private fun ContentDetailsScreen(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-        // ==================== 2. PRIMARY ACTION BUTTON: FIX METADATA MATCH ====================
+        // ==================== 2. PRIMARY ACTION BUTTONS: FIX MATCH, MERGE, POSTER ====================
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Clear Labeled Primary Button: Fix Metadata Match
@@ -1306,6 +1322,27 @@ private fun ContentDetailsScreen(
                         color = Color.Black,
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.5.sp
+                    )
+                }
+            }
+
+            // Merge with Another Title in Library Button
+            Surface(
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    showMergeDialog = true
+                },
+                shape = CircleShape,
+                color = Color(0xFF191B24),
+                border = BorderStroke(0.8.dp, Color(0x33FFFFFF)),
+                modifier = Modifier.size(44.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.Layers,
+                        contentDescription = "Merge with another title",
+                        tint = Color(0xFFA855F7),
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
@@ -1579,9 +1616,10 @@ private fun ContentDetailsScreen(
                             fontSize = 9.5.sp,
                             letterSpacing = 0.5.sp
                         )
-                        Row(
+                        FlowRow(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
                             // IMDb ID pill
                             Surface(
@@ -1594,13 +1632,15 @@ private fun ContentDetailsScreen(
                                     horizontalArrangement = Arrangement.spacedBy(5.dp),
                                     modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
                                 ) {
-                                    Text("IMDb", color = Color(0xFFFBBF24), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    Text("IMDb", color = Color(0xFFFBBF24), fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                                     Text(
                                         text = group.imdbId ?: "N/A",
                                         color = Color.White,
                                         fontSize = 11.5.sp,
                                         fontWeight = FontWeight.SemiBold,
-                                        fontFamily = FontFamily.Monospace
+                                        fontFamily = FontFamily.Monospace,
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
                                 }
                             }
@@ -1617,13 +1657,15 @@ private fun ContentDetailsScreen(
                                         horizontalArrangement = Arrangement.spacedBy(5.dp),
                                         modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
                                     ) {
-                                        Text("TMDB", color = Color(0xFF60A5FA), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        Text("TMDB", color = Color(0xFF60A5FA), fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                                         Text(
                                             text = group.tmdbId.toString(),
                                             color = Color.White,
                                             fontSize = 11.5.sp,
                                             fontWeight = FontWeight.SemiBold,
-                                            fontFamily = FontFamily.Monospace
+                                            fontFamily = FontFamily.Monospace,
+                                            maxLines = 1,
+                                            softWrap = false
                                         )
                                     }
                                 }
@@ -1642,13 +1684,15 @@ private fun ContentDetailsScreen(
                                         horizontalArrangement = Arrangement.spacedBy(5.dp),
                                         modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
                                     ) {
-                                        Text("KITSU", color = Color(0xFFFF7A00), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        Text("KITSU", color = Color(0xFFFF7A00), fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                                         Text(
                                             text = "#$kitsuId",
                                             color = Color.White,
                                             fontSize = 11.5.sp,
                                             fontWeight = FontWeight.SemiBold,
-                                            fontFamily = FontFamily.Monospace
+                                            fontFamily = FontFamily.Monospace,
+                                            maxLines = 1,
+                                            softWrap = false
                                         )
                                     }
                                 }
@@ -3083,45 +3127,21 @@ private fun MediaVersionsSection(
         // Section Header with Dot Matrix
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF38BDF8))
-                )
-                Text(
-                    text = "VERSIONS IN LIBRARY",
-                    color = Color.White,
-                    fontFamily = NdotFont,
-                    fontSize = 12.sp,
-                    letterSpacing = 0.8.sp
-                )
-                Surface(
-                    shape = RoundedCornerShape(999.dp),
-                    color = Color(0x18FFFFFF),
-                    border = BorderStroke(0.5.dp, Color(0x33FFFFFF))
-                ) {
-                    Text(
-                        text = "${versions.size}",
-                        color = Color(0xFFD1D5DB),
-                        fontSize = 10.sp,
-                        fontFamily = NdotFont,
-                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 1.dp)
-                    )
-                }
-            }
-
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF38BDF8))
+            )
             Text(
-                text = "Detected OTT & Sources",
-                color = Color(0xFF717482),
-                fontSize = 11.sp
+                text = "IN YOUR COLLECTION",
+                color = Color.White,
+                fontFamily = NdotFont,
+                fontSize = 12.sp,
+                letterSpacing = 0.8.sp
             )
         }
 
@@ -3329,6 +3349,348 @@ private fun MediaVersionsSection(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Dialog to manually merge the current MediaGroup with another title in the Library
+ */
+@Composable
+private fun MergeTitlesDialog(
+    currentGroup: MediaGroup,
+    allGroups: List<MediaGroup>,
+    onDismiss: () -> Unit,
+    onMerge: (targetGroup: MediaGroup) -> Unit
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    var targetToConfirm by remember { mutableStateOf<MediaGroup?>(null) }
+
+    val candidates = remember(searchQuery, allGroups, currentGroup) {
+        val otherGroups = allGroups.filter { it.key != currentGroup.key }
+        if (searchQuery.isBlank()) {
+            val currentTokens = currentGroup.title.lowercase().split(" ", "_", "-", ".", ":").filter { it.length > 2 }.toSet()
+            otherGroups.sortedByDescending { other ->
+                val otherTokens = other.title.lowercase().split(" ", "_", "-", ".", ":").filter { it.length > 2 }.toSet()
+                currentTokens.intersect(otherTokens).size
+            }
+        } else {
+            val q = searchQuery.trim().lowercase()
+            otherGroups.filter {
+                it.title.lowercase().contains(q) ||
+                it.items.any { item -> item.fileName.lowercase().contains(q) } ||
+                (it.imdbId?.lowercase()?.contains(q) == true)
+            }
+        }
+    }
+
+    if (targetToConfirm != null) {
+        val target = targetToConfirm!!
+        AlertDialog(
+            onDismissRequest = { targetToConfirm = null },
+            containerColor = Color(0xFF14151C),
+            shape = RoundedCornerShape(20.dp),
+            title = {
+                Text(
+                    text = "Confirm Title Merge",
+                    color = Color.White,
+                    fontFamily = NdotFont,
+                    fontSize = 17.sp,
+                    letterSpacing = 0.5.sp
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Are you sure you want to merge '${currentGroup.title}' into '${target.title}'?",
+                        color = Color(0xFFE4E4E7),
+                        fontSize = 13.5.sp,
+                        lineHeight = 19.sp
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF1B1D28),
+                        border = BorderStroke(1.dp, Color(0xFF2E3142)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "• Unified Files: ${currentGroup.items.size + target.items.size} files total",
+                                color = Color(0xFFC084FC),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "• All streams & releases will show under 'In Your Collection'",
+                                color = Color(0xFF9CA3AF),
+                                fontSize = 11.5.sp
+                            )
+                            Text(
+                                text = "• Metadata & identifiers will sync across devices",
+                                color = Color(0xFF9CA3AF),
+                                fontSize = 11.5.sp
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val chosen = target
+                        targetToConfirm = null
+                        onMerge(chosen)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFA855F7),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Merge Titles", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { targetToConfirm = null }) {
+                    Text("Cancel", color = Color(0xFF9CA3AF), fontSize = 13.sp)
+                }
+            }
+        )
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF101117),
+        shape = RoundedCornerShape(22.dp),
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+        modifier = Modifier
+            .fillMaxWidth(0.94f)
+            .heightIn(max = 620.dp),
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "MERGE WITH ANOTHER TITLE",
+                        color = Color.White,
+                        fontFamily = NdotFont,
+                        fontSize = 14.sp,
+                        letterSpacing = 0.8.sp
+                    )
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = Color(0xFF8E909A),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+                Text(
+                    text = "Select a target title from your library to merge '${currentGroup.title}' (${currentGroup.items.size} files) into it.",
+                    color = Color(0xFF8E909A),
+                    fontSize = 11.5.sp,
+                    lineHeight = 16.sp
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Search Field
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF181A22),
+                    border = BorderStroke(1.dp, Color(0xFF282A36)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Search",
+                            tint = Color(0xFF717482),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        BasicTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            textStyle = TextStyle(color = Color.White, fontSize = 13.sp),
+                            singleLine = true,
+                            cursorBrush = androidx.compose.ui.graphics.SolidColor(Color(0xFFA855F7)),
+                            modifier = Modifier.weight(1f),
+                            decorationBox = { innerTextField ->
+                                if (searchQuery.isEmpty()) {
+                                    Text(
+                                        text = "Search library titles...",
+                                        color = Color(0xFF555869),
+                                        fontSize = 12.5.sp
+                                    )
+                                }
+                                innerTextField()
+                            }
+                        )
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(
+                                onClick = { searchQuery = "" },
+                                modifier = Modifier.size(20.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Clear",
+                                    tint = Color(0xFF8E909A),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Candidates List
+                if (candidates.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "No other matching titles found in library",
+                            color = Color(0xFF6B7280),
+                            fontSize = 12.5.sp
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 380.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(candidates, key = { it.key }) { target ->
+                            MergeCandidateRow(
+                                target = target,
+                                onSelect = {
+                                    targetToConfirm = target
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {}
+    )
+}
+
+@Composable
+private fun MergeCandidateRow(
+    target: MediaGroup,
+    onSelect: () -> Unit
+) {
+    Surface(
+        onClick = onSelect,
+        shape = RoundedCornerShape(12.dp),
+        color = Color(0xFF161822),
+        border = BorderStroke(1.dp, Color(0xFF252836)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Poster thumbnail
+            RemoteImage(
+                url = target.posterUrl,
+                contentDescription = target.title,
+                modifier = Modifier
+                    .width(38.dp)
+                    .height(54.dp)
+                    .clip(RoundedCornerShape(6.dp))
+            )
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                Text(
+                    text = target.title,
+                    color = Color.White,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (!target.year.isNullOrBlank()) {
+                        Text(
+                            text = target.year,
+                            color = Color(0xFFA855F7),
+                            fontFamily = NdotFont,
+                            fontSize = 10.sp
+                        )
+                    }
+                    Text(
+                        text = "• ${target.type.uppercase()}",
+                        color = Color(0xFF717482),
+                        fontSize = 10.sp
+                    )
+                    Text(
+                        text = "• ${target.items.size} files",
+                        color = Color(0xFF9CA3AF),
+                        fontSize = 10.sp
+                    )
+                }
+
+                if (!target.imdbId.isNullOrBlank()) {
+                    Text(
+                        text = "IMDb: ${target.imdbId}",
+                        color = Color(0xFFFBBF24),
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 9.5.sp
+                    )
+                }
+            }
+
+            // MERGE Action Tag
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xFF2E1547))
+                    .border(1.dp, Color(0xFFA855F7), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 9.dp, vertical = 5.dp)
+            ) {
+                Text(
+                    text = "MERGE",
+                    color = Color(0xFFD8B4FE),
+                    fontFamily = NdotFont,
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
     }

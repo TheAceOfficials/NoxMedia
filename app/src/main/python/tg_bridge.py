@@ -1787,7 +1787,7 @@ def upload_backup_file(api_id: int, api_hash: str, session_str: str, file_path: 
         return json.dumps({"status": "error", "error": str(e)})
 
 
-def fetch_latest_backup_file(api_id: int, api_hash: str, session_str: str, target_download_path: str, source: str = "me") -> str:
+def fetch_latest_backup_file(api_id: int, api_hash: str, session_str: str, target_download_path: str, source: str = "me", min_timestamp: int = 0) -> str:
     """Finds and downloads the latest #NoxMediaBackup JSON file from Saved Messages or target chat."""
     async def _async_fetch():
         client = await _get_connected_stream_client(int(api_id), str(api_hash), str(session_str))
@@ -1829,6 +1829,26 @@ def fetch_latest_backup_file(api_id: int, api_hash: str, session_str: str, targe
 
         if not latest_msg or not getattr(latest_msg, "document", None):
             return json.dumps({"status": "not_found", "message": "No backup found in Telegram chat"})
+
+        doc = latest_msg.document
+        fname = getattr(doc, "file_name", "") or ""
+        ts_match = re.search(r"backup_(\d+)", fname)
+        backup_ts = int(ts_match.group(1)) if ts_match else (int(latest_msg.date.timestamp() * 1000) if getattr(latest_msg, "date", None) else 0)
+
+        # Fast metadata check: if latest backup on Telegram is older than or equal to local last sync, avoid downloading
+        min_ts = 0
+        try:
+            min_ts = int(min_timestamp)
+        except Exception:
+            pass
+
+        if min_ts > 0 and backup_ts > 0 and backup_ts <= min_ts:
+            return json.dumps({
+                "status": "up_to_date",
+                "message": "Cloud backup is already up to date",
+                "timestamp": backup_ts,
+                "message_id": latest_msg.id
+            })
 
         if os.path.exists(target_download_path):
             try:

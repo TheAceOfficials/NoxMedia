@@ -213,6 +213,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             if (session.value.isLoggedIn) {
                 tgClient.refreshUserProfile()
                 if (loaded.cloudSyncLibrary || loaded.autoBackupEnabled) {
+                    delay(8000L) // Defer cloud sync so startup & UI render remain 100% fluid
                     syncFromCloud(silent = true)
                 }
             }
@@ -666,6 +667,64 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                     getApplication(),
                     "✓ Metadata synced: ${enriched.title ?: meta.title} (${enriched.year ?: meta.year}) • ${effectiveType.uppercase()}",
                     Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
+    fun mergeMediaGroups(sourceGroup: MediaGroup, targetGroup: MediaGroup) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val bestTitle = targetGroup.title.ifBlank { sourceGroup.title }
+            val bestType = targetGroup.type.ifBlank { sourceGroup.type }
+            val bestYear = targetGroup.year ?: sourceGroup.year
+            val bestImdbId = targetGroup.imdbId ?: sourceGroup.imdbId
+            val bestTmdbId = if ((targetGroup.tmdbId ?: 0) > 0) targetGroup.tmdbId else sourceGroup.tmdbId
+            val bestKitsuId = targetGroup.items.firstOrNull { (it.kitsuId ?: 0) > 0 }?.kitsuId
+                ?: sourceGroup.items.firstOrNull { (it.kitsuId ?: 0) > 0 }?.kitsuId
+            val bestPoster = targetGroup.posterUrl ?: sourceGroup.posterUrl
+            val bestBackdrop = targetGroup.backdropUrl ?: sourceGroup.backdropUrl
+            val bestOverview = targetGroup.overview ?: sourceGroup.overview
+
+            val allItemsToUpdate = (sourceGroup.items + targetGroup.items).map { item ->
+                item.copy(
+                    title = bestTitle,
+                    type = bestType,
+                    year = bestYear,
+                    imdbId = bestImdbId,
+                    tmdbId = bestTmdbId,
+                    kitsuId = bestKitsuId,
+                    posterUrl = bestPoster,
+                    backdropUrl = bestBackdrop,
+                    overview = bestOverview,
+                    isManuallyMatched = true,
+                    lastModified = System.currentTimeMillis()
+                )
+            }
+
+            val oldTitle = sourceGroup.title
+            if (!oldTitle.isNullOrBlank()) {
+                MetadataEnricher.invalidateTitle(oldTitle)
+            }
+            if (!targetGroup.title.isNullOrBlank()) {
+                MetadataEnricher.invalidateTitle(targetGroup.title)
+            }
+            StreamerForegroundService.activeServer?.clearTitleCache()
+
+            tgClient.updateMediaItems(allItemsToUpdate)
+            triggerAutoCloudBackupDebounced(4000L)
+
+            val newKey = when {
+                bestTmdbId != null && bestTmdbId > 0 -> "tmdb_${bestType}_$bestTmdbId"
+                !bestImdbId.isNullOrBlank() -> "imdb_$bestImdbId"
+                else -> "title_${bestType}_${bestTitle.trim().lowercase()}"
+            }
+
+            withContext(Dispatchers.Main) {
+                _selectedMediaGroupKey.value = newKey
+                Toast.makeText(
+                    getApplication(),
+                    "✓ Merged into '${bestTitle}' (${allItemsToUpdate.size} files unified)",
+                    Toast.LENGTH_LONG
                 ).show()
             }
         }
@@ -1276,10 +1335,12 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             }
 
             if (root.has("mediaItems")) {
-                val mediaArr = root.getJSONArray("mediaItems")
-                if (mediaArr.length() > 0) {
+                val mediaElement = try {
+                    com.google.gson.JsonParser.parseString(json).asJsonObject.get("mediaItems")
+                } catch (_: Exception) { null }
+                if (mediaElement != null && mediaElement.isJsonArray && mediaElement.asJsonArray.size() > 0) {
                     val type = object : TypeToken<List<MediaItem>>() {}.type
-                    val list: List<MediaItem> = Gson().fromJson(mediaArr.toString(), type) ?: emptyList()
+                    val list: List<MediaItem> = Gson().fromJson(mediaElement, type) ?: emptyList()
                     if (list.isNotEmpty()) {
                         mediaRestoredCount = tgClient.mergeMediaItems(list)
                     }
@@ -1351,60 +1412,92 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun syncFromCloud(silent: Boolean = true, onDone: ((Boolean, String?) -> Unit)? = null) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             if (!session.value.isLoggedIn) {
-                if (!silent) Toast.makeText(getApplication(), "Telegram is not connected", Toast.LENGTH_SHORT).show()
+                withContext(Dispatchers.Main) {
+                    if (!silent) Toast.makeText(getApplication(), "Telegram is not connected", Toast.LENGTH_SHORT).show()
+                }
                 onDone?.invoke(false, "Telegram not connected")
                 return@launch
             }
-            if (!silent) _isRestoringFromCloud.value = true
+            if (!silent) {
+                withContext(Dispatchers.Main) { _isRestoringFromCloud.value = true }
+            }
             val target = _config.value.backupDestination.ifBlank { "me" }
-            val res = tgClient.fetchLatestBackupFromTelegram(target)
-            if (!silent) _isRestoringFromCloud.value = false
+            val lastSyncTs = prefs.getLong("last_cloud_sync_timestamp", 0L)
+            val res = tgClient.fetchLatestBackupFromTelegram(target, if (silent) lastSyncTs else 0L)
+            if (!silent) {
+                withContext(Dispatchers.Main) { _isRestoringFromCloud.value = false }
+            }
             if (res.isSuccess) {
                 val json = res.getOrNull()
                 if (json.isNullOrBlank()) {
-                    if (!silent) Toast.makeText(getApplication(), "No backup found in Telegram $target", Toast.LENGTH_SHORT).show()
-                    onDone?.invoke(false, "No backup found")
+                    if (silent) {
+                        onDone?.invoke(true, "Already up to date")
+                    } else {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(getApplication(), "No new backup found in Telegram $target", Toast.LENGTH_SHORT).show()
+                        }
+                        onDone?.invoke(false, "No backup found")
+                    }
                     return@launch
                 }
                 try {
-                    val root = JSONObject(json)
-                    val originDeviceId = root.optString("deviceId", "")
-                    val backupTs = root.optLong("timestamp", 0L)
-                    val lastSyncTs = prefs.getLong("last_cloud_sync_timestamp", 0L)
+                    // Fast header check using lightweight regex before doing any heavy JSON tree parsing
+                    val tsMatch = Regex(""""timestamp"\s*:\s*(\d+)""").find(json)
+                    val devMatch = Regex(""""deviceId"\s*:\s*"([^"]+)"""").find(json)
+                    val backupTs = tsMatch?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+                    val originDeviceId = devMatch?.groupValues?.get(1) ?: ""
 
-                    // If silent check and uploaded by this device or older than last sync, skip
-                    if (silent && (originDeviceId == syncDeviceId || backupTs <= lastSyncTs)) {
+                    // If silent check and uploaded by this device or older than last sync, skip immediately
+                    if (silent && (originDeviceId == syncDeviceId || (lastSyncTs > 0L && backupTs <= lastSyncTs))) {
                         onDone?.invoke(true, "Already up to date")
                         return@launch
                     }
 
                     val (settingsRestored, channelsRestored, mediaRestored) = importBackupJsonDetailed(json)
                     if (settingsRestored || channelsRestored > 0 || mediaRestored > 0) {
-                        prefs.edit().putLong("last_cloud_sync_timestamp", backupTs).apply()
-                        val origin = root.optString("deviceName", "Cloud")
+                        if (backupTs > 0L) {
+                            prefs.edit().putLong("last_cloud_sync_timestamp", backupTs).apply()
+                        }
+                        val originMatch = Regex(""""deviceName"\s*:\s*"([^"]+)"""").find(json)
+                        val origin = originMatch?.groupValues?.get(1) ?: "Cloud"
                         val summary = mutableListOf<String>()
                         if (mediaRestored > 0) summary.add("$mediaRestored media")
                         if (channelsRestored > 0) summary.add("$channelsRestored channels")
                         if (settingsRestored) summary.add("settings")
                         val msg = "✓ Synced from $origin: ${summary.joinToString(", ")}"
-                        Toast.makeText(getApplication(), msg, Toast.LENGTH_LONG).show()
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(getApplication(), msg, Toast.LENGTH_LONG).show()
+                        }
                         if (channelsRestored > 0 && mediaRestored == 0) {
                             syncAllChannels()
                         }
                         onDone?.invoke(true, null)
                     } else {
-                        if (!silent) Toast.makeText(getApplication(), "Backup file did not contain new data", Toast.LENGTH_SHORT).show()
+                        if (!silent) {
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(getApplication(), "Backup file did not contain new data", Toast.LENGTH_SHORT).show()
+                            }
+                        }
                         onDone?.invoke(false, "No new data")
                     }
                 } catch (e: Exception) {
-                    if (!silent) Toast.makeText(getApplication(), "Error parsing backup: ${e.message}", Toast.LENGTH_LONG).show()
+                    Log.e("MainAppViewModel", "Error parsing backup: ${e.message}", e)
+                    if (!silent) {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(getApplication(), "Error parsing backup: ${e.message}", Toast.LENGTH_LONG).show()
+                        }
+                    }
                     onDone?.invoke(false, e.message)
                 }
             } else {
                 val err = res.exceptionOrNull()?.message ?: "Fetch failed"
-                if (!silent) Toast.makeText(getApplication(), "Failed to fetch backup: $err", Toast.LENGTH_LONG).show()
+                if (!silent) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(getApplication(), "Failed to fetch backup: $err", Toast.LENGTH_LONG).show()
+                    }
+                }
                 onDone?.invoke(false, err)
             }
         }
