@@ -82,6 +82,21 @@ object WhatsNewRepository {
             ),
             WhatsNewItem(
                 category = ChangeCategory.IMPROVEMENT,
+                title = "3D Depth Parallax Hero Banner",
+                description = "Apple TV+ inspired multi-layer scroll motion: hero backdrop scrolls with 0.45x depth velocity and subtle scale transition, layered behind foreground title elements with an adaptive frosted glass top bar."
+            ),
+            WhatsNewItem(
+                category = ChangeCategory.IMPROVEMENT,
+                title = "Redesigned 'Versions in Library' Section",
+                description = "Re-engineered from scratch with OTT brand gradient borders (Netflix, Prime, Apple TV+, Blu-ray, etc.), sleek resolution & audio pills, and an expandable release file details accordion."
+            ),
+            WhatsNewItem(
+                category = ChangeCategory.IMPROVEMENT,
+                title = "Redesigned 'About & Specifications' Section",
+                description = "Replaced crowded layout with clean 2-column specs grid, IMDb/TMDB/Kitsu Anime identifier pills, and full-width chip wrap for multi-audio language tags."
+            ),
+            WhatsNewItem(
+                category = ChangeCategory.IMPROVEMENT,
                 title = "Tactile Press Physics & Emil Kowalski Micro-Animations",
                 description = "Snappy 180ms spring switches, physical 0.96x press depression on posters and cards, organic dialog popups, and fluid 160ms bottom tab crossfades."
             ),

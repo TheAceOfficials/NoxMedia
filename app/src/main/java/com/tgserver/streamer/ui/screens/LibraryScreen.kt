@@ -56,6 +56,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -1084,20 +1085,30 @@ private fun ContentDetailsScreen(
         }
     }
 
-    Column(
+    val scrollState = rememberScrollState()
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF070709))
-            .verticalScroll(rememberScrollState())
     ) {
-        // ==================== 1. HERO BACKDROP & FLOATING GLASS BAR ====================
+        // ==================== 1. PARALLAX HERO BACKDROP (3D Motion Depth) ====================
+        val heroImageUrl = group.backdropUrl?.takeIf { it.isNotBlank() } ?: group.posterUrl
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(350.dp)
+                .height(370.dp)
+                .graphicsLayer {
+                    // Smooth parallax: moves at ~0.45x scroll speed
+                    translationY = -scrollState.value * 0.45f
+                    // 3D scale and gentle depth
+                    val scaleProgress = (scrollState.value / 750f).coerceIn(0f, 1f)
+                    scaleX = 1f + (scaleProgress * 0.08f)
+                    scaleY = 1f + (scaleProgress * 0.08f)
+                    // OLED black fade
+                    alpha = (1f - (scrollState.value / 520f)).coerceIn(0.06f, 1f)
+                }
         ) {
-            // Immersive Backdrop Image
-            val heroImageUrl = group.backdropUrl?.takeIf { it.isNotBlank() } ?: group.posterUrl
             if (!heroImageUrl.isNullOrBlank()) {
                 RemoteImage(
                     url = heroImageUrl,
@@ -1117,15 +1128,15 @@ private fun ContentDetailsScreen(
                 )
             }
 
-            // Top vignette for clear status & action buttons
+            // Top vignette for clear status bar
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(95.dp)
+                    .height(110.dp)
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
-                                Color.Black.copy(alpha = 0.6f),
+                                Color.Black.copy(alpha = 0.65f),
                                 Color.Transparent
                             )
                         )
@@ -1140,88 +1151,32 @@ private fun ContentDetailsScreen(
                         Brush.verticalGradient(
                             colors = listOf(
                                 Color.Transparent,
-                                Color(0xFF070709).copy(alpha = 0.2f),
-                                Color(0xFF070709).copy(alpha = 0.78f),
+                                Color(0xFF070709).copy(alpha = 0.25f),
+                                Color(0xFF070709).copy(alpha = 0.85f),
                                 Color(0xFF070709)
                             )
                         )
                     )
             )
+        }
 
-            // Floating Frosted Glass Action Bar
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(top = 10.dp, start = 16.dp, end = 16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Back Button
-                IconButton(
-                    onClick = onBack,
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.55f))
-                        .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.2f)), CircleShape)
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = Color.White,
-                        modifier = Modifier.size(19.dp)
-                    )
-                }
+        // ==================== SCROLLABLE CONTENT COLUMN ====================
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+        ) {
+            // Spacer allowing the hero backdrop to be prominently visible
+            Spacer(modifier = Modifier.height(175.dp))
 
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Rescan Metadata Button
-                    IconButton(
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            showRescanDialog = true
-                        },
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.55f))
-                            .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.2f)), CircleShape)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = "Rescan",
-                            tint = Color.White,
-                            modifier = Modifier.size(17.dp)
-                        )
-                    }
-
-                    // Refresh Metadata Button
-                    IconButton(
-                        onClick = onRefreshMetadata,
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.55f))
-                            .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.2f)), CircleShape)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Refresh",
-                            tint = Color.White,
-                            modifier = Modifier.size(17.dp)
-                        )
-                    }
-                }
-            }
-
-            // Hero Center & Bottom: Logo / Title + Metadata Line
+            // Hero Center & Bottom: Logo / Title + Metadata Line (with foreground parallax)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .align(Alignment.BottomCenter)
+                    .graphicsLayer {
+                        translationY = -scrollState.value * 0.14f
+                        alpha = (1f - (scrollState.value / 420f)).coerceIn(0f, 1f)
+                    }
                     .padding(horizontal = 20.dp, vertical = 6.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -1311,9 +1266,8 @@ private fun ContentDetailsScreen(
                     )
                 }
             }
-        }
 
-        Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
         // ==================== 2. PRIMARY ACTION BUTTON: FIX METADATA MATCH ====================
         Row(
@@ -1580,109 +1534,332 @@ private fun ContentDetailsScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // ==================== 6. ABOUT & SERVER SPECIFICATIONS ====================
+        // ==================== 6. ABOUT & SPECIFICATIONS (Redesigned) ====================
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text(
-                text = "About",
-                color = Color.White,
-                fontFamily = FontFamily.Default,
-                fontWeight = FontWeight.Bold,
-                fontSize = 16.sp
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFA855F7))
+                )
+                Text(
+                    text = "ABOUT & SPECIFICATIONS",
+                    color = Color.White,
+                    fontFamily = NdotFont,
+                    fontSize = 12.sp,
+                    letterSpacing = 0.8.sp
+                )
+            }
 
             Surface(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(18.dp),
                 color = Color(0xFF101117),
-                border = BorderStroke(0.5.dp, Color(0xFF22242F)),
+                border = BorderStroke(1.dp, Color(0xFF1F222E)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    // Row 1: External IDs
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column {
-                            Text("IMDb ID", color = Color(0xFF717482), fontSize = 11.sp)
-                            Text(
-                                text = group.imdbId ?: "N/A",
-                                color = Color(0xFFFBBF24),
-                                fontSize = 12.5.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text("TMDb ID", color = Color(0xFF717482), fontSize = 11.sp)
-                            Text(
-                                text = group.tmdbId?.toString() ?: "N/A",
-                                color = Color(0xFF60A5FA),
-                                fontSize = 12.5.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                    // Block 1: Identifiers / Databases (IMDb, TMDb, Kitsu)
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "DATABASE IDENTIFIERS",
+                            color = Color(0xFF717482),
+                            fontFamily = NdotFont,
+                            fontSize = 9.5.sp,
+                            letterSpacing = 0.5.sp
+                        )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // IMDb ID pill
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFF1B1914),
+                                border = BorderStroke(1.dp, Color(0x66FBBF24))
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                                ) {
+                                    Text("IMDb", color = Color(0xFFFBBF24), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = group.imdbId ?: "N/A",
+                                        color = Color.White,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
+
+                            // TMDb ID pill
+                            if (group.tmdbId != null && group.tmdbId > 0) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFF121924),
+                                    border = BorderStroke(1.dp, Color(0x6660A5FA))
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                                    ) {
+                                        Text("TMDB", color = Color(0xFF60A5FA), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            text = group.tmdbId.toString(),
+                                            color = Color.White,
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Kitsu Anime ID pill (if present on anime item!)
+                            val kitsuId = group.items.firstOrNull { it.kitsuId != null && it.kitsuId > 0 }?.kitsuId
+                            if (kitsuId != null) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFF221612),
+                                    border = BorderStroke(1.dp, Color(0x66FF7A00))
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                                    ) {
+                                        Text("KITSU", color = Color(0xFFFF7A00), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            text = "#$kitsuId",
+                                            color = Color.White,
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
 
-                    HorizontalDivider(color = Color(0xFF1F212A), thickness = 0.5.dp)
+                    HorizontalDivider(color = Color(0xFF1C1E28), thickness = 0.5.dp)
 
-                    // Row 2: Media Specs & Total Storage
+                    // Block 2: 2-Column Responsive Specs Grid
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Column {
-                            Text("Audio / Languages", color = Color(0xFF717482), fontSize = 11.sp)
-                            Text(
-                                text = visualSpecs.audioLanguages.joinToString(", ").ifBlank { "Original" },
-                                color = Color(0xFFE4E4E7),
-                                fontSize = 12.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                        // Left Column
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text("TOTAL STORAGE", color = Color(0xFF717482), fontFamily = NdotFont, fontSize = 9.5.sp)
+                                Text(
+                                    text = visualSpecs.totalSize,
+                                    color = Color(0xFFC084FC),
+                                    fontFamily = NdotFont,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text("CONTENT TYPE", color = Color(0xFF717482), fontFamily = NdotFont, fontSize = 9.5.sp)
+                                Text(
+                                    text = group.type.uppercase(),
+                                    color = Color(0xFFA855F7),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text("Total Storage", color = Color(0xFF717482), fontSize = 11.sp)
-                            Text(
-                                text = visualSpecs.totalSize,
-                                color = Color(0xFFC084FC),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
+
+                        // Right Column
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text("INDEXED FILES", color = Color(0xFF717482), fontFamily = NdotFont, fontSize = 9.5.sp)
+                                Text(
+                                    text = "${group.items.size} media files",
+                                    color = Color.White,
+                                    fontFamily = NdotFont,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text("STREAM QUALITY", color = Color(0xFF717482), fontFamily = NdotFont, fontSize = 9.5.sp)
+                                Text(
+                                    text = visualSpecs.resolutionBadge + if (visualSpecs.visualBadges.isNotEmpty()) " (${visualSpecs.visualBadges.joinToString(", ")})" else "",
+                                    color = Color(0xFFD4D4D8),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
                         }
                     }
 
-                    HorizontalDivider(color = Color(0xFF1F212A), thickness = 0.5.dp)
+                    // Block 3: Audio / Languages (Dedicated full-width row with clean tags)
+                    if (visualSpecs.audioLanguages.isNotEmpty()) {
+                        HorizontalDivider(color = Color(0xFF1C1E28), thickness = 0.5.dp)
 
-                    // Row 3: Server Indexing Info
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "${group.items.size} video files indexed",
-                            color = Color(0xFF9CA3AF),
-                            fontSize = 11.5.sp
-                        )
-                        Text(
-                            text = "Type: ${group.type.uppercase()}",
-                            color = Color(0xFFA855F7),
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "AVAILABLE AUDIO LANGUAGES",
+                                color = Color(0xFF717482),
+                                fontFamily = NdotFont,
+                                fontSize = 9.5.sp
+                            )
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(5.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                visualSpecs.audioLanguages.forEach { lang ->
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = Color(0xFF181A24),
+                                        border = BorderStroke(0.5.dp, Color(0x33FFFFFF))
+                                    ) {
+                                        Text(
+                                            text = lang,
+                                            color = Color(0xFFE4E4E7),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
 
         // Bottom space for floating bottom bar clearance
-        Spacer(modifier = Modifier.height(100.dp))
+        Spacer(modifier = Modifier.height(110.dp))
+    }
+
+    // ==================== 7. FLOATING FROSTED GLASS ACTION BAR (Layer 3) ====================
+    val navAlpha = (scrollState.value / 180f).coerceIn(0f, 1f)
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .align(Alignment.TopCenter)
+            .background(Color(0xFF070709).copy(alpha = navAlpha * 0.90f))
+            .border(
+                width = 0.5.dp,
+                color = Color.White.copy(alpha = navAlpha * 0.12f)
+            )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(top = 10.dp, bottom = 10.dp, start = 16.dp, end = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Back Button with tactile response
+            IconButton(
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onBack()
+                },
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.2f)), CircleShape)
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                    tint = Color.White,
+                    modifier = Modifier.size(19.dp)
+                )
+            }
+
+            // Title snippet smoothly fading in as user scrolls past hero banner
+            if (navAlpha > 0.5f) {
+                Text(
+                    text = group.title,
+                    color = Color.White.copy(alpha = ((navAlpha - 0.5f) / 0.5f).coerceIn(0f, 1f)),
+                    fontFamily = FontFamily.Default,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 14.dp)
+                )
+            } else {
+                Spacer(modifier = Modifier.weight(1f))
+            }
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Rescan Metadata Button
+                IconButton(
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        showRescanDialog = true
+                    },
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.55f))
+                        .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.2f)), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = "Rescan",
+                        tint = Color.White,
+                        modifier = Modifier.size(17.dp)
+                    )
+                }
+
+                // Refresh Metadata Button
+                IconButton(
+                    onClick = onRefreshMetadata,
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.55f))
+                        .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.2f)), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Refresh",
+                        tint = Color.White,
+                        modifier = Modifier.size(17.dp)
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -2900,9 +3077,9 @@ private fun MediaVersionsSection(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Section Header
+        // Section Header with Dot Matrix
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -2912,6 +3089,12 @@ private fun MediaVersionsSection(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF38BDF8))
+                )
                 Text(
                     text = "VERSIONS IN LIBRARY",
                     color = Color.White,
@@ -2921,15 +3104,15 @@ private fun MediaVersionsSection(
                 )
                 Surface(
                     shape = RoundedCornerShape(999.dp),
-                    color = Color(0x1FFFFFFF),
+                    color = Color(0x18FFFFFF),
                     border = BorderStroke(0.5.dp, Color(0x33FFFFFF))
                 ) {
                     Text(
                         text = "${versions.size}",
                         color = Color(0xFFD1D5DB),
-                        fontSize = 10.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 1.5.dp)
+                        fontSize = 10.sp,
+                        fontFamily = NdotFont,
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 1.dp)
                     )
                 }
             }
@@ -2937,94 +3120,129 @@ private fun MediaVersionsSection(
             Text(
                 text = "Detected OTT & Sources",
                 color = Color(0xFF717482),
-                fontFamily = FontFamily.Default,
                 fontSize = 11.sp
             )
         }
 
         // Version Cards
         versions.forEach { version ->
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Color(0xFF14151C))
-                    .border(
-                        BorderStroke(1.dp, version.brandColor.copy(alpha = 0.28f)),
-                        shape = RoundedCornerShape(14.dp)
+            var isExpanded by remember { mutableStateOf(false) }
+
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xFF101117),
+                border = BorderStroke(
+                    1.dp,
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            version.brandColor.copy(alpha = 0.5f),
+                            Color(0xFF1E212D)
+                        )
                     )
-                    .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                ),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                // Top row: Brand Badge + Tag + Total Size
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    // Header Row: Brand badge & Release tag (Left), Storage & File count (Right)
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // OTT Brand Pill
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(version.brandBgColor)
-                                .border(
-                                    BorderStroke(1.dp, version.brandColor.copy(alpha = 0.6f)),
-                                    shape = RoundedCornerShape(6.dp)
-                                )
-                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            // Brand badge with subtle glow
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = version.brandBgColor,
+                                border = BorderStroke(1.dp, version.brandColor.copy(alpha = 0.7f))
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(5.dp)
+                                            .clip(CircleShape)
+                                            .background(version.brandColor)
+                                    )
+                                    Text(
+                                        text = version.platformName,
+                                        color = version.brandColor,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 11.5.sp,
+                                        letterSpacing = 0.3.sp
+                                    )
+                                }
+                            }
+
+                            // Source Tag
                             Text(
-                                text = version.platformName,
-                                color = version.brandColor,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp,
-                                fontFamily = FontFamily.Default,
-                                letterSpacing = 0.3.sp
+                                text = version.releaseTag,
+                                color = Color(0xFF9CA3AF),
+                                fontFamily = NdotFont,
+                                fontSize = 10.5.sp,
+                                letterSpacing = 0.5.sp
                             )
                         }
 
-                        // Release Tag
-                        Text(
-                            text = version.releaseTag,
-                            color = Color(0xFFA1A1AA),
-                            fontFamily = NdotFont,
-                            fontSize = 10.5.sp,
-                            letterSpacing = 0.5.sp
-                        )
+                        // Right: Storage size in Nothing OS badge
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFF181A24),
+                            border = BorderStroke(0.5.dp, Color(0x33FFFFFF))
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            ) {
+                                Text(
+                                    text = version.formattedSize,
+                                    color = Color.White,
+                                    fontFamily = NdotFont,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "•",
+                                    color = Color(0xFF6B7280),
+                                    fontSize = 10.sp
+                                )
+                                val countLabel = if (isSeries) {
+                                    if (version.fileCount == 1) "1 ep" else "${version.fileCount} eps"
+                                } else {
+                                    if (version.fileCount == 1) "1 file" else "${version.fileCount} files"
+                                }
+                                Text(
+                                    text = countLabel,
+                                    color = Color(0xFFA1A1AA),
+                                    fontSize = 10.5.sp
+                                )
+                            }
+                        }
                     }
 
-                    // Total Size
-                    Text(
-                        text = version.formattedSize,
-                        color = Color.White,
-                        fontFamily = NdotFont,
-                        fontSize = 12.sp,
-                        letterSpacing = 0.5.sp
-                    )
-                }
-
-                // Middle row: Specs Badges (4K, DV, HDR, etc.) + File count
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                    // Specs & Quality Badges
                     FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                        modifier = Modifier.weight(1f)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         version.resolutions.forEach { res ->
-                            val is4k = res == "4K"
+                            val is4k = res.contains("4K", ignoreCase = true)
                             NetflixAppleBadge(
                                 text = res,
-                                textColor = if (is4k) Color.White else Color(0xFFE4E4E7),
-                                borderColor = if (is4k) Color(0x55FFFFFF) else Color(0x35FFFFFF),
-                                bgColor = if (is4k) Color(0x28FFFFFF) else Color(0x18FFFFFF)
+                                textColor = if (is4k) Color(0xFFFBBF24) else Color.White,
+                                borderColor = if (is4k) Color(0x66FBBF24) else Color(0x40FFFFFF),
+                                bgColor = if (is4k) Color(0x20FBBF24) else Color(0x20FFFFFF)
                             )
                         }
                         version.visualFeatures.forEach { feat ->
@@ -3032,58 +3250,83 @@ private fun MediaVersionsSection(
                             NetflixAppleBadge(
                                 text = feat,
                                 textColor = if (isDv) Color(0xFFFBBF24) else Color(0xFFE4E4E7),
-                                borderColor = if (isDv) Color(0x66FBBF24) else Color(0x35FFFFFF),
+                                borderColor = if (isDv) Color(0x66FBBF24) else Color(0x30FFFFFF),
                                 bgColor = if (isDv) Color(0x20FBBF24) else Color(0x18FFFFFF)
                             )
                         }
                     }
 
-                    val countLabel = if (isSeries) {
-                        if (version.fileCount == 1) "1 ep" else "${version.fileCount} eps"
-                    } else {
-                        if (version.fileCount == 1) "1 file" else "${version.fileCount} files"
+                    // Audio languages list (Clean horizontal chips / formatted row)
+                    if (version.audioTracks.isNotEmpty()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "Audio:",
+                                color = Color(0xFF717482),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = version.audioTracks.joinToString(", "),
+                                color = Color(0xFFE4E4E7),
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
-                    Text(
-                        text = countLabel,
-                        color = Color(0xFF8E909A),
-                        fontFamily = NdotFont,
-                        fontSize = 10.5.sp,
-                        modifier = Modifier.padding(start = 8.dp)
-                    )
-                }
 
-                // Audio row (if detected for this version)
-                if (version.audioTracks.isNotEmpty()) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            text = "Audio:",
-                            color = Color(0xFF717482),
-                            fontSize = 10.5.sp,
-                            fontFamily = FontFamily.Default
-                        )
-                        Text(
-                            text = version.audioTracks.joinToString(", "),
-                            color = Color(0xFFD4D4D8),
-                            fontSize = 10.5.sp,
-                            fontWeight = FontWeight.Medium,
-                            fontFamily = FontFamily.Default
-                        )
+                    // Expandable File Inspector / Transparency (Emil Kowalski style clean toggle)
+                    if (version.sampleFileName.isNotBlank()) {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable { isExpanded = !isExpanded }
+                                    .padding(vertical = 2.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                    contentDescription = null,
+                                    tint = Color(0xFF8E909A),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = if (isExpanded) "Hide release file details" else "Inspect release file details",
+                                    color = Color(0xFF8E909A),
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+
+                            if (isExpanded) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFF0B0C10),
+                                    border = BorderStroke(0.5.dp, Color(0xFF1E202B)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        text = version.sampleFileName,
+                                        color = Color(0xFF8E909A),
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 10.sp,
+                                        lineHeight = 14.sp,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
+                                    )
+                                }
+                            }
+                        }
                     }
-                }
-
-                // Sample filename snippet (gives release transparency)
-                if (version.sampleFileName.isNotBlank()) {
-                    Text(
-                        text = version.sampleFileName,
-                        color = Color(0xFF555765),
-                        fontSize = 9.5.sp,
-                        fontFamily = FontFamily.Monospace,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
                 }
             }
         }
