@@ -1630,7 +1630,7 @@ private fun ContentDetailsScreen(
                             }
 
                             // Kitsu Anime ID pill (if present on anime item!)
-                            val kitsuId = group.items.firstOrNull { it.kitsuId != null && it.kitsuId > 0 }?.kitsuId
+                            val kitsuId = group.items.firstOrNull { (it.kitsuId ?: 0) > 0 }?.kitsuId
                             if (kitsuId != null) {
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
@@ -1861,6 +1861,7 @@ private fun ContentDetailsScreen(
             }
         }
     }
+}
 }
 
 /**
@@ -2364,7 +2365,7 @@ private fun RescanMetadataDialog(
     var searchQuery by remember { mutableStateOf(group.title) }
     var searchType by remember {
         mutableStateOf(
-            if (group.items.any { it.kitsuId != null && it.kitsuId > 0 }) "anime" else group.type
+            if (group.items.any { (it.kitsuId ?: 0) > 0 }) "anime" else group.type
         )
     } // "movie", "series", or "anime"
     var isLoading by remember { mutableStateOf(false) }
