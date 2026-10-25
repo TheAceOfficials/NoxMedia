@@ -610,6 +610,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         val newState = tgClient.toggleHideMediaItem(itemId)
         val msg = if (newState) "Item hidden from Stremio" else "Item unhidden"
         Toast.makeText(getApplication(), msg, Toast.LENGTH_SHORT).show()
+        triggerAutoCloudBackupDebounced()
         return newState
     }
 
@@ -618,6 +619,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         tgClient.setMediaItemsHidden(ids, hide)
         val action = if (hide) "hidden & blacklisted" else "unhidden"
         Toast.makeText(getApplication(), "✓ \"${group.title}\" $action", Toast.LENGTH_SHORT).show()
+        triggerAutoCloudBackupDebounced()
     }
 
     fun setMultipleGroupsHidden(groups: List<MediaGroup>, hide: Boolean) {
@@ -625,6 +627,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         tgClient.setMediaItemsHidden(ids, hide)
         val action = if (hide) "hidden & blacklisted" else "unhidden"
         Toast.makeText(getApplication(), "✓ ${groups.size} titles $action", Toast.LENGTH_SHORT).show()
+        triggerAutoCloudBackupDebounced()
     }
 
     suspend fun searchMetadataCandidates(query: String, type: String): List<EnrichedMetadata> = withContext(Dispatchers.IO) {

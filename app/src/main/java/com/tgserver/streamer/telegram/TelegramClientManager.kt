@@ -1827,7 +1827,8 @@ class TelegramClientManager(private val context: Context) {
             } else {
                 val shouldOverwrite = (item.isManuallyMatched && !existing.isManuallyMatched) ||
                         (item.isManuallyMatched == existing.isManuallyMatched && (item.lastModified > existing.lastModified || item.dateAdded >= existing.dateAdded)) ||
-                        (!item.imdbId.isNullOrBlank() && existing.imdbId.isNullOrBlank())
+                        (!item.imdbId.isNullOrBlank() && existing.imdbId.isNullOrBlank()) ||
+                        (item.lastModified > existing.lastModified && item.isHidden != existing.isHidden)
                 if (shouldOverwrite) {
                     mediaIndex[item.id] = item
                     updatedCount++
@@ -1844,7 +1845,8 @@ class TelegramClientManager(private val context: Context) {
     fun toggleHideMediaItem(itemId: String): Boolean {
         val existing = mediaIndex[itemId] ?: return false
         val newHidden = !existing.isHidden
-        val updated = existing.copy(isHidden = newHidden)
+        val now = System.currentTimeMillis()
+        val updated = existing.copy(isHidden = newHidden, lastModified = now)
         mediaIndex[itemId] = updated
         saveMediaIndex()
         return newHidden
@@ -1852,10 +1854,11 @@ class TelegramClientManager(private val context: Context) {
 
     fun setMediaItemsHidden(itemIds: Collection<String>, isHidden: Boolean) {
         var changed = false
+        val now = System.currentTimeMillis()
         for (id in itemIds) {
             val existing = mediaIndex[id] ?: continue
             if (existing.isHidden != isHidden) {
-                mediaIndex[id] = existing.copy(isHidden = isHidden)
+                mediaIndex[id] = existing.copy(isHidden = isHidden, lastModified = now)
                 changed = true
             }
         }

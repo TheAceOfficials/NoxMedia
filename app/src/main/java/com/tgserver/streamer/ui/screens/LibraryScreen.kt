@@ -304,47 +304,54 @@ data class ActiveFilters(
     fun clear(): ActiveFilters = ActiveFilters(sortOrder = LibrarySortOrder.RECENT)
 }
 
+data class FilterSheetOptions(
+    val resolutions: List<Pair<String, Int>> = emptyList(),
+    val editions: List<Pair<String, Int>> = emptyList(),
+    val platforms: List<Pair<String, Int>> = emptyList(),
+    val audios: List<Pair<String, Int>> = emptyList()
+)
+
 private fun matchesGroupResolution(group: MediaGroup, res: String): Boolean {
     return when (res) {
-        "4K" -> group.items.any { it.quality.contains("4K", true) || it.quality.contains("2160", true) || it.fileName.contains("4K", true) || it.fileName.contains("2160p", true) }
-        "1080p (FHD)" -> group.items.any { it.quality.contains("1080", true) || it.quality.contains("FHD", true) || it.fileName.contains("1080p", true) }
-        "720p (HD)" -> group.items.any { it.quality.contains("720", true) || it.quality.contains("HD", true) || it.fileName.contains("720p", true) }
-        "SD" -> group.items.any { it.quality.contains("480", true) || it.fileName.contains("480p", true) }
+        "4K" -> group.has4K
+        "1080p (FHD)" -> group.has1080p
+        "720p (HD)" -> group.has720p
+        "SD" -> group.hasSD
         else -> false
     }
 }
 
 private fun matchesGroupEdition(group: MediaGroup, ed: String): Boolean {
     return when (ed) {
-        "IMAX" -> group.items.any { it.fileName.contains("IMAX", true) }
-        "BluRay" -> group.items.any { it.fileName.contains(Regex("""(?i)\b(bluray|bdrip|brrip)\b""")) }
-        "WEB-DL" -> group.items.any { it.fileName.contains(Regex("""(?i)\b(web-?dl|web-?rip)\b""")) }
-        "HDR / DV" -> group.items.any { it.fileName.contains(Regex("""(?i)\b(hdr|hdr10|dovi|dv|dolby\s*vision)\b""")) }
-        "10-Bit" -> group.items.any { it.fileName.contains(Regex("""(?i)\b(10-?bit|hevc|x265)\b""")) }
-        "Remux" -> group.items.any { it.fileName.contains("remux", true) }
+        "IMAX" -> group.hasIMAX
+        "BluRay" -> group.hasBluRay
+        "WEB-DL" -> group.hasWebDl
+        "HDR / DV" -> group.hasHdrDv
+        "10-Bit" -> group.has10Bit
+        "Remux" -> group.hasRemux
         else -> false
     }
 }
 
 private fun matchesGroupPlatform(group: MediaGroup, plat: String): Boolean {
     return when (plat) {
-        "Netflix" -> group.items.any { it.fileName.contains(Regex("""(?i)\b(nf|netflix)\b""")) }
-        "Crunchyroll" -> group.items.any { it.fileName.contains(Regex("""(?i)\b(cr|crunchyroll)\b""")) }
-        "Prime Video" -> group.items.any { it.fileName.contains(Regex("""(?i)\b(amzn|amazon|prime)\b""")) }
-        "Disney+ / Hotstar" -> group.items.any { it.fileName.contains(Regex("""(?i)\b(dsnp|disney|hotstar)\b""")) }
-        "Apple TV" -> group.items.any { it.fileName.contains(Regex("""(?i)\b(atvp|apple)\b""")) }
-        "Zee5" -> group.items.any { it.fileName.contains("zee5", true) }
+        "Netflix" -> group.hasNetflix
+        "Crunchyroll" -> group.hasCrunchyroll
+        "Prime Video" -> group.hasPrimeVideo
+        "Disney+ / Hotstar" -> group.hasDisney
+        "Apple TV" -> group.hasAppleTv
+        "Zee5" -> group.hasZee5
         else -> false
     }
 }
 
 private fun matchesGroupAudio(group: MediaGroup, lang: String): Boolean {
     return when (lang) {
-        "Hindi" -> group.items.any { it.fileName.contains(Regex("""(?i)\b(hindi|hin)\b""")) }
-        "English" -> group.items.any { it.fileName.contains(Regex("""(?i)\b(english|eng)\b""")) }
-        "Japanese" -> group.items.any { it.fileName.contains(Regex("""(?i)\b(japanese|jap|jpn)\b""")) }
-        "Dual Audio" -> group.items.any { it.fileName.contains(Regex("""(?i)\b(dual|dual\s*audio)\b""")) }
-        "Multi Audio" -> group.items.any { it.fileName.contains(Regex("""(?i)\b(multi|multi\s*audio)\b""")) }
+        "Hindi" -> group.hasHindi
+        "English" -> group.hasEnglish
+        "Japanese" -> group.hasJapanese
+        "Dual Audio" -> group.hasDualAudio
+        "Multi Audio" -> group.hasMultiAudio
         else -> false
     }
 }
@@ -435,6 +442,26 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
     val seriesCount = remember(unhiddenGroups) { unhiddenGroups.count { it.type == "series" } }
     val animeCount = remember(unhiddenGroups) { unhiddenGroups.count { it.type == "anime" } }
     val hiddenCount = remember(hiddenGroups) { hiddenGroups.size }
+
+    // Precomputed filter chip options and counts (Cached on mediaGroups change, 0ms latency when opening sheet)
+    val availableFilterOptions = remember(mediaGroups) {
+        val allResolutions = listOf("4K", "1080p (FHD)", "720p (HD)", "SD")
+        val allEditions = listOf("IMAX", "BluRay", "WEB-DL", "HDR / DV", "10-Bit", "Remux")
+        val allPlatforms = listOf("Netflix", "Crunchyroll", "Prime Video", "Disney+ / Hotstar", "Apple TV", "Zee5")
+        val allAudios = listOf("Hindi", "English", "Japanese", "Dual Audio", "Multi Audio")
+
+        val res = allResolutions.map { r -> r to mediaGroups.count { matchesGroupResolution(it, r) } }.filter { it.second > 0 }
+        val ed = allEditions.map { e -> e to mediaGroups.count { matchesGroupEdition(it, e) } }.filter { it.second > 0 }
+        val plat = allPlatforms.map { p -> p to mediaGroups.count { matchesGroupPlatform(it, p) } }.filter { it.second > 0 }
+        val aud = allAudios.map { a -> a to mediaGroups.count { matchesGroupAudio(it, a) } }.filter { it.second > 0 }
+
+        FilterSheetOptions(
+            resolutions = res,
+            editions = ed,
+            platforms = plat,
+            audios = aud
+        )
+    }
 
     val categories = remember(unhiddenGroups.size, movieCount, seriesCount, animeCount, hiddenCount) {
         buildList {
@@ -1091,7 +1118,7 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
         // DYNAMIC FILTER BOTTOM SHEET
         if (showFilterSheet) {
             FilterBottomSheet(
-                mediaGroups = mediaGroups,
+                options = availableFilterOptions,
                 activeFilters = activeFilters,
                 onApply = { updated ->
                     activeFilters = updated
@@ -1532,7 +1559,7 @@ private fun QuickActionModal(
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun FilterBottomSheet(
-    mediaGroups: List<MediaGroup>,
+    options: FilterSheetOptions,
     activeFilters: ActiveFilters,
     onApply: (ActiveFilters) -> Unit,
     onDismiss: () -> Unit
@@ -1540,27 +1567,10 @@ private fun FilterBottomSheet(
     var tempFilters by remember { mutableStateOf(activeFilters) }
     val haptic = LocalHapticFeedback.current
 
-    val allResolutions = listOf("4K", "1080p (FHD)", "720p (HD)", "SD")
-    val allEditions = listOf("IMAX", "BluRay", "WEB-DL", "HDR / DV", "10-Bit", "Remux")
-    val allPlatforms = listOf("Netflix", "Crunchyroll", "Prime Video", "Disney+ / Hotstar", "Apple TV", "Zee5")
-    val allAudios = listOf("Hindi", "English", "Japanese", "Dual Audio", "Multi Audio")
-
-    val availableResolutions = remember(mediaGroups) {
-        allResolutions.map { res -> res to mediaGroups.count { matchesGroupResolution(it, res) } }
-            .filter { it.second > 0 }
-    }
-    val availableEditions = remember(mediaGroups) {
-        allEditions.map { ed -> ed to mediaGroups.count { matchesGroupEdition(it, ed) } }
-            .filter { it.second > 0 }
-    }
-    val availablePlatforms = remember(mediaGroups) {
-        allPlatforms.map { plat -> plat to mediaGroups.count { matchesGroupPlatform(it, plat) } }
-            .filter { it.second > 0 }
-    }
-    val availableAudios = remember(mediaGroups) {
-        allAudios.map { aud -> aud to mediaGroups.count { matchesGroupAudio(it, aud) } }
-            .filter { it.second > 0 }
-    }
+    val availableResolutions = options.resolutions
+    val availableEditions = options.editions
+    val availablePlatforms = options.platforms
+    val availableAudios = options.audios
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
