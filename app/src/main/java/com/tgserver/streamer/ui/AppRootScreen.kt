@@ -66,7 +66,7 @@ import com.tgserver.streamer.ui.screens.HomeScreen
 import com.tgserver.streamer.ui.screens.LibraryScreen
 import com.tgserver.streamer.ui.screens.SettingsScreen
 import com.tgserver.streamer.ui.screens.TelegramLoginScreen
-import com.tgserver.streamer.updater.UpdateUiState
+import com.tgserver.streamer.update.UpdateUiState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
