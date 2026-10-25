@@ -183,20 +183,21 @@ class LocalHttpServer(
             addProperty("version", getAppVersionForManifest())
             addProperty("name", "NoxMedia")
             addProperty("description", "NoxMedia - Designed for Your Media")
-            addProperty("logo", "http://${getLocalIpAddress()}:${config.port}/logo.png")
-            add("types", gson.toJsonTree(listOf("movie", "series", "anime")))
+            addProperty("logo", "https://raw.githubusercontent.com/TheAceOfficials/NoxMedia/main/art/logo.png")
+            // Stremio official SDK strictly validates root 'types'. Must only be standard types.
+            add("types", gson.toJsonTree(listOf("movie", "series")))
             add("catalogs", gson.toJsonTree(listOf(
                 mapOf(
                     "type" to "movie",
                     "id" to "tg_movies",
-                    "name" to "NoxMedia",
+                    "name" to "NoxMedia Movies",
                     "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
                     "extraSupported" to listOf("search", "skip")
                 ),
                 mapOf(
                     "type" to "series",
                     "id" to "tg_series",
-                    "name" to "NoxMedia",
+                    "name" to "NoxMedia Series",
                     "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
                     "extraSupported" to listOf("search", "skip")
                 ),
@@ -208,7 +209,20 @@ class LocalHttpServer(
                     "extraSupported" to listOf("search", "skip")
                 )
             )))
-            add("resources", gson.toJsonTree(listOf("catalog", "meta", "stream")))
+            // Resources: provide explicit types and prefixes so Stremio Android app doesn't hang in infinite loop
+            add("resources", gson.toJsonTree(listOf(
+                "catalog",
+                mapOf(
+                    "name" to "meta",
+                    "types" to listOf("movie", "series"),
+                    "idPrefixes" to listOf("tg_", "tt", "kitsu")
+                ),
+                mapOf(
+                    "name" to "stream",
+                    "types" to listOf("movie", "series"),
+                    "idPrefixes" to listOf("tg_", "tt", "kitsu")
+                )
+            )))
             add("idPrefixes", gson.toJsonTree(listOf("tg_", "tt", "kitsu")))
         }
         return newFixedLengthResponse(Response.Status.OK, "application/json", gson.toJson(manifest))
