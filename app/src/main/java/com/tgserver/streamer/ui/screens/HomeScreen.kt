@@ -68,7 +68,6 @@ private val NdotFont = FontFamily(Font(R.font.ndot))
 fun HomeScreen(viewModel: MainAppViewModel) {
     val telemetry by viewModel.telemetry.collectAsState()
     val media by viewModel.media.collectAsState()
-    val mediaGroups by viewModel.mediaGroups.collectAsState()
     val session by viewModel.session.collectAsState()
     val haptic = LocalHapticFeedback.current
 
@@ -147,9 +146,9 @@ fun HomeScreen(viewModel: MainAppViewModel) {
         }
     }
 
-    // Recently Added media groups (newest 15) - Pre-computed in background (0ms UI latency)
-    val recentlyAdded = remember(mediaGroups) {
-        mediaGroups
+    // Recently Added media groups (newest 15)
+    val recentlyAdded = remember(media) {
+        media.toMediaGroups()
             .sortedByDescending { group ->
                 val date = group.dateAdded.takeIf { it > 0L }
                 date ?: (group.items.maxOfOrNull { it.messageId }?.toLong() ?: 0L)
@@ -657,7 +656,7 @@ fun HomeScreen(viewModel: MainAppViewModel) {
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     contentPadding = PaddingValues(horizontal = 20.dp)
                 ) {
-                    items(recentlyAdded, key = { it.key }, contentType = { "recent_card" }) { group ->
+                    items(recentlyAdded, key = { it.key }) { group ->
                         RecentMediaCard(
                             group = group,
                             onClick = {

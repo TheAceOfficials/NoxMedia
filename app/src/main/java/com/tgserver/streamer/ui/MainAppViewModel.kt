@@ -18,7 +18,6 @@ import com.tgserver.streamer.data.model.ChannelInfo
 import com.tgserver.streamer.data.model.MediaGroup
 import com.tgserver.streamer.data.model.MediaItem
 import com.tgserver.streamer.data.model.ServerConfig
-import com.tgserver.streamer.data.model.toMediaGroups
 import com.tgserver.streamer.metadata.EnrichedMetadata
 import com.tgserver.streamer.metadata.MetadataEnricher
 import com.tgserver.streamer.server.LocalHttpServer
@@ -27,11 +26,8 @@ import com.tgserver.streamer.telegram.TelegramClientManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -85,19 +81,6 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     val session: StateFlow<AuthSession> = tgClient.sessionState
     val channels: StateFlow<List<ChannelInfo>> = tgClient.channelsState
     val media: StateFlow<List<MediaItem>> = tgClient.mediaState
-
-    // Background pre-computed media groups (computed off UI main thread; 0ms latency on tab switch)
-    val mediaGroups: StateFlow<List<MediaGroup>> = media
-        .map { list ->
-            withContext(Dispatchers.Default) {
-                list.toMediaGroups()
-            }
-        }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.Eagerly,
-            initialValue = emptyList()
-        )
 
     val is32BitDevice: Boolean
         get() = com.tgserver.streamer.util.DeviceProfile.is32BitDevice

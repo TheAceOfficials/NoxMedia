@@ -151,31 +151,31 @@ data class MediaGroup(
     val isHidden: Boolean
         get() = items.isNotEmpty() && items.all { it.isHidden }
 
-    // Pre-computed filter tags evaluated lazily to prevent lag and frame drops during library grouping
-    val has4K: Boolean by lazy(LazyThreadSafetyMode.NONE) { items.any { it.quality.contains("4K", true) || it.quality.contains("2160", true) || it.fileName.contains("4K", true) || it.fileName.contains("2160p", true) } }
-    val has1080p: Boolean by lazy(LazyThreadSafetyMode.NONE) { items.any { it.quality.contains("1080", true) || it.quality.contains("FHD", true) || it.fileName.contains("1080p", true) } }
-    val has720p: Boolean by lazy(LazyThreadSafetyMode.NONE) { items.any { it.quality.contains("720", true) || it.quality.contains("HD", true) || it.fileName.contains("720p", true) } }
-    val hasSD: Boolean by lazy(LazyThreadSafetyMode.NONE) { items.any { it.quality.contains("480", true) || it.fileName.contains("480p", true) } }
+    // Pre-computed filter tags so opening filters and applying filters is instant (0ms freeze)
+    val has4K: Boolean = items.any { it.quality.contains("4K", true) || it.quality.contains("2160", true) || it.fileName.contains("4K", true) || it.fileName.contains("2160p", true) }
+    val has1080p: Boolean = items.any { it.quality.contains("1080", true) || it.quality.contains("FHD", true) || it.fileName.contains("1080p", true) }
+    val has720p: Boolean = items.any { it.quality.contains("720", true) || it.quality.contains("HD", true) || it.fileName.contains("720p", true) }
+    val hasSD: Boolean = items.any { it.quality.contains("480", true) || it.fileName.contains("480p", true) }
 
-    val hasIMAX: Boolean by lazy(LazyThreadSafetyMode.NONE) { items.any { it.fileName.contains("IMAX", true) } }
-    val hasBluRay: Boolean by lazy(LazyThreadSafetyMode.NONE) { items.any { it.fileName.contains("bluray", true) || it.fileName.contains("bdrip", true) || it.fileName.contains("brrip", true) } }
-    val hasWebDl: Boolean by lazy(LazyThreadSafetyMode.NONE) { items.any { it.fileName.contains("web-dl", true) || it.fileName.contains("webdl", true) || it.fileName.contains("webrip", true) || it.fileName.contains("web-rip", true) } }
-    val hasHdrDv: Boolean by lazy(LazyThreadSafetyMode.NONE) { items.any { it.fileName.contains("hdr", true) || it.fileName.contains("dovi", true) || it.fileName.contains("dv", true) || it.fileName.contains("dolby vision", true) } }
-    val has10Bit: Boolean by lazy(LazyThreadSafetyMode.NONE) { items.any { it.fileName.contains("10bit", true) || it.fileName.contains("10-bit", true) || it.fileName.contains("hevc", true) || it.fileName.contains("x265", true) } }
-    val hasRemux: Boolean by lazy(LazyThreadSafetyMode.NONE) { items.any { it.fileName.contains("remux", true) } }
+    val hasIMAX: Boolean = items.any { it.fileName.contains("IMAX", true) }
+    val hasBluRay: Boolean = items.any { it.fileName.contains("bluray", true) || it.fileName.contains("bdrip", true) || it.fileName.contains("brrip", true) }
+    val hasWebDl: Boolean = items.any { it.fileName.contains("web-dl", true) || it.fileName.contains("webdl", true) || it.fileName.contains("webrip", true) || it.fileName.contains("web-rip", true) }
+    val hasHdrDv: Boolean = items.any { it.fileName.contains("hdr", true) || it.fileName.contains("dovi", true) || it.fileName.contains("dv", true) || it.fileName.contains("dolby vision", true) }
+    val has10Bit: Boolean = items.any { it.fileName.contains("10bit", true) || it.fileName.contains("10-bit", true) || it.fileName.contains("hevc", true) || it.fileName.contains("x265", true) }
+    val hasRemux: Boolean = items.any { it.fileName.contains("remux", true) }
 
-    val hasNetflix: Boolean by lazy(LazyThreadSafetyMode.NONE) { items.any { it.fileName.contains("netflix", true) || it.fileName.contains(".nf.", true) || it.fileName.contains("-nf", true) } }
-    val hasCrunchyroll: Boolean by lazy(LazyThreadSafetyMode.NONE) { items.any { it.fileName.contains("crunchyroll", true) || it.fileName.contains(".cr.", true) } }
-    val hasPrimeVideo: Boolean by lazy(LazyThreadSafetyMode.NONE) { items.any { it.fileName.contains("amazon", true) || it.fileName.contains("prime", true) || it.fileName.contains(".amzn.", true) } }
-    val hasDisney: Boolean by lazy(LazyThreadSafetyMode.NONE) { items.any { it.fileName.contains("disney", true) || it.fileName.contains("hotstar", true) || it.fileName.contains(".dsnp.", true) } }
-    val hasAppleTv: Boolean by lazy(LazyThreadSafetyMode.NONE) { items.any { it.fileName.contains("apple", true) || it.fileName.contains(".atvp.", true) } }
-    val hasZee5: Boolean by lazy(LazyThreadSafetyMode.NONE) { items.any { it.fileName.contains("zee5", true) } }
+    val hasNetflix: Boolean = items.any { it.fileName.contains("netflix", true) || it.fileName.contains(".nf.", true) || it.fileName.contains("-nf", true) }
+    val hasCrunchyroll: Boolean = items.any { it.fileName.contains("crunchyroll", true) || it.fileName.contains(".cr.", true) }
+    val hasPrimeVideo: Boolean = items.any { it.fileName.contains("amazon", true) || it.fileName.contains("prime", true) || it.fileName.contains(".amzn.", true) }
+    val hasDisney: Boolean = items.any { it.fileName.contains("disney", true) || it.fileName.contains("hotstar", true) || it.fileName.contains(".dsnp.", true) }
+    val hasAppleTv: Boolean = items.any { it.fileName.contains("apple", true) || it.fileName.contains(".atvp.", true) }
+    val hasZee5: Boolean = items.any { it.fileName.contains("zee5", true) }
 
-    val hasHindi: Boolean by lazy(LazyThreadSafetyMode.NONE) { items.any { it.fileName.contains("hindi", true) || it.fileName.contains(".hin.", true) } }
-    val hasEnglish: Boolean by lazy(LazyThreadSafetyMode.NONE) { items.any { it.fileName.contains("english", true) || it.fileName.contains(".eng.", true) } }
-    val hasJapanese: Boolean by lazy(LazyThreadSafetyMode.NONE) { items.any { it.fileName.contains("japanese", true) || it.fileName.contains(".jap.", true) || it.fileName.contains(".jpn.", true) } }
-    val hasDualAudio: Boolean by lazy(LazyThreadSafetyMode.NONE) { items.any { it.fileName.contains("dual audio", true) || it.fileName.contains("dual", true) } }
-    val hasMultiAudio: Boolean by lazy(LazyThreadSafetyMode.NONE) { items.any { it.fileName.contains("multi audio", true) || it.fileName.contains("multi", true) } }
+    val hasHindi: Boolean = items.any { it.fileName.contains("hindi", true) || it.fileName.contains(".hin.", true) }
+    val hasEnglish: Boolean = items.any { it.fileName.contains("english", true) || it.fileName.contains(".eng.", true) }
+    val hasJapanese: Boolean = items.any { it.fileName.contains("japanese", true) || it.fileName.contains(".jap.", true) || it.fileName.contains(".jpn.", true) }
+    val hasDualAudio: Boolean = items.any { it.fileName.contains("dual audio", true) || it.fileName.contains("dual", true) }
+    val hasMultiAudio: Boolean = items.any { it.fileName.contains("multi audio", true) || it.fileName.contains("multi", true) }
 }
 
 enum class LibrarySortOrder(val label: String) {

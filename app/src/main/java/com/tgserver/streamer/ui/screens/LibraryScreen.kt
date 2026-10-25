@@ -374,13 +374,18 @@ private fun matchesGroupAudio(group: MediaGroup, lang: String): Boolean {
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun LibraryScreen(viewModel: MainAppViewModel) {
-    val mediaGroups by viewModel.mediaGroups.collectAsState()
+    val allMedia by viewModel.media.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val selectedCategory by viewModel.selectedCategory.collectAsState()
     val telemetry by viewModel.telemetry.collectAsState()
     val navGroupKey by viewModel.selectedMediaGroupKey.collectAsState()
     val haptic = LocalHapticFeedback.current
     val gridState = rememberLazyGridState()
+
+    // Group raw files into distinct titles (Movies and Series entities)
+    val mediaGroups = remember(allMedia) {
+        allMedia.toMediaGroups()
+    }
 
     // Dynamic animated search placeholders from user library & popular titles (capped to 30 for low CPU footprint)
     val searchPlaceholders = remember(mediaGroups) {
@@ -444,46 +449,34 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
         }
     }
 
-    // Dynamic Category Tabs: Single-pass partition and type tallying (zero main-thread stutter)
-    val (unhiddenGroups, hiddenGroups) = remember(mediaGroups) {
-        mediaGroups.partition { !it.isHidden }
-    }
-    val (movieCount, seriesCount, animeCount, personalCount) = remember(unhiddenGroups) {
-        var m = 0; var s = 0; var a = 0; var p = 0
-        for (g in unhiddenGroups) {
-            when (g.type) {
-                "movie" -> m++
-                "series" -> s++
-                "anime" -> a++
-                "personal" -> p++
-            }
-        }
-        arrayOf(m, s, a, p)
-    }
+    // Dynamic Category Tabs: Only show tabs that have content in the library
+    val unhiddenGroups = remember(mediaGroups) { mediaGroups.filter { !it.isHidden } }
+    val hiddenGroups = remember(mediaGroups) { mediaGroups.filter { it.isHidden } }
+
+    val movieCount = remember(unhiddenGroups) { unhiddenGroups.count { it.type == "movie" } }
+    val seriesCount = remember(unhiddenGroups) { unhiddenGroups.count { it.type == "series" } }
+    val animeCount = remember(unhiddenGroups) { unhiddenGroups.count { it.type == "anime" } }
+    val personalCount = remember(unhiddenGroups) { unhiddenGroups.count { it.type == "personal" } }
     val hiddenCount = remember(hiddenGroups) { hiddenGroups.size }
 
-    // Precomputed filter chip options and counts: computed ONLY when the filter sheet is opened
-    val availableFilterOptions = remember(mediaGroups, showFilterSheet) {
-        if (!showFilterSheet) {
-            FilterSheetOptions()
-        } else {
-            val allResolutions = listOf("4K", "1080p (FHD)", "720p (HD)", "SD")
-            val allEditions = listOf("IMAX", "BluRay", "WEB-DL", "HDR / DV", "10-Bit", "Remux")
-            val allPlatforms = listOf("Netflix", "Crunchyroll", "Prime Video", "Disney+ / Hotstar", "Apple TV", "Zee5")
-            val allAudios = listOf("Hindi", "English", "Japanese", "Dual Audio", "Multi Audio")
+    // Precomputed filter chip options and counts (Cached on mediaGroups change, 0ms latency when opening sheet)
+    val availableFilterOptions = remember(mediaGroups) {
+        val allResolutions = listOf("4K", "1080p (FHD)", "720p (HD)", "SD")
+        val allEditions = listOf("IMAX", "BluRay", "WEB-DL", "HDR / DV", "10-Bit", "Remux")
+        val allPlatforms = listOf("Netflix", "Crunchyroll", "Prime Video", "Disney+ / Hotstar", "Apple TV", "Zee5")
+        val allAudios = listOf("Hindi", "English", "Japanese", "Dual Audio", "Multi Audio")
 
-            val res = allResolutions.map { r -> r to mediaGroups.count { matchesGroupResolution(it, r) } }.filter { it.second > 0 }
-            val ed = allEditions.map { e -> e to mediaGroups.count { matchesGroupEdition(it, e) } }.filter { it.second > 0 }
-            val plat = allPlatforms.map { p -> p to mediaGroups.count { matchesGroupPlatform(it, p) } }.filter { it.second > 0 }
-            val aud = allAudios.map { a -> a to mediaGroups.count { matchesGroupAudio(it, a) } }.filter { it.second > 0 }
+        val res = allResolutions.map { r -> r to mediaGroups.count { matchesGroupResolution(it, r) } }.filter { it.second > 0 }
+        val ed = allEditions.map { e -> e to mediaGroups.count { matchesGroupEdition(it, e) } }.filter { it.second > 0 }
+        val plat = allPlatforms.map { p -> p to mediaGroups.count { matchesGroupPlatform(it, p) } }.filter { it.second > 0 }
+        val aud = allAudios.map { a -> a to mediaGroups.count { matchesGroupAudio(it, a) } }.filter { it.second > 0 }
 
-            FilterSheetOptions(
-                resolutions = res,
-                editions = ed,
-                platforms = plat,
-                audios = aud
-            )
-        }
+        FilterSheetOptions(
+            resolutions = res,
+            editions = ed,
+            platforms = plat,
+            audios = aud
+        )
     }
 
     val categories = remember(unhiddenGroups.size, movieCount, seriesCount, animeCount, personalCount, hiddenCount) {

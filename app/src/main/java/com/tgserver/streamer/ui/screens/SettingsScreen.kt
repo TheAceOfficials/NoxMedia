@@ -20,6 +20,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -1695,7 +1696,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
             val isBoostActive = config.lowEndOptimization
 
             MinimalSettingsCard(
-                icon = Icons.Default.Speed,
+                icon = Icons.Default.Tune,
                 title = "Performance & Smoothness",
                 subtitle = "${if (is32Bit) "32-bit Architecture" else "64-bit Architecture"} • ${if (isBoostActive) "Low-End Boost Active" else "Standard HD Mode"}",
                 isExpanded = expandedPerformance,
