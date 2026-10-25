@@ -95,10 +95,11 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
     var tmdbKeyError by remember { mutableStateOf<String?>(null) }
     var tvdbKeyError by remember { mutableStateOf<String?>(null) }
 
-    // Library scan & storage state
-    var duplicateScanCount by remember { mutableStateOf<Int?>(null) }
-    var deadFilesScanCount by remember { mutableStateOf<Int?>(null) }
-    var isScanningDeadFiles by remember { mutableStateOf(false) }
+    // Library scan & storage state (persisted across background & screen changes)
+    val isScanningDuplicates by viewModel.isScanningDuplicates.collectAsState()
+    val duplicateScanCount by viewModel.duplicateScanCount.collectAsState()
+    val isScanningDeadFiles by viewModel.isScanningDeadFiles.collectAsState()
+    val deadFilesScanCount by viewModel.deadFilesScanCount.collectAsState()
     var cacheSizeBytes by remember { mutableStateOf(viewModel.getAppCacheSizeBytes()) }
 
     // Card Expansion states (clean minimal collapsed by default)
@@ -723,40 +724,70 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         }
                     }
 
-                    // Selector Chips
+                    // Selector Chips - Balanced, equal height & sleek Nothing/OLED aesthetic
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(IntrinsicSize.Min),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         val isSeasonal = config.animeMetadataPreference != "kitsu"
+
                         // Seasonal Chip
                         Box(
                             modifier = Modifier
                                 .weight(1f)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSeasonal) Color(0xFFA855F7) else Color(0xFF111218))
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    if (isSeasonal) Color(0x22A855F7) else Color(0xFF101217)
+                                )
                                 .border(
-                                    1.dp,
-                                    if (isSeasonal) Color(0xFFC084FC) else Color(0xFF262934),
-                                    RoundedCornerShape(8.dp)
+                                    width = if (isSeasonal) 1.5.dp else 1.dp,
+                                    color = if (isSeasonal) Color(0xFFA855F7) else Color(0xFF222530),
+                                    shape = RoundedCornerShape(10.dp)
                                 )
                                 .clickable {
                                     if (!isSeasonal) viewModel.updateAnimeMetadataPreference("seasonal")
                                 }
-                                .padding(horizontal = 10.dp, vertical = 8.dp),
-                            contentAlignment = Alignment.Center
+                                .padding(horizontal = 10.dp, vertical = 9.dp)
                         ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Column(
+                                modifier = Modifier.fillMaxSize(),
+                                verticalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Seasonal",
+                                        color = if (isSeasonal) Color.White else Color(0xFF94A3B8),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(7.dp)
+                                            .background(
+                                                if (isSeasonal) Color(0xFFC084FC) else Color(0xFF2E3240),
+                                                CircleShape
+                                            )
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "Seasonal (TVDB / TMDB)",
-                                    color = if (isSeasonal) Color.White else Color(0xFF94A3B8),
-                                    fontSize = 11.5.sp,
+                                    text = "TVDB / TMDB",
+                                    color = if (isSeasonal) Color(0xFFC084FC) else Color(0xFF64748B),
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Text(
                                     text = "Best for Nuvio & S2+ play",
-                                    color = if (isSeasonal) Color(0xFFE9D5FF) else Color(0xFF64748B),
-                                    fontSize = 9.5.sp
+                                    color = if (isSeasonal) Color(0xFFD8B4FE) else Color(0xFF64748B),
+                                    fontSize = 9.sp,
+                                    lineHeight = 12.sp
                                 )
                             }
                         }
@@ -765,30 +796,57 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         Box(
                             modifier = Modifier
                                 .weight(1f)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (!isSeasonal) Color(0xFFA855F7) else Color(0xFF111218))
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    if (!isSeasonal) Color(0x22F59E0B) else Color(0xFF101217)
+                                )
                                 .border(
-                                    1.dp,
-                                    if (!isSeasonal) Color(0xFFC084FC) else Color(0xFF262934),
-                                    RoundedCornerShape(8.dp)
+                                    width = if (!isSeasonal) 1.5.dp else 1.dp,
+                                    color = if (!isSeasonal) Color(0xFFF59E0B) else Color(0xFF222530),
+                                    shape = RoundedCornerShape(10.dp)
                                 )
                                 .clickable {
                                     if (isSeasonal) viewModel.updateAnimeMetadataPreference("kitsu")
                                 }
-                                .padding(horizontal = 10.dp, vertical = 8.dp),
-                            contentAlignment = Alignment.Center
+                                .padding(horizontal = 10.dp, vertical = 9.dp)
                         ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Column(
+                                modifier = Modifier.fillMaxSize(),
+                                verticalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Absolute",
+                                        color = if (!isSeasonal) Color.White else Color(0xFF94A3B8),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(7.dp)
+                                            .background(
+                                                if (!isSeasonal) Color(0xFFFBBF24) else Color(0xFF2E3240),
+                                                CircleShape
+                                            )
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "Absolute (Kitsu)",
-                                    color = if (!isSeasonal) Color.White else Color(0xFF94A3B8),
-                                    fontSize = 11.5.sp,
+                                    text = "Kitsu Catalog",
+                                    color = if (!isSeasonal) Color(0xFFFBBF24) else Color(0xFF64748B),
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Text(
                                     text = "Ep 1..1000 continuous",
-                                    color = if (!isSeasonal) Color(0xFFE9D5FF) else Color(0xFF64748B),
-                                    fontSize = 9.5.sp
+                                    color = if (!isSeasonal) Color(0xFFFDE68A) else Color(0xFF64748B),
+                                    fontSize = 9.sp,
+                                    lineHeight = 12.sp
                                 )
                             }
                         }
@@ -868,7 +926,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
             MinimalSettingsCard(
                 icon = Icons.Default.Image,
                 title = "Artworks",
-                subtitle = if (posterUrlInput.isNotBlank()) "Custom template" else "TMDB & Cinemeta",
+                subtitle = "SpatialPosters and Custom URL",
                 isExpanded = expandedArtworks,
                 onToggleExpand = { expandedArtworks = !expandedArtworks }
             ) {
@@ -1453,17 +1511,20 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                             modifier = Modifier.padding(top = 1.dp)
                         ) {
                             val dotColor = when {
+                                isScanningDuplicates -> AccentYellow
                                 duplicateScanCount == null -> TextTertiary
                                 duplicateScanCount == 0 -> Color(0xFF00E676)
                                 else -> StatusAmber
                             }
                             val statusText = when {
+                                isScanningDuplicates -> "Scanning duplicates..."
                                 duplicateScanCount == null -> "Not scanned"
                                 duplicateScanCount == 0 -> "Clean (0 duplicates)"
                                 duplicateScanCount == 1 -> "1 duplicate found"
                                 else -> "$duplicateScanCount duplicates found"
                             }
                             val textColor = when {
+                                isScanningDuplicates -> AccentYellow
                                 duplicateScanCount == null -> TextTertiary
                                 duplicateScanCount == 0 -> Color(0xFF00E676)
                                 else -> StatusAmber
@@ -1485,12 +1546,10 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     action = {
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                             NothingPillButton(
-                                text = "Scan",
-                                onClick = {
-                                    val res = viewModel.scanDuplicates()
-                                    duplicateScanCount = res
-                                    Toast.makeText(context, if (res == 0) "✓ Catalog clean: 0 duplicates" else "⚠ Found $res duplicate entries", Toast.LENGTH_SHORT).show()
-                                },
+                                text = if (isScanningDuplicates) "Scanning" else "Scan",
+                                isLoading = isScanningDuplicates,
+                                enabled = !isScanningDuplicates,
+                                onClick = { viewModel.startBackgroundDuplicateScan() },
                                 variant = NothingButtonVariant.Ghost,
                                 height = 32.dp,
                                 modifier = Modifier.wrapContentWidth()
@@ -1498,9 +1557,9 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
 
                             NothingPillButton(
                                 text = "Delete",
+                                enabled = !isScanningDuplicates && duplicateScanCount != null && duplicateScanCount!! > 0,
                                 onClick = {
                                     val res = viewModel.deleteDuplicates()
-                                    duplicateScanCount = 0
                                     Toast.makeText(context, if (res > 0) "✓ Deleted $res duplicate items" else "✓ Catalog clean: 0 duplicates", Toast.LENGTH_SHORT).show()
                                 },
                                 variant = if (duplicateScanCount != null && duplicateScanCount!! > 0) NothingButtonVariant.Primary else NothingButtonVariant.Secondary,
@@ -1562,20 +1621,9 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                             NothingPillButton(
                                 text = if (isScanningDeadFiles) "Scanning" else "Scan",
-                                onClick = {
-                                    if (isScanningDeadFiles) return@NothingPillButton
-                                    coroutineScope.launch {
-                                        isScanningDeadFiles = true
-                                        val res = viewModel.scanDeadFilesRemote()
-                                        deadFilesScanCount = res
-                                        isScanningDeadFiles = false
-                                        Toast.makeText(
-                                            context,
-                                            if (res == 0) "✓ All indexed media files verified & online" else "⚠ Detected $res deleted or broken files",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    }
-                                },
+                                isLoading = isScanningDeadFiles,
+                                enabled = !isScanningDeadFiles,
+                                onClick = { viewModel.startBackgroundDeadFilesScan() },
                                 variant = NothingButtonVariant.Ghost,
                                 height = 32.dp,
                                 modifier = Modifier.wrapContentWidth()
@@ -1583,9 +1631,9 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
 
                             NothingPillButton(
                                 text = "Clear",
+                                enabled = !isScanningDeadFiles && deadFilesScanCount != null && deadFilesScanCount!! > 0,
                                 onClick = {
                                     val res = viewModel.purgeDeadFiles()
-                                    deadFilesScanCount = 0
                                     Toast.makeText(context, if (res > 0) "✓ Cleared $res dead entries" else "✓ Catalog clean: 0 dead files", Toast.LENGTH_SHORT).show()
                                 },
                                 variant = if (deadFilesScanCount != null && deadFilesScanCount!! > 0) NothingButtonVariant.Primary else NothingButtonVariant.Secondary,
@@ -1643,7 +1691,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
             MinimalSettingsCard(
                 icon = Icons.Default.Sync,
                 title = "Automation",
-                subtitle = if (alexaVoiceControlEnabled) "Alexa active • Channel rules" else "Channel monitoring & duplicate rules",
+                subtitle = null,
                 isExpanded = expandedAutomation,
                 onToggleExpand = { expandedAutomation = !expandedAutomation }
             ) {
@@ -1865,7 +1913,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
             // ==================== 8. BACKUP ====================
             MinimalSettingsCard(
                 icon = Icons.Default.Backup,
-                title = "Cloud Sync & Multi-Device Backup",
+                title = "True Cloud Sync",
                 subtitle = if (autoBackupEnabled) "Live sync active (${autoBackupHours}h / auto-push)" else "Manual & Cloud backup",
                 isExpanded = expandedBackup,
                 onToggleExpand = { expandedBackup = !expandedBackup }
@@ -2032,9 +2080,11 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         enabled = !isBackingUpToCloud && !isRestoringFromCloud,
                         variant = NothingButtonVariant.Primary,
                         height = 42.dp,
+                        fontSize = 11.5.sp,
+                        contentPadding = PaddingValues(horizontal = 8.dp),
                         modifier = Modifier.weight(1f),
                         leadingIcon = {
-                            Icon(Icons.Default.CloudUpload, null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.CloudUpload, null, tint = Color.Black, modifier = Modifier.size(15.dp))
                         }
                     )
 
@@ -2044,9 +2094,11 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         enabled = !isBackingUpToCloud && !isRestoringFromCloud,
                         variant = NothingButtonVariant.Secondary,
                         height = 42.dp,
+                        fontSize = 11.5.sp,
+                        contentPadding = PaddingValues(horizontal = 8.dp),
                         modifier = Modifier.weight(1f),
                         leadingIcon = {
-                            Icon(Icons.Default.CloudDownload, null, tint = TextPrimary, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.CloudDownload, null, tint = TextPrimary, modifier = Modifier.size(15.dp))
                         }
                     )
                 }
@@ -2236,8 +2288,15 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                             }
 
                             if (state.info.changelog.isNotBlank()) {
+                                val cleanChangelog = remember(state.info.changelog) {
+                                    state.info.changelog
+                                        .replace("📱", "")
+                                        .replace("📦", "")
+                                        .replace("- ", "• ")
+                                        .trim()
+                                }
                                 Text(
-                                    text = state.info.changelog.take(200),
+                                    text = cleanChangelog.take(220),
                                     color = TextSecondary,
                                     fontSize = 11.sp,
                                     lineHeight = 15.sp,
@@ -2351,15 +2410,30 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                                 fontWeight = FontWeight.SemiBold
                             )
                             if (config.receiveBetaUpdates) {
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(Color(0xFFE50914).copy(alpha = 0.2f))
-                                        .border(BorderStroke(0.5.dp, Color(0xFFE50914).copy(alpha = 0.4f)), RoundedCornerShape(4.dp))
-                                        .padding(horizontal = 5.dp, vertical = 1.dp)
+                                Spacer(modifier = Modifier.width(7.dp))
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color(0x24A855F7),
+                                    border = BorderStroke(0.7.dp, Color(0x66C084FC))
                                 ) {
-                                    Text("BETA ACTIVE", color = Color(0xFFFF6B6B), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.5.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(5.dp)
+                                                .background(Color(0xFFC084FC), CircleShape)
+                                        )
+                                        Text(
+                                            text = "BETA ACTIVE",
+                                            color = Color(0xFFE9D5FF),
+                                            fontSize = 8.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 0.4.sp
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -2377,7 +2451,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         onCheckedChange = { viewModel.updateReceiveBetaUpdates(it) },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color.White,
-                            checkedTrackColor = Color(0xFFE50914),
+                            checkedTrackColor = Color(0xFFA855F7),
                             uncheckedThumbColor = Color.Gray,
                             uncheckedTrackColor = Color(0xFF1E1F27)
                         )

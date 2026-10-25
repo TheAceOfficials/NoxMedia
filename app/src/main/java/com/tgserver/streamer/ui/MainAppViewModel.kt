@@ -1120,6 +1120,9 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         saveStoredConfig(updated)
         val msg = if (enabled) "✓ Enrolled in Beta Updates" else "✓ Switched to Stable Updates only"
         Toast.makeText(getApplication(), msg, Toast.LENGTH_SHORT).show()
+        if (!enabled) {
+            updateManager.resetUpdateState()
+        }
         checkForAppUpdate(manual = false)
     }
 
@@ -1173,15 +1176,73 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    private val _isScanningDuplicates = MutableStateFlow(false)
+    val isScanningDuplicates: StateFlow<Boolean> = _isScanningDuplicates.asStateFlow()
+
+    private val _duplicateScanCount = MutableStateFlow<Int?>(null)
+    val duplicateScanCount: StateFlow<Int?> = _duplicateScanCount.asStateFlow()
+
+    private val _isScanningDeadFiles = MutableStateFlow(false)
+    val isScanningDeadFiles: StateFlow<Boolean> = _isScanningDeadFiles.asStateFlow()
+
+    private val _deadFilesScanCount = MutableStateFlow<Int?>(null)
+    val deadFilesScanCount: StateFlow<Int?> = _deadFilesScanCount.asStateFlow()
+
+    fun startBackgroundDuplicateScan() {
+        if (_isScanningDuplicates.value) return
+        _isScanningDuplicates.value = true
+        tgClient.launchBackgroundJob {
+            try {
+                val res = tgClient.scanDuplicates()
+                _duplicateScanCount.value = res
+                withContext(Dispatchers.Main) {
+                    val msg = if (res == 0) "✓ Catalog clean: 0 duplicates" else "⚠ Found $res duplicate entries"
+                    Toast.makeText(getApplication(), msg, Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MainAppViewModel", "Duplicate scan failed", e)
+            } finally {
+                _isScanningDuplicates.value = false
+            }
+        }
+    }
+
     fun scanDuplicates(): Int = tgClient.scanDuplicates()
 
-    fun deleteDuplicates(): Int = tgClient.deleteDuplicates()
+    fun deleteDuplicates(): Int {
+        val res = tgClient.deleteDuplicates()
+        _duplicateScanCount.value = 0
+        return res
+    }
+
+    fun startBackgroundDeadFilesScan() {
+        if (_isScanningDeadFiles.value) return
+        _isScanningDeadFiles.value = true
+        tgClient.launchBackgroundJob {
+            try {
+                val res = tgClient.scanDeadFilesRemote()
+                _deadFilesScanCount.value = res
+                withContext(Dispatchers.Main) {
+                    val msg = if (res == 0) "✓ All indexed media files verified & online" else "⚠ Detected $res deleted or broken files"
+                    Toast.makeText(getApplication(), msg, Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MainAppViewModel", "Dead files scan failed", e)
+            } finally {
+                _isScanningDeadFiles.value = false
+            }
+        }
+    }
 
     fun scanDeadFiles(): Int = tgClient.scanDeadFiles()
 
     suspend fun scanDeadFilesRemote(): Int = tgClient.scanDeadFilesRemote()
 
-    fun purgeDeadFiles(): Int = tgClient.purgeDeadFiles()
+    fun purgeDeadFiles(): Int {
+        val res = tgClient.purgeDeadFiles()
+        _deadFilesScanCount.value = 0
+        return res
+    }
 
     fun refreshContentGroup(groupItems: List<MediaItem>, onFinished: ((Triple<Int, Int, Int>) -> Unit)? = null) {
         viewModelScope.launch(Dispatchers.IO) {

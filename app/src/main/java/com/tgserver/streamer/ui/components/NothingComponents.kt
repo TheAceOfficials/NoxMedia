@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tgserver.streamer.theme.*
@@ -75,6 +76,7 @@ fun NothingPillButton(
     height: Dp = 54.dp,
     shape: Shape = CircleShape,
     contentPadding: PaddingValues? = null,
+    fontSize: TextUnit? = null,
     leadingIcon: (@Composable () -> Unit)? = null,
     trailingIcon: (@Composable () -> Unit)? = null
 ) {
@@ -116,7 +118,7 @@ fun NothingPillButton(
         PaddingValues(horizontal = 16.dp, vertical = 0.dp)
     }
 
-    val effectiveFontSize = if (height <= 38.dp) 12.sp else 14.sp
+    val effectiveFontSize = fontSize ?: if (height <= 38.dp) 12.sp else 14.sp
 
     Box(
         modifier = modifier

@@ -146,9 +146,14 @@ class AppUpdateManager(private val context: Context) {
         return Build.CPU_ABI ?: "universal"
     }
 
+    fun resetUpdateState() {
+        _updateState.value = UpdateUiState.Idle
+        _isDismissed.value = false
+    }
+
     /**
      * Checks for new release on GitHub.
-     * If user is on beta build or includeBeta is true, checks for latest pre-release as well.
+     * Strictly checks for beta releases ONLY if includeBeta is true.
      */
     suspend fun checkForUpdate(manual: Boolean = false, includeBeta: Boolean = false): Boolean = withContext(Dispatchers.IO) {
         if (!manual && _updateState.value is UpdateUiState.Downloading) {
@@ -159,11 +164,11 @@ class AppUpdateManager(private val context: Context) {
 
         try {
             val currentVersion = getAppCurrentVersion()
-            val isCurrentBeta = currentVersion.contains("beta", ignoreCase = true) || includeBeta
+            val allowBeta = includeBeta
 
             var release: GitHubReleaseResponse? = null
 
-            if (isCurrentBeta) {
+            if (allowBeta) {
                 // Fetch latest pre-release or stable release from releases list
                 release = fetchLatestBetaOrStableRelease(ALL_RELEASES_URL)
             } else {
@@ -185,6 +190,13 @@ class AppUpdateManager(private val context: Context) {
                 return@withContext false
             }
 
+            // If user has not enabled beta updates, reject any beta release
+            if (!allowBeta && (release.tagName.contains("beta", ignoreCase = true) || release.prerelease)) {
+                val curVer = getAppCurrentVersion()
+                _updateState.value = if (manual) UpdateUiState.UpToDate(curVer) else UpdateUiState.Idle
+                return@withContext false
+            }
+
             // 3. Determine device preferred architecture and select best APK asset
             val (matchedAsset, abiLabel) = pickBestAsset(release.assets)
             if (matchedAsset == null) {
@@ -194,7 +206,7 @@ class AppUpdateManager(private val context: Context) {
             }
 
             // 4. Compare versions
-            val isNewer = isRemoteNewer(release, currentVersion)
+            val isNewer = isRemoteNewer(release, currentVersion, allowBeta)
 
             if (isNewer) {
                 val releaseInfo = AppReleaseInfo(
@@ -378,11 +390,17 @@ class AppUpdateManager(private val context: Context) {
     /**
      * Compares remote release version against current installed app.
      */
-    private fun isRemoteNewer(release: GitHubReleaseResponse, currentVersion: String): Boolean {
+    private fun isRemoteNewer(release: GitHubReleaseResponse, currentVersion: String, allowBeta: Boolean = true): Boolean {
         val cleanTag = release.tagName.removePrefix("v").removePrefix("V").trim()
         val cleanCurrent = currentVersion.removePrefix("v").removePrefix("V").trim()
 
         if (cleanTag.equals(cleanCurrent, ignoreCase = true)) return false
+
+        val remoteIsBeta = cleanTag.contains("beta", ignoreCase = true) || release.prerelease
+        if (!allowBeta && remoteIsBeta) {
+            // User has disabled Early Beta Access: never treat a beta build as an update
+            return false
+        }
 
         // Extract base semantic numbers (e.g., "1.1.25" from "1.1.25-beta")
         val remoteCore = cleanTag.substringBefore("-")

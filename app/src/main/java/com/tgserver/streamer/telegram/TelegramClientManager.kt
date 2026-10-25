@@ -683,6 +683,10 @@ class TelegramClientManager(private val context: Context) {
         scanDeadFiles()
     }
 
+    fun launchBackgroundJob(block: suspend CoroutineScope.() -> Unit): Job {
+        return managerScope.launch(block = block)
+    }
+
     private fun itIsInvalidMessage(item: MediaItem): Boolean {
         return (item.channelId == 0L && item.messageId == 0) || (item.isSplit && item.parts.isEmpty())
     }

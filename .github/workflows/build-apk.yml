@@ -108,9 +108,9 @@ jobs:
           body: |
             Direct APK downloads for ${{ steps.versioning.outputs.release_title }}:
 
-            - 📱 **NoxMedia-arm64-v8a.apk**: Modern 64-bit Android devices (Recommended, ~35MB)
-            - 📱 **NoxMedia-armeabi-v7a.apk**: Older & budget 32-bit Android devices (Compatible with older phones, ~33MB)
-            - 📦 **NoxMedia-universal.apk**: Universal build (Contains all architectures, ~65MB)
+            • **NoxMedia-arm64-v8a.apk**: Modern 64-bit Android devices (Recommended, ~35MB)
+            • **NoxMedia-armeabi-v7a.apk**: Older & budget 32-bit Android devices (Compatible with older phones, ~33MB)
+            • **NoxMedia-universal.apk**: Universal build (Contains all architectures, ~65MB)
           files: output/*.apk
           draft: false
           prerelease: ${{ steps.versioning.outputs.is_prerelease == 'true' }}
