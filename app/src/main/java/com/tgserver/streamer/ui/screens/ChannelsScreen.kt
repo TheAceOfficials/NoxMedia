@@ -76,6 +76,7 @@ fun ChannelsScreen(viewModel: MainAppViewModel) {
 
     var channelInput by remember { mutableStateOf("") }
     var isAnimeChannel by remember { mutableStateOf(false) }
+    var isPersonalChannel by remember { mutableStateOf(false) }
     var showAnimeInfo by remember { mutableStateOf(false) }
     var showUnmatchedSheet by remember { mutableStateOf(false) }
 
@@ -187,25 +188,27 @@ fun ChannelsScreen(viewModel: MainAppViewModel) {
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Radio dot toggle + Info icon
+                        // Radio dot toggles (Anime & Personal) + Info icon
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
+                            // Anime Toggle
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(5.dp),
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(6.dp))
                                     .clickable {
-                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                         isAnimeChannel = !isAnimeChannel
+                                        if (isAnimeChannel) isPersonalChannel = false
                                     }
                                     .padding(vertical = 4.dp, horizontal = 2.dp)
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(13.dp)
+                                        .size(12.dp)
                                         .clip(CircleShape)
                                         .background(if (isAnimeChannel) Color(0xFF10B981) else Color.Transparent)
                                         .border(
@@ -215,8 +218,40 @@ fun ChannelsScreen(viewModel: MainAppViewModel) {
                                         )
                                 )
                                 Text(
-                                    text = "Mark as Anime Channel",
+                                    text = "Anime",
                                     color = if (isAnimeChannel) Color.White else Color(0xFF9CA3AF),
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Normal
+                                )
+                            }
+
+                            // Personal Media Toggle
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        isPersonalChannel = !isPersonalChannel
+                                        if (isPersonalChannel) isAnimeChannel = false
+                                    }
+                                    .padding(vertical = 4.dp, horizontal = 2.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(12.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isPersonalChannel) Color(0xFF3B82F6) else Color.Transparent)
+                                        .border(
+                                            1.5.dp,
+                                            if (isPersonalChannel) Color(0xFF3B82F6) else Color(0xFF4B5563),
+                                            CircleShape
+                                        )
+                                )
+                                Text(
+                                    text = "Personal",
+                                    color = if (isPersonalChannel) Color.White else Color(0xFF9CA3AF),
                                     fontSize = 11.5.sp,
                                     fontWeight = FontWeight.Normal
                                 )
@@ -224,7 +259,7 @@ fun ChannelsScreen(viewModel: MainAppViewModel) {
 
                             Icon(
                                 imageVector = Icons.Default.Info,
-                                contentDescription = "Anime Parser Details",
+                                contentDescription = "Mode Details",
                                 tint = if (showAnimeInfo) Color.White else Color(0xFF6B7280),
                                 modifier = Modifier
                                     .size(15.dp)
@@ -254,10 +289,11 @@ fun ChannelsScreen(viewModel: MainAppViewModel) {
                                 )
                                 .clickable(enabled = channelInput.isNotBlank() && !isAddingChannel) {
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    viewModel.addChannel(channelInput.trim(), isAnimeChannel) { success, _ ->
+                                    viewModel.addChannel(channelInput.trim(), isAnimeChannel, isPersonalChannel) { success, _ ->
                                         if (success) {
                                             channelInput = ""
                                             isAnimeChannel = false
+                                            isPersonalChannel = false
                                         }
                                     }
                                 }
@@ -308,7 +344,10 @@ fun ChannelsScreen(viewModel: MainAppViewModel) {
                                 .padding(horizontal = 10.dp, vertical = 8.dp)
                         ) {
                             Text(
-                                text = "Anime channels use the Kitsu database sorted by absolute episode numbering (e.g. One Piece 1131) instead of standard Season/Episode format.",
+                                text = if (isPersonalChannel)
+                                    "Personal Media mode disables external TMDB / TVDB lookups. Videos are indexed with clean raw filenames and listed under Library > Personal tab."
+                                else
+                                    "Anime channels use the Kitsu database sorted by absolute episode numbering (e.g. One Piece 1131) instead of standard Season/Episode format.",
                                 color = Color(0xFFA0A3B0),
                                 fontSize = 11.5.sp,
                                 lineHeight = 16.sp
@@ -440,6 +479,10 @@ fun ChannelsScreen(viewModel: MainAppViewModel) {
                                     onToggleAnime = {
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                         viewModel.toggleAnimeChannel(channel.id)
+                                    },
+                                    onTogglePersonal = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        viewModel.togglePersonalChannel(channel.id)
                                     },
                                     onDelete = {
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -612,12 +655,13 @@ private fun ChannelItemCard(
     onStopScan: () -> Unit,
     onRescanFromScratch: () -> Unit,
     onToggleAnime: () -> Unit,
+    onTogglePersonal: () -> Unit,
     onDelete: () -> Unit
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
-    // Media stats calculation: Movies | Shows - Episodes
+    // Media stats calculation: Movies | Shows - Episodes | Personal
     val channelMedia = remember(mediaItems, channel.id) {
         mediaItems.filter { it.channelId == channel.id }
     }
@@ -631,9 +675,15 @@ private fun ChannelItemCard(
         seriesItems.map { it.title.lowercase().trim() }.distinct().size
     }
     val episodeCount = seriesItems.size
+    val personalCount = remember(channelMedia) {
+        channelMedia.count { it.type == "personal" }
+    }
 
-    val statsText = remember(movieCount, showCount, episodeCount, channel.videoCount) {
+    val statsText = remember(movieCount, showCount, episodeCount, personalCount, channel.videoCount, channel.isPersonal) {
         when {
+            channel.isPersonal || personalCount > 0 -> {
+                if (personalCount == 1) "1 Personal Item" else "$personalCount Personal Items"
+            }
             movieCount > 0 && showCount > 0 -> {
                 val movieStr = if (movieCount == 1) "1 Movie" else "$movieCount Movies"
                 val showStr = if (showCount == 1) "1 Show" else "$showCount Shows"
@@ -725,6 +775,21 @@ private fun ChannelItemCard(
                                             fontSize = 8.sp
                                         )
                                     }
+                                } else if (channel.isPersonal) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(Color(0xFF1E293B))
+                                            .border(1.dp, Color(0xFF3B82F6).copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                                            .padding(horizontal = 6.dp, vertical = 1.dp)
+                                    ) {
+                                        Text(
+                                            text = "Personal",
+                                            color = Color(0xFF60A5FA),
+                                            fontFamily = NdotFont,
+                                            fontSize = 8.sp
+                                        )
+                                    }
                                 }
                             }
 
@@ -809,6 +874,29 @@ private fun ChannelItemCard(
                                 onClick = {
                                     menuExpanded = false
                                     onToggleAnime()
+                                }
+                            )
+
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = if (channel.isPersonal) "Disable personal media" else "Mark as personal media",
+                                        color = Color.White,
+                                        fontSize = 12.5.sp,
+                                        fontFamily = FontFamily.Default
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.VideoLibrary,
+                                        contentDescription = null,
+                                        tint = Color(0xFF60A5FA),
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                },
+                                onClick = {
+                                    menuExpanded = false
+                                    onTogglePersonal()
                                 }
                             )
 

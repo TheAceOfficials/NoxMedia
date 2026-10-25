@@ -54,6 +54,7 @@ import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -182,7 +183,8 @@ fun RemoteImage(
     contentDescription: String?,
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Crop,
-    isSeries: Boolean = false
+    isSeries: Boolean = false,
+    mediaType: String? = null
 ) {
     val context = LocalContext.current.applicationContext
     val client = remember(context) { getImageHttpClient(context) }
@@ -276,8 +278,13 @@ fun RemoteImage(
                     strokeWidth = 2.dp
                 )
             } else {
+                val icon = when {
+                    mediaType == "personal" -> Icons.Default.VideoLibrary
+                    isSeries -> Icons.Default.Tv
+                    else -> Icons.Default.Movie
+                }
                 Icon(
-                    imageVector = if (isSeries) Icons.Default.Tv else Icons.Default.Movie,
+                    imageVector = icon,
                     contentDescription = null,
                     tint = Color(0xFF4A4D5A),
                     modifier = Modifier.size(28.dp)
@@ -441,6 +448,7 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
     val movieCount = remember(unhiddenGroups) { unhiddenGroups.count { it.type == "movie" } }
     val seriesCount = remember(unhiddenGroups) { unhiddenGroups.count { it.type == "series" } }
     val animeCount = remember(unhiddenGroups) { unhiddenGroups.count { it.type == "anime" } }
+    val personalCount = remember(unhiddenGroups) { unhiddenGroups.count { it.type == "personal" } }
     val hiddenCount = remember(hiddenGroups) { hiddenGroups.size }
 
     // Precomputed filter chip options and counts (Cached on mediaGroups change, 0ms latency when opening sheet)
@@ -463,12 +471,13 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
         )
     }
 
-    val categories = remember(unhiddenGroups.size, movieCount, seriesCount, animeCount, hiddenCount) {
+    val categories = remember(unhiddenGroups.size, movieCount, seriesCount, animeCount, personalCount, hiddenCount) {
         buildList {
             add("all" to "ALL")
             if (movieCount > 0) add("movies" to "MOVIES")
             if (seriesCount > 0) add("series" to "SERIES")
             if (animeCount > 0) add("anime" to "ANIME")
+            if (personalCount > 0) add("personal" to "PERSONAL")
             if (hiddenCount > 0) add("hide" to "HIDE")
         }
     }
@@ -487,6 +496,7 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                 "movies" -> !group.isHidden && group.type == "movie"
                 "series" -> !group.isHidden && group.type == "series"
                 "anime" -> !group.isHidden && group.type == "anime"
+                "personal" -> !group.isHidden && group.type == "personal"
                 "hide" -> group.isHidden
                 else -> !group.isHidden
             }
@@ -1206,6 +1216,7 @@ private fun PosterCard(
                 url = group.posterUrl,
                 contentDescription = group.title,
                 isSeries = group.type == "series" || group.type == "anime",
+                mediaType = group.type,
                 modifier = Modifier.fillMaxSize()
             )
 
@@ -1268,7 +1279,7 @@ private fun PosterCard(
                 }
             }
 
-            // Clean Episode Count badge for Series/Anime (Bottom Left)
+            // Clean Episode Count badge for Series/Anime or Personal badge (Bottom Left)
             if (group.type == "series" || group.type == "anime") {
                 Box(
                     modifier = Modifier
@@ -1283,6 +1294,22 @@ private fun PosterCard(
                         color = Color.White,
                         fontFamily = NdotFont,
                         fontSize = 9.sp
+                    )
+                }
+            } else if (group.type == "personal") {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(6.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color(0xFF1E3A8A).copy(alpha = 0.85f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "PERSONAL",
+                        color = Color(0xFF93C5FD),
+                        fontFamily = NdotFont,
+                        fontSize = 8.5.sp
                     )
                 }
             }
@@ -1301,7 +1328,9 @@ private fun PosterCard(
 
         // Year · Type · Total Aggregated Size
         val yearText = group.year?.takeIf { it.isNotBlank() } ?: "2026"
-        val subtitle = if (group.formattedTotalSize.isNotBlank()) {
+        val subtitle = if (group.type == "personal") {
+            if (group.formattedTotalSize.isNotBlank()) "PERSONAL · ${group.formattedTotalSize}" else "PERSONAL"
+        } else if (group.formattedTotalSize.isNotBlank()) {
             "$yearText · ${group.type.uppercase()} · ${group.formattedTotalSize}"
         } else {
             "$yearText · ${group.type.uppercase()}"
@@ -1418,6 +1447,7 @@ private fun QuickActionModal(
                         url = group.posterUrl,
                         contentDescription = group.title,
                         isSeries = group.type == "series" || group.type == "anime",
+                        mediaType = group.type,
                         modifier = Modifier.fillMaxSize()
                     )
 
@@ -1435,6 +1465,22 @@ private fun QuickActionModal(
                                 color = Color.White,
                                 fontFamily = NdotFont,
                                 fontSize = 9.sp
+                            )
+                        }
+                    } else if (group.type == "personal") {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .padding(6.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(0xFF1E3A8A).copy(alpha = 0.9f))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "PERSONAL",
+                                color = Color(0xFF93C5FD),
+                                fontFamily = NdotFont,
+                                fontSize = 8.5.sp
                             )
                         }
                     }
@@ -1455,8 +1501,13 @@ private fun QuickActionModal(
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
+                    val infoText = if (group.type == "personal") {
+                        if (group.formattedTotalSize.isNotBlank()) "PERSONAL · ${group.formattedTotalSize}" else "PERSONAL"
+                    } else {
+                        "${group.year ?: "2026"} · ${group.type.uppercase()} · ${group.formattedTotalSize}"
+                    }
                     Text(
-                        text = "${group.year ?: "2026"} · ${group.type.uppercase()} · ${group.formattedTotalSize}",
+                        text = infoText,
                         color = Color(0xFF9CA3AF),
                         fontFamily = NdotFont,
                         fontSize = 10.5.sp,

@@ -413,10 +413,10 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
 
     // --- Channels Actions ---
 
-    fun addChannel(identifier: String, isAnime: Boolean = false, onDone: (Boolean, String?) -> Unit = { _, _ -> }) {
+    fun addChannel(identifier: String, isAnime: Boolean = false, isPersonal: Boolean = false, onDone: (Boolean, String?) -> Unit = { _, _ -> }) {
         viewModelScope.launch {
             _isAddingChannel.value = true
-            val result = tgClient.resolveAndAddChannel(identifier, isAnime)
+            val result = tgClient.resolveAndAddChannel(identifier, isAnime, isPersonal)
             _isAddingChannel.value = false
             if (result.isSuccess) {
                 val channel = result.getOrNull()!!
@@ -573,6 +573,14 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         val newState = !ch.isAnime
         tgClient.toggleAnimeChannel(channelId, newState)
         val msg = if (newState) "✓ Marked as Anime channel (Kitsu absolute matching enabled)" else "✓ Unmarked Anime channel"
+        Toast.makeText(getApplication(), msg, Toast.LENGTH_SHORT).show()
+    }
+
+    fun togglePersonalChannel(channelId: Long) {
+        val ch = channels.value.find { it.id == channelId } ?: return
+        val newState = !ch.isPersonal
+        tgClient.togglePersonalChannel(channelId, newState)
+        val msg = if (newState) "✓ Marked as Personal Media channel (Metadata scrapers disabled)" else "✓ Unmarked Personal Media channel"
         Toast.makeText(getApplication(), msg, Toast.LENGTH_SHORT).show()
     }
 
@@ -1306,6 +1314,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                 put("title", ch.title)
                 if (!ch.username.isNullOrBlank()) put("username", ch.username)
                 put("isAnime", ch.isAnime)
+                put("isPersonal", ch.isPersonal)
                 put("isActive", ch.isActive)
                 put("autoIndex", ch.autoIndex)
             }
@@ -1394,6 +1403,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                         val title = chObj.optString("title", "Channel $id")
                         val username = if (chObj.has("username") && !chObj.isNull("username")) chObj.getString("username") else null
                         val isAnime = chObj.optBoolean("isAnime", false)
+                        val isPersonal = chObj.optBoolean("isPersonal", false)
                         val isActive = chObj.optBoolean("isActive", true)
                         val autoIndex = chObj.optBoolean("autoIndex", true)
                         channelList.add(
@@ -1402,6 +1412,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                                 title = title,
                                 username = username,
                                 isAnime = isAnime,
+                                isPersonal = isPersonal,
                                 isActive = isActive,
                                 autoIndex = autoIndex
                             )

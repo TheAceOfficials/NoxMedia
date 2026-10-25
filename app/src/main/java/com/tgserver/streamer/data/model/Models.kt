@@ -10,6 +10,7 @@ data class ChannelInfo(
     val autoIndex: Boolean = true,
     val lastSyncTime: Long = 0L,
     val isAnime: Boolean = false,
+    val isPersonal: Boolean = false,
     val lastScannedMsgId: Int = 0,
     val avatarUrl: String? = null
 ) {
@@ -228,6 +229,7 @@ fun List<MediaItem>.toMediaGroups(): List<MediaGroup> {
     return effectiveMedia.groupBy { item ->
         val cleanTitle = item.title.trim().lowercase()
         when {
+            item.type == "personal" -> "personal_${item.channelId}_${item.id}"
             item.tmdbId != null && item.tmdbId!! > 0 -> "tmdb_${item.type}_${item.tmdbId}"
             !item.imdbId.isNullOrBlank() -> "imdb_${item.imdbId}"
             else -> "title_${item.type}_$cleanTitle"

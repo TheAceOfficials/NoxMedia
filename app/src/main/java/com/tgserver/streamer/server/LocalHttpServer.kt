@@ -194,6 +194,13 @@ class LocalHttpServer(
                     "extraSupported" to listOf("search", "skip")
                 ),
                 mapOf(
+                    "type" to "movie",
+                    "id" to "tg_personal",
+                    "name" to "NoxMedia Personal",
+                    "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
+                    "extraSupported" to listOf("search", "skip")
+                ),
+                mapOf(
                     "type" to "series",
                     "id" to "tg_series",
                     "name" to "NoxMedia",
@@ -217,6 +224,7 @@ class LocalHttpServer(
     private fun handleCatalog(uri: String): Response {
         val isSeries = uri.contains("/series/")
         val isAnime = uri.contains("tg_anime")
+        val isPersonal = uri.contains("tg_personal")
         val searchQuery = if (uri.contains("search=")) {
             try {
                 java.net.URLDecoder.decode(uri.substringAfter("search=").substringBefore(".json").substringBefore("&"), "UTF-8")
@@ -225,12 +233,15 @@ class LocalHttpServer(
 
         var mediaList = tgClient.getAllMedia().filter { !it.isHidden }.filter { item ->
             val isItemSeries = item.type == "series" || item.type == "anime" || (item.season != null && item.episode != null)
-            if (isAnime) {
-                item.type == "anime" || item.kitsuId != null || (tgClient.getChannel(item.channelId)?.isAnime == true)
+            val isItemPersonal = item.type == "personal" || (tgClient.getChannel(item.channelId)?.isPersonal == true)
+            if (isPersonal) {
+                isItemPersonal
+            } else if (isAnime) {
+                !isItemPersonal && (item.type == "anime" || item.kitsuId != null || (tgClient.getChannel(item.channelId)?.isAnime == true))
             } else if (isSeries) {
-                isItemSeries
+                !isItemPersonal && isItemSeries
             } else {
-                !isItemSeries
+                !isItemPersonal && !isItemSeries
             }
         }
 
@@ -250,14 +261,19 @@ class LocalHttpServer(
         }
 
         val metasArray = distinctShows.map { item ->
-            val poster = item.posterUrl ?: posterService.resolvePoster(
-                item.title,
-                config.customPosterUrl,
-                config.customPosterApiKey,
-                config.tmdbApiKey,
-                config.tvdbApiKey
-            )?.also { resolved ->
-                item.posterUrl = resolved
+            val isItemPersonal = item.type == "personal" || (tgClient.getChannel(item.channelId)?.isPersonal == true)
+            val poster = if (isItemPersonal) {
+                item.posterUrl
+            } else {
+                item.posterUrl ?: posterService.resolvePoster(
+                    item.title,
+                    config.customPosterUrl,
+                    config.customPosterApiKey,
+                    config.tmdbApiKey,
+                    config.tvdbApiKey
+                )?.also { resolved ->
+                    item.posterUrl = resolved
+                }
             }
             val desc = item.overview ?: "${item.qualityBadge} • ${item.formattedSize}"
             val stremioType = if (isSeries || isAnime) "series" else "movie"
@@ -292,17 +308,22 @@ class LocalHttpServer(
             return newFixedLengthResponse(Response.Status.NOT_FOUND, "application/json", "{\"meta\":null}")
         }
 
-        val poster = item.posterUrl ?: posterService.resolvePoster(
-            item.title,
-            config.customPosterUrl,
-            config.customPosterApiKey,
-            config.tmdbApiKey,
-            config.tvdbApiKey
-        )?.also { resolved ->
-            item.posterUrl = resolved
+        val isItemPersonal = item.type == "personal" || (tgClient.getChannel(item.channelId)?.isPersonal == true)
+        val poster = if (isItemPersonal) {
+            item.posterUrl
+        } else {
+            item.posterUrl ?: posterService.resolvePoster(
+                item.title,
+                config.customPosterUrl,
+                config.customPosterApiKey,
+                config.tmdbApiKey,
+                config.tvdbApiKey
+            )?.also { resolved ->
+                item.posterUrl = resolved
+            }
         }
 
-        val isSeries = item.type == "series" || item.type == "anime" || (item.season != null && item.episode != null)
+        val isSeries = !isItemPersonal && (item.type == "series" || item.type == "anime" || (item.season != null && item.episode != null))
 
         val videosList = if (isSeries) {
             val episodes = tgClient.getAllMedia().filter { ep ->

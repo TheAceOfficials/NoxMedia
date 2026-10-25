@@ -372,6 +372,7 @@ class TelegramClientManager(private val context: Context) {
                     title = ch.title.ifBlank { existing.title },
                     username = ch.username ?: existing.username,
                     isAnime = ch.isAnime,
+                    isPersonal = ch.isPersonal,
                     isActive = ch.isActive
                 )
             }
@@ -1007,6 +1008,10 @@ class TelegramClientManager(private val context: Context) {
                 chunk.map { item ->
                     async(Dispatchers.IO) {
                         val ch = channels[item.channelId]
+                        val isPersonal = ch?.isPersonal ?: false || item.type == "personal"
+                        if (isPersonal) {
+                            return@async
+                        }
                         val isAnime = ch?.isAnime ?: false
                         metadataEnricher.enrich(
                             item = item,
@@ -1474,7 +1479,7 @@ class TelegramClientManager(private val context: Context) {
     fun getChannels(): List<ChannelInfo> = channels.values.toList()
     fun getChannel(id: Long): ChannelInfo? = channels[id]
 
-    suspend fun resolveAndAddChannel(identifier: String, isAnime: Boolean = false): Result<ChannelInfo> = withContext(Dispatchers.IO) {
+    suspend fun resolveAndAddChannel(identifier: String, isAnime: Boolean = false, isPersonal: Boolean = false): Result<ChannelInfo> = withContext(Dispatchers.IO) {
         val clean = identifier.trim()
         if (clean.isBlank()) {
             return@withContext Result.failure(IllegalArgumentException("Channel username, link, or ID cannot be empty"))
@@ -1552,6 +1557,7 @@ class TelegramClientManager(private val context: Context) {
             videoCount = 0,
             isActive = true,
             isAnime = isAnime,
+            isPersonal = isPersonal,
             lastSyncTime = 0L,
             avatarUrl = finalAvatarPath
         )
@@ -1594,7 +1600,7 @@ class TelegramClientManager(private val context: Context) {
         null
     }
 
-    fun addChannel(identifier: String, isAnime: Boolean = false): Result<ChannelInfo> {
+    fun addChannel(identifier: String, isAnime: Boolean = false, isPersonal: Boolean = false): Result<ChannelInfo> {
         val clean = identifier.trim().removePrefix("@").removePrefix("https://t.me/").removePrefix("t.me/")
         if (clean.isBlank()) {
             return Result.failure(IllegalArgumentException("Channel name or link cannot be empty"))
@@ -1612,6 +1618,7 @@ class TelegramClientManager(private val context: Context) {
             videoCount = 0,
             isActive = true,
             isAnime = isAnime,
+            isPersonal = isPersonal,
             lastSyncTime = 0L
         )
 
@@ -1622,7 +1629,14 @@ class TelegramClientManager(private val context: Context) {
 
     fun toggleAnimeChannel(channelId: Long, isAnime: Boolean) {
         channels[channelId]?.let {
-            channels[channelId] = it.copy(isAnime = isAnime)
+            channels[channelId] = it.copy(isAnime = isAnime, isPersonal = if (isAnime) false else it.isPersonal)
+            saveChannels()
+        }
+    }
+
+    fun togglePersonalChannel(channelId: Long, isPersonal: Boolean) {
+        channels[channelId]?.let {
+            channels[channelId] = it.copy(isPersonal = isPersonal, isAnime = if (isPersonal) false else it.isAnime)
             saveChannels()
         }
     }
@@ -2078,43 +2092,62 @@ class TelegramClientManager(private val context: Context) {
                             rating = mObj.optDouble("rating", 0.0)
                         )
 
-                        // Enrich metadata
-                        metadataEnricher.enrich(
-                            item = item,
-                            isAnimeChannel = isAnime,
-                            tmdbKey = tmdbKey,
-                            tvdbKey = tvdbKey,
-                            animePreference = animePref
-                        )
-
-                        val isMatched = !item.posterUrl.isNullOrBlank() ||
-                                !item.imdbId.isNullOrBlank() ||
-                                item.tmdbId != null ||
-                                item.kitsuId != null
-
-                        if (isMatched) {
+                        val isPersonal = ch?.isPersonal ?: false
+                        if (isPersonal) {
+                            item.type = "personal"
+                            if (item.title.isBlank()) {
+                                item.title = item.fileName.substringBeforeLast(".").replace("_", " ").trim()
+                            }
+                            val min = item.durationSeconds / 60
+                            val sec = item.durationSeconds % 60
+                            val durStr = if (min > 0) "${min}m ${sec}s" else "${sec}s"
+                            val sizeStr = com.tgserver.streamer.server.StreamTrafficStats.formatBytes(item.sizeBytes)
+                            if (item.overview.isNullOrBlank()) {
+                                item.overview = "${item.qualityBadge} • $sizeStr • $durStr"
+                            }
                             mediaIndex[item.id] = item
                             unmatchedIndex.remove("unmatched_${item.channelId}_${item.messageId}")
                             newItemsAdded++
                             totalBytesScanned += item.sizeBytes
                         } else {
-                            // Unmatched media item
-                            val rawFn = mObj.optString("rawFileName", item.fileName)
-                            val un = UnmatchedItem(
-                                id = "unmatched_${item.channelId}_${item.messageId}",
-                                channelId = item.channelId,
-                                channelTitle = ch?.title ?: "",
-                                messageId = item.messageId,
-                                fileName = if (item.fileName.isNotBlank()) item.fileName else item.title,
-                                rawFileName = rawFn,
-                                sizeBytes = item.sizeBytes,
-                                scannedAt = System.currentTimeMillis(),
-                                reason = if (item.title.isNotBlank()) "Uncertain match / low confidence for '${item.title}'" else "No match found on TMDB / TVDB / Kitsu",
-                                mimeType = item.mimeType,
-                                isVideo = true,
-                                parsedMediaItem = item
+                            // Enrich metadata
+                            metadataEnricher.enrich(
+                                item = item,
+                                isAnimeChannel = isAnime,
+                                tmdbKey = tmdbKey,
+                                tvdbKey = tvdbKey,
+                                animePreference = animePref
                             )
-                            unmatchedIndex[un.id] = un
+
+                            val isMatched = !item.posterUrl.isNullOrBlank() ||
+                                    !item.imdbId.isNullOrBlank() ||
+                                    item.tmdbId != null ||
+                                    item.kitsuId != null
+
+                            if (isMatched) {
+                                mediaIndex[item.id] = item
+                                unmatchedIndex.remove("unmatched_${item.channelId}_${item.messageId}")
+                                newItemsAdded++
+                                totalBytesScanned += item.sizeBytes
+                            } else {
+                                // Unmatched media item
+                                val rawFn = mObj.optString("rawFileName", item.fileName)
+                                val un = UnmatchedItem(
+                                    id = "unmatched_${item.channelId}_${item.messageId}",
+                                    channelId = item.channelId,
+                                    channelTitle = ch?.title ?: "",
+                                    messageId = item.messageId,
+                                    fileName = if (item.fileName.isNotBlank()) item.fileName else item.title,
+                                    rawFileName = rawFn,
+                                    sizeBytes = item.sizeBytes,
+                                    scannedAt = System.currentTimeMillis(),
+                                    reason = if (item.title.isNotBlank()) "Uncertain match / low confidence for '${item.title}'" else "No match found on TMDB / TVDB / Kitsu",
+                                    mimeType = item.mimeType,
+                                    isVideo = true,
+                                    parsedMediaItem = item
+                                )
+                                unmatchedIndex[un.id] = un
+                            }
                         }
                     }
                 }
@@ -2188,43 +2221,59 @@ class TelegramClientManager(private val context: Context) {
                             parts = computedParts
                         )
 
-                        // Enrich metadata
-                        metadataEnricher.enrich(
-                            item = splitItem,
-                            isAnimeChannel = isAnime,
-                            tmdbKey = tmdbKey,
-                            tvdbKey = tvdbKey,
-                            animePreference = animePref
-                        )
-
-                        val isMatched = !splitItem.posterUrl.isNullOrBlank() ||
-                                !splitItem.imdbId.isNullOrBlank() ||
-                                splitItem.tmdbId != null ||
-                                splitItem.kitsuId != null
-
-                        if (isMatched) {
+                        if (isPersonal) {
+                            splitItem.type = "personal"
+                            if (splitItem.title.isBlank()) {
+                                splitItem.title = cleanBase.substringBeforeLast(".").replace("_", " ").trim()
+                            }
+                            val sizeStr = com.tgserver.streamer.server.StreamTrafficStats.formatBytes(runningStart)
+                            if (splitItem.overview.isNullOrBlank()) {
+                                splitItem.overview = "${splitItem.qualityBadge} • $sizeStr"
+                            }
                             val wasAlreadyInIndex = mediaIndex.containsKey(splitItem.id)
                             mediaIndex[splitItem.id] = splitItem
                             unmatchedIndex.remove("unmatched_${channelId}_${firstMsgId}")
                             if (!wasAlreadyInIndex) newItemsAdded++
                             totalBytesScanned += pSize
                         } else {
-                            val rawFn = spObj.optString("rawFileName", cleanBase)
-                            val un = UnmatchedItem(
-                                id = "unmatched_${channelId}_${firstMsgId}",
-                                channelId = channelId,
-                                channelTitle = ch?.title ?: "",
-                                messageId = firstMsgId,
-                                fileName = cleanBase,
-                                rawFileName = rawFn,
-                                sizeBytes = runningStart,
-                                scannedAt = System.currentTimeMillis(),
-                                reason = if (splitItem.title.isNotBlank()) "Uncertain match / low confidence for '${splitItem.title}'" else "No match found on TMDB / TVDB / Kitsu",
-                                mimeType = splitItem.mimeType,
-                                isVideo = true,
-                                parsedMediaItem = splitItem
+                            // Enrich metadata
+                            metadataEnricher.enrich(
+                                item = splitItem,
+                                isAnimeChannel = isAnime,
+                                tmdbKey = tmdbKey,
+                                tvdbKey = tvdbKey,
+                                animePreference = animePref
                             )
-                            unmatchedIndex[un.id] = un
+
+                            val isMatched = !splitItem.posterUrl.isNullOrBlank() ||
+                                    !splitItem.imdbId.isNullOrBlank() ||
+                                    splitItem.tmdbId != null ||
+                                    splitItem.kitsuId != null
+
+                            if (isMatched) {
+                                val wasAlreadyInIndex = mediaIndex.containsKey(splitItem.id)
+                                mediaIndex[splitItem.id] = splitItem
+                                unmatchedIndex.remove("unmatched_${channelId}_${firstMsgId}")
+                                if (!wasAlreadyInIndex) newItemsAdded++
+                                totalBytesScanned += pSize
+                            } else {
+                                val rawFn = spObj.optString("rawFileName", cleanBase)
+                                val un = UnmatchedItem(
+                                    id = "unmatched_${channelId}_${firstMsgId}",
+                                    channelId = channelId,
+                                    channelTitle = ch?.title ?: "",
+                                    messageId = firstMsgId,
+                                    fileName = cleanBase,
+                                    rawFileName = rawFn,
+                                    sizeBytes = runningStart,
+                                    scannedAt = System.currentTimeMillis(),
+                                    reason = if (splitItem.title.isNotBlank()) "Uncertain match / low confidence for '${splitItem.title}'" else "No match found on TMDB / TVDB / Kitsu",
+                                    mimeType = splitItem.mimeType,
+                                    isVideo = true,
+                                    parsedMediaItem = splitItem
+                                )
+                                unmatchedIndex[un.id] = un
+                            }
                         }
                     }
                 }
