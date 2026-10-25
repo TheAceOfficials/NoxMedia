@@ -29,7 +29,11 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -69,6 +73,7 @@ fun HomeScreen(viewModel: MainAppViewModel) {
     val telemetry by viewModel.telemetry.collectAsState()
     val media by viewModel.media.collectAsState()
     val session by viewModel.session.collectAsState()
+    val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
 
     var copiedRecently by remember { mutableStateOf(false) }
@@ -443,8 +448,8 @@ fun HomeScreen(viewModel: MainAppViewModel) {
                             }
                         }
 
-                        // Lower Shelf: Stream URL
-                        Box(
+                        // Lower Shelf: Stream URL + One-Tap Add to Stremio
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .background(Color(0xFF131418))
@@ -453,34 +458,103 @@ fun HomeScreen(viewModel: MainAppViewModel) {
                                     color = Color(0xFF26272E),
                                     shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp)
                                 )
-                                .clickable {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    viewModel.copyToClipboard(serverUrl, "URL copied")
-                                    copiedRecently = true
-                                }
-                                .padding(horizontal = 18.dp, vertical = 12.dp)
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                            // 1. URL Row (Tap to Copy)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        viewModel.copyToClipboard(serverUrl, "URL copied")
+                                        copiedRecently = true
+                                    }
+                                    .padding(horizontal = 18.dp, vertical = 11.dp)
                             ) {
-                                Text(
-                                    text = "URL: $serverUrl",
-                                    color = Color(0xFFA6A8B2),
-                                    fontFamily = NdotFont,
-                                    fontSize = 11.5.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                if (copiedRecently) {
-                                    Spacer(modifier = Modifier.width(8.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                     Text(
-                                        text = "copied",
-                                        color = Color(0xFF34D399),
+                                        text = "URL: $serverUrl",
+                                        color = Color(0xFFA6A8B2),
                                         fontFamily = NdotFont,
-                                        fontSize = 10.5.sp
+                                        fontSize = 11.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    if (copiedRecently) {
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "copied",
+                                            color = Color(0xFF34D399),
+                                            fontFamily = NdotFont,
+                                            fontSize = 10.5.sp
+                                        )
+                                    } else {
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "COPY",
+                                            color = Color(0xFF71747F),
+                                            fontFamily = NdotFont,
+                                            fontSize = 9.5.sp,
+                                            letterSpacing = 0.5.sp
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Divider
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(1.dp)
+                                    .background(Color(0xFF1F2026))
+                            )
+
+                            // 2. One-Tap Add to Stremio Button (Bypasses Browser Mixed-Content & Manual typing)
+                            val stremioUrl = remember(telemetry) {
+                                val ip = telemetry.localIp.ifBlank { "127.0.0.1" }
+                                val port = if (telemetry.port > 0) telemetry.port else 7788
+                                "stremio://$ip:$port/manifest.json"
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        try {
+                                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(stremioUrl))
+                                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            context.startActivity(intent)
+                                        } catch (_: Exception) {
+                                            // Fallback if Stremio not directly handling protocol: copy manifest & guide
+                                            val httpManifest = "http://${telemetry.localIp.ifBlank { "127.0.0.1" }}:${if (telemetry.port > 0) telemetry.port else 7788}/manifest.json"
+                                            viewModel.copyToClipboard(httpManifest, "Manifest URL copied!")
+                                            Toast.makeText(context, "Install Stremio or paste manifest URL in Addons", Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                    .padding(horizontal = 18.dp, vertical = 9.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(6.dp)
+                                            .background(Color(0xFFA855F7), CircleShape)
+                                    )
+                                    Text(
+                                        text = "ADD TO STREMIO (ONE-TAP INSTALL)",
+                                        color = Color(0xFFC084FC),
+                                        fontFamily = NdotFont,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        letterSpacing = 0.6.sp
                                     )
                                 }
                             }
