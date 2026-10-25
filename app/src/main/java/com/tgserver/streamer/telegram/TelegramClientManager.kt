@@ -1945,6 +1945,7 @@ class TelegramClientManager(private val context: Context) {
 
             val ch = channels[channelId]
             val isAnime = ch?.isAnime ?: false
+            val isPersonal = ch?.isPersonal ?: false
             val tmdbKey = prefs.getString("tmdb_api_key", "") ?: ""
             val tvdbKey = prefs.getString("tvdb_api_key", "") ?: ""
             val animePref = prefs.getString("anime_metadata_preference", "seasonal") ?: "seasonal"
@@ -2092,7 +2093,6 @@ class TelegramClientManager(private val context: Context) {
                             rating = mObj.optDouble("rating", 0.0)
                         )
 
-                        val isPersonal = ch?.isPersonal ?: false
                         if (isPersonal) {
                             item.type = "personal"
                             if (item.title.isBlank()) {
@@ -2101,7 +2101,7 @@ class TelegramClientManager(private val context: Context) {
                             val min = item.durationSeconds / 60
                             val sec = item.durationSeconds % 60
                             val durStr = if (min > 0) "${min}m ${sec}s" else "${sec}s"
-                            val sizeStr = com.tgserver.streamer.server.StreamTrafficStats.formatBytes(item.sizeBytes)
+                            val sizeStr = formatBytes(item.sizeBytes)
                             if (item.overview.isNullOrBlank()) {
                                 item.overview = "${item.qualityBadge} • $sizeStr • $durStr"
                             }
@@ -2226,7 +2226,7 @@ class TelegramClientManager(private val context: Context) {
                             if (splitItem.title.isBlank()) {
                                 splitItem.title = cleanBase.substringBeforeLast(".").replace("_", " ").trim()
                             }
-                            val sizeStr = com.tgserver.streamer.server.StreamTrafficStats.formatBytes(runningStart)
+                            val sizeStr = formatBytes(runningStart)
                             if (splitItem.overview.isNullOrBlank()) {
                                 splitItem.overview = "${splitItem.qualityBadge} • $sizeStr"
                             }
