@@ -19,6 +19,7 @@
 
 ## 📑 Table of Contents
 
+- [What's New in v1.2!](#-whats-new-in-v12)
 - [What is NoxMedia?](#-what-is-noxmedia)
 - [Why NoxMedia? (Use-Cases)](#-why-noxmedia-use-cases)
 - [Key Features](#-key-features)
@@ -28,11 +29,48 @@
   - [Step 2: Authenticate Account](#step-2-authenticate-account)
   - [Step 3: Connect Monitored Channels](#step-3-connect-monitored-channels)
   - [Step 4: Stream in Stremio / Nuvio](#step-4-stream-in-stremio--nuvio)
+  - [Finding Telegram Channel IDs (Private & Public)](#-finding-telegram-channel-ids-private--public)
 - [Remote Streaming (Tailscale & Custom Domains)](#-remote-streaming-tailscale--custom-domains)
 - [Background Streaming Best Practices](#-background-streaming-best-practices)
 - [Support & Sponsorship](#-support--sponsorship)
 - [Acknowledgements & Inspiration](#-acknowledgements--inspiration)
 - [License](#-license)
+
+---
+
+## 🚀 What's New in v1.2!
+
+NoxMedia **v1.2** is a massive milestone release introducing multi-device True Cloud Sync, intelligent catalog organizing, hands-free smart home integration, and extensive design polish inspired by Nothing OS and Emil Kowalski micro-interactions.
+
+### 🌟 Key Highlights
+
+* **☁️ True Cloud Sync & Multi-Device Backup**:
+  * Bi-directional live sync across all your phones, Android TVs, and tablets.
+  * **Gzip Compression**: Snapshots are compressed by ~90%, saving bandwidth and storage.
+  * Auto-push triggers when new media is scanned, metadata matches are fixed, or titles are hidden/unhidden.
+  * Custom destination backup support (dedicated private channel or Telegram Saved Messages).
+
+* **📑 Dynamic Library Tabs & 60fps Filter Sheet**:
+  * Seamless browsing across smart tabs: **All, Movies, TV Shows, Anime, 4K UHD, Recent**.
+  * Multi-tag filter bottom sheet for resolutions (4K, 1080p, 720p), audio/source codecs (BluRay, WEB-DL, HDR/DV), and sorting.
+  * Zero-lag opening with pre-computed media group tags.
+
+* **✨ Batch Selection & Manual Title Merge**:
+  * Long press any library item to enter selection mode: bulk hide/unhide, delete, or merge multiple disparate episode parts under one show/movie card.
+
+* **🎙️ Alexa Voice Control & Standby Quick Settings Tile**:
+  * Control local streaming server on/off using Amazon Alexa voice commands over local Wi-Fi.
+  * Dedicated **Standby Control Center Tile** in Android's notification shade.
+
+* **🍙 Anime Indexing Preference (Seasonal vs Absolute)**:
+  * Choose between **Seasonal (TVDB/TMDB)** (standard multi-season playback for Nuvio & Cinemeta) and **Absolute (Kitsu)** (continuous Ep 1..1000+) with balanced, equal-height OLED cards.
+
+* **🛡️ Background Storage Cleanup (Unkillable Scans)**:
+  * Duplicate Media Scan and Dead Entries Scan run on an independent background supervisor scope, preventing Android from killing scans when navigating or locking the phone.
+
+* **🎨 Emil Kowalski Tactile Physics & Redesigned Settings**:
+  * Responsive spring scales (`0.96f` on press), organic sheet reveals, Nothing OS typography.
+  * Redesigned glowing **`BETA ACTIVE`** pill badge, auto-fitting cloud action buttons, and strict stable-only update isolation when Early Beta Access is turned off.
 
 ---
 
@@ -149,7 +187,7 @@ Open NoxMedia on your Android device and enter your `API ID` and `API Hash`. You
 
 ### Step 3: Connect Monitored Channels
 1. Navigate to the **Channels** tab.
-2. Enter the channel username (e.g., `@MyMoviesChannel`), invite link, or private channel ID (`t.me/c/...`).
+2. Enter the channel username (e.g., `@MyMoviesChannel`), invite link, or channel ID (e.g., `-1001234567890`).
 3. Tap **Connect Channel**. NoxMedia will resolve channel access and begin background media indexing immediately.
 
 ### Step 4: Stream in Stremio / Nuvio
@@ -160,6 +198,29 @@ Open NoxMedia on your Android device and enter your `API ID` and `API Hash`. You
    - **In Stremio:** Go to **Addons** ➔ paste your `manifest.json` URL into the search bar ➔ tap **Install**.
    - **In Nuvio:** Go to **Plugins / Addons** ➔ paste your `manifest.json` URL ➔ save & enable.
 5. Browse your movies, series, and anime with full posters, episode streams, and instant seeking!
+
+---
+
+### 🔍 Finding Telegram Channel IDs (Private & Public)
+
+Need the exact channel ID for connecting private channels or configuring your **True Cloud Sync Backup Destination**?
+
+You can easily get the ID of **any Telegram channel** (even private ones without a public `@username`) using these verified Telegram bots:
+
+* **[@idbot](https://t.me/idbot)**
+* **[@userinfobot](https://t.me/userinfobot)**
+
+#### How to use:
+1. Open [@idbot](https://t.me/idbot) or [@userinfobot](https://t.me/userinfobot) in your Telegram app and tap **Start**.
+2. Go to your private or public channel and **forward any message or video** from the channel into the bot chat.
+3. Even if the channel is completely private, the bot will instantly reply with the channel's unique ID:
+   ```
+   Forwarded from chat: Your Channel Name
+   ID: -1001234567890
+   ```
+4. Copy the full ID including the `-100` prefix (e.g., `-1001234567890`) and paste it directly into:
+   - **Channels Tab** ➔ To connect and monitor the channel.
+   - **Settings Tab ➔ True Cloud Sync ➔ Backup Destination Chat** ➔ To use a private channel as your personal encrypted backup cloud!
 
 ---
 

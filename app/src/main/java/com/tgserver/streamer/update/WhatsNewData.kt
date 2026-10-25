@@ -46,74 +46,64 @@ data class WhatsNewRelease(
 object WhatsNewRepository {
 
     val currentRelease: WhatsNewRelease = WhatsNewRelease(
-        version = "1.1-beta",
-        releaseTitle = "Anime Kitsu Match & True Cloud Sync",
+        version = "1.2",
+        releaseTitle = "True Cloud Sync, Smart Library & Modern UI",
         releaseDate = "October 2026",
         items = listOf(
             WhatsNewItem(
                 category = ChangeCategory.NEW,
-                title = "Anime (Kitsu) Metadata Matching",
-                description = "Dedicated Anime toggle in both Fix Metadata Match and Unmatched Content dialogs. Searches Kitsu anime database with full episode names, artwork, and direct Kitsu ID support."
+                title = "True Cloud Sync & Multi-Device Backup",
+                description = "Bi-directional true sync across all your phones, Android TVs, and tablets. Full library snapshots, title merges, and hidden states are compressed with Gzip (~90% smaller) and pushed automatically to Telegram without re-scanning."
             ),
             WhatsNewItem(
                 category = ChangeCategory.NEW,
-                title = "Overhauled Unmatched Content Rematch",
-                description = "Rematching unmatched files now features snappy 350ms debounced live search, Nothing OS aesthetics, clear query icon, and direct IMDb/TMDB/Kitsu ID lookup."
+                title = "Dynamic Library Tabs & Multi-Select Filters",
+                description = "Browse through smart categorical tabs (All, Movies, TV Shows, Anime, 4K UHD, Recent) with a stutter-free multi-tag filter bottom sheet for resolutions, sources, and sorting."
             ),
             WhatsNewItem(
                 category = ChangeCategory.NEW,
-                title = "True Multi-Device Cloud Sync",
-                description = "Bi-directional true sync across all your phones, Android TVs, and tablets. Pre-indexed library and manual rematch fixes are compressed with Gzip (~90% smaller) and synced automatically without re-scanning. Supports custom Telegram backup channels."
+                title = "Batch Selection & Manual Title Merge",
+                description = "Long press any media card to enter selection mode: bulk hide, unhide, merge disparate episodes/parts under one title, or delete entries in a single tap."
             ),
             WhatsNewItem(
                 category = ChangeCategory.NEW,
-                title = "Movie ↔ Series Category Switching",
-                description = "Easily convert misplaced media between Movie and Series. Automatically sets up season and episode numbering and fetches episode-specific metadata."
-            ),
-            WhatsNewItem(
-                category = ChangeCategory.NEW,
-                title = "Early Beta Access Update Channel",
-                description = "New setting toggle allows opting into bleeding-edge GitHub pre-release beta builds with automatic in-app updates."
+                title = "Alexa Voice Control & Quick Settings Tile",
+                description = "Control streaming server on/off via Echo voice commands over local Wi-Fi, and toggle Alexa Standby mode directly from your phone's notification shade control center tile."
             ),
             WhatsNewItem(
                 category = ChangeCategory.NEW,
                 title = "Anime Indexing Preference (Seasonal vs Absolute)",
-                description = "Choose between Seasonal TVDB/TMDB (recommended for Nuvio & Season 2+ stream matching) and Absolute Kitsu numbering with real-time pipeline visualization and workflow explainer."
-            ),
-            WhatsNewItem(
-                category = ChangeCategory.NEW,
-                title = "Alexa Standby Quick Settings Tile",
-                description = "Toggle Alexa Standby mode directly from your phone's notification shade / control center. Shows live listening status, connected device name, and seamless transition between streaming and standby."
+                description = "Select between Seasonal TVDB/TMDB (standard multi-season playback for Nuvio & Cinemeta) and Absolute Continuous (Kitsu 1..1000+) with balanced, equal-height OLED cards."
             ),
             WhatsNewItem(
                 category = ChangeCategory.IMPROVEMENT,
-                title = "3D Depth Parallax Hero Banner",
-                description = "Apple TV+ inspired multi-layer scroll motion: hero backdrop scrolls with 0.45x depth velocity and subtle scale transition, layered behind foreground title elements with an adaptive frosted glass top bar."
+                title = "Background Storage Cleanup (Unkillable Scans)",
+                description = "Duplicate Media Scan and Dead Entries Scan now run on an independent background supervisor scope. Navigating away or locking your screen will no longer cancel active scans."
             ),
             WhatsNewItem(
                 category = ChangeCategory.IMPROVEMENT,
-                title = "Redesigned 'Versions in Library' Section",
-                description = "Re-engineered from scratch with OTT brand gradient borders (Netflix, Prime, Apple TV+, Blu-ray, etc.), sleek resolution & audio pills, and an expandable release file details accordion."
+                title = "Emil Kowalski Micro-Interactions & Physics",
+                description = "Responsive spring scales (0.96x depression on press), organic dialog popups, Nothing OS typography, and refined tactile haptics across all buttons."
             ),
             WhatsNewItem(
                 category = ChangeCategory.IMPROVEMENT,
-                title = "Redesigned 'About & Specifications' Section",
-                description = "Replaced crowded layout with clean 2-column specs grid, IMDb/TMDB/Kitsu Anime identifier pills, and full-width chip wrap for multi-audio language tags."
-            ),
-            WhatsNewItem(
-                category = ChangeCategory.IMPROVEMENT,
-                title = "Tactile Press Physics & Emil Kowalski Micro-Animations",
-                description = "Snappy 180ms spring switches, physical 0.96x press depression on posters and cards, organic dialog popups, and fluid 160ms bottom tab crossfades."
-            ),
-            WhatsNewItem(
-                category = ChangeCategory.IMPROVEMENT,
-                title = "Apple TV+ 'Fix Metadata Match' Button",
-                description = "Replaced ambiguous play/stream label and search icon with a prominent, labeled 'Fix Metadata Match' pill button on media detail screens."
+                title = "Settings Screen Polish & Strict Beta Separation",
+                description = "Redesigned sleek glowing 'BETA ACTIVE' pill tag, auto-fitting cloud action buttons without text cropping, sanitized changelog typography, and strict stable-only updates when Beta toggle is off."
             ),
             WhatsNewItem(
                 category = ChangeCategory.FIX,
-                title = "Metadata Candidate Deduplication",
-                description = "Eliminated duplicate candidate cards from showing during rescan. Cross-source deduplication merges TMDB and Cinemeta results, keeping TMDB at top priority."
+                title = "Hide/Unhide Cloud State Persistence",
+                description = "Fixed hidden/unhidden status updates so timestamp changes immediately trigger background cloud backup and reflect accurately across all synced screens."
+            ),
+            WhatsNewItem(
+                category = ChangeCategory.FIX,
+                title = "Filter BottomSheet Zero-Lag Opening",
+                description = "Pre-computed filter tags on media groups, completely eliminating UI stutter and freeze when opening the library filters sheet."
+            ),
+            WhatsNewItem(
+                category = ChangeCategory.FIX,
+                title = "Stremio & Nuvio Streaming Stability",
+                description = "Streamlined HTTP streaming pipeline ensuring zero infinite loading loops and rock-solid playback across Stremio Mobile, Desktop, and Nuvio."
             )
         )
     )

@@ -66,9 +66,9 @@ jobs:
             echo "is_prerelease=false" >> $GITHUB_OUTPUT
             echo "make_latest=true" >> $GITHUB_OUTPUT
           elif [[ "$IS_BETA" == "true" ]]; then
-            # Beta branch push: tags as v1.1.<run_number>-beta
-            BASE_VER=$(grep -m1 'val baseVersion =' app/build.gradle.kts | cut -d '"' -f2 || echo "1.1")
-            [ -z "$BASE_VER" ] && BASE_VER="1.1"
+            # Beta branch push: tags as v1.2.<run_number>-beta
+            BASE_VER=$(grep -m1 'val baseVersion =' app/build.gradle.kts | cut -d '"' -f2 || echo "1.2")
+            [ -z "$BASE_VER" ] && BASE_VER="1.2"
             FULL_VER="${BASE_VER}.${{ github.run_number }}-beta"
             echo "tag_name=v${FULL_VER}" >> $GITHUB_OUTPUT
             echo "version_name=${FULL_VER}" >> $GITHUB_OUTPUT
@@ -76,9 +76,9 @@ jobs:
             echo "is_prerelease=true" >> $GITHUB_OUTPUT
             echo "make_latest=false" >> $GITHUB_OUTPUT
           else
-            # Continuous push on main/master: reads baseVersion from app/build.gradle.kts (e.g. 1.1)
-            BASE_VER=$(grep -m1 'val baseVersion =' app/build.gradle.kts | cut -d '"' -f2 || echo "1.1")
-            [ -z "$BASE_VER" ] && BASE_VER="1.1"
+            # Continuous push on main/master: reads baseVersion from app/build.gradle.kts (e.g. 1.2)
+            BASE_VER=$(grep -m1 'val baseVersion =' app/build.gradle.kts | cut -d '"' -f2 || echo "1.2")
+            [ -z "$BASE_VER" ] && BASE_VER="1.2"
             FULL_VER="${BASE_VER}.${{ github.run_number }}"
             echo "tag_name=v${FULL_VER}" >> $GITHUB_OUTPUT
             echo "version_name=${FULL_VER}" >> $GITHUB_OUTPUT
