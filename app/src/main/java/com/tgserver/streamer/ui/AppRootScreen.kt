@@ -3,12 +3,8 @@ package com.tgserver.streamer.ui
 import android.graphics.BitmapFactory
 import androidx.compose.animation.*
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -19,7 +15,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -66,7 +61,6 @@ import com.tgserver.streamer.ui.screens.HomeScreen
 import com.tgserver.streamer.ui.screens.LibraryScreen
 import com.tgserver.streamer.ui.screens.SettingsScreen
 import com.tgserver.streamer.ui.screens.TelegramLoginScreen
-import com.tgserver.streamer.update.UpdateUiState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -91,8 +85,6 @@ fun AppRootScreen(viewModel: MainAppViewModel) {
     val selectedTab by viewModel.selectedTab.collectAsState()
     val apiCreds by viewModel.apiCredentials.collectAsState()
     val session by viewModel.session.collectAsState()
-    val telemetry by viewModel.telemetry.collectAsState()
-    val updateState by viewModel.updateState.collectAsState()
     val haptic = LocalHapticFeedback.current
 
     val hasCredentials = apiCreds.first > 0 && apiCreds.second.isNotBlank()
@@ -114,7 +106,7 @@ fun AppRootScreen(viewModel: MainAppViewModel) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    // Horizontal swipe between tabs (Emil Kowalski: 140f threshold prevents carousel scroll collisions)
+                    // Horizontal swipe between tabs
                     .pointerInput(selectedTab) {
                         detectHorizontalDragGestures(
                             onDragStart = { dragAccumulator = 0f },
@@ -124,11 +116,11 @@ fun AppRootScreen(viewModel: MainAppViewModel) {
                             },
                             onDragEnd = {
                                 val currentIdx = NAV_TABS.indexOfFirst { it.tab == selectedTab }
-                                if (dragAccumulator < -140f && currentIdx < NAV_TABS.size - 1) {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                if (dragAccumulator < -90f && currentIdx < NAV_TABS.size - 1) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     viewModel.selectTab(NAV_TABS[currentIdx + 1].tab)
-                                } else if (dragAccumulator > 140f && currentIdx > 0) {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                } else if (dragAccumulator > 90f && currentIdx > 0) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     viewModel.selectTab(NAV_TABS[currentIdx - 1].tab)
                                 }
                                 dragAccumulator = 0f
@@ -183,8 +175,6 @@ fun AppRootScreen(viewModel: MainAppViewModel) {
                 currentTab = selectedTab,
                 avatarUrl = session.avatarUrl,
                 userInitials = session.initials,
-                isServerRunning = telemetry.isRunning,
-                hasUpdateAvailable = updateState is UpdateUiState.Available || updateState is UpdateUiState.ReadyToInstall,
                 onTabSelected = { viewModel.selectTab(it) },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -197,14 +187,11 @@ fun AppRootScreen(viewModel: MainAppViewModel) {
 
 /**
  * Ultra-minimalist, 60fps+ fluid glassmorphic floating navigation island.
- * Built with Emil Kowalski motion & interaction craftsmanship:
- * - Tactile touch-down feedback (instant scale-down on finger touch, bouncy recoil on release).
+ * Features:
+ * - Only icons (pure minimal aesthetic, zero text clutter).
  * - Symmetrical, perfectly centered icon alignment.
- * - Fluid hold-to-swipe scrub gesture with organic spring physics & stretch.
- * - Crisp micro-haptics (TextHandleMove) for mechanical switch feel.
- * - Live server status pulsing neon dot on Home tab.
- * - Live update available badge on Settings tab.
- * - Profile avatar integrated for Settings tab with illuminated specular halo.
+ * - Fluid hold-to-swipe drag scrub gesture with squishy liquid springs.
+ * - Profile avatar integrated for Settings tab with active white ring.
  * - True multi-layered frosted smoked glass with specular reflection & zero background cut-off.
  */
 @OptIn(ExperimentalFoundationApi::class)
@@ -213,8 +200,6 @@ private fun MinimalFloatingNavDock(
     currentTab: AppTab,
     avatarUrl: String?,
     userInitials: String,
-    isServerRunning: Boolean,
-    hasUpdateAvailable: Boolean,
     onTabSelected: (AppTab) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -239,16 +224,15 @@ private fun MinimalFloatingNavDock(
         }
     }
 
-    // Emil Kowalski Principle: Organic spring physics for navigation indicators
-    // Damping ratio 0.76f gives a lively, premium settle without excess wobble.
+    // 120 FPS buttery smooth spring interpolation
     val animatedPosition by animateFloatAsState(
         targetValue = if (isDragging) dragPosition else targetIndex,
         animationSpec = if (isDragging) spring(dampingRatio = 0.98f, stiffness = 1600f)
-                        else spring(dampingRatio = 0.76f, stiffness = 480f),
+                        else spring(dampingRatio = 0.72f, stiffness = 420f),
         label = "dock_pill_pos"
     )
 
-    // Dynamic squishy stretch physics along movement direction
+    // Liquid squishy stretch physics based on animation speed
     var prevPos by remember { mutableFloatStateOf(targetIndex) }
     val velocity = animatedPosition - prevPos
     SideEffect {
@@ -256,13 +240,13 @@ private fun MinimalFloatingNavDock(
     }
 
     val dynamicStretch by animateFloatAsState(
-        targetValue = (abs(velocity) * 1.5f).coerceIn(0f, 0.22f),
-        animationSpec = spring(dampingRatio = 0.75f, stiffness = 550f),
+        targetValue = (abs(velocity) * 1.8f).coerceIn(0f, 0.28f),
+        animationSpec = spring(dampingRatio = 0.65f, stiffness = 600f),
         label = "dock_pill_stretch"
     )
 
     val pillScaleX = 1.0f + dynamicStretch
-    val pillScaleY = (1.0f - dynamicStretch * 0.30f).coerceAtLeast(0.80f)
+    val pillScaleY = (1.0f - dynamicStretch * 0.35f).coerceAtLeast(0.75f)
 
     Box(
         modifier = modifier,
@@ -271,21 +255,21 @@ private fun MinimalFloatingNavDock(
         // Floating Island Capsule (Compact, Centered, Symmetrical, Frosted Glass)
         Box(
             modifier = Modifier
-                .width(284.dp)
-                .height(56.dp)
+                .width(276.dp)
+                .height(54.dp)
                 .shadow(
-                    elevation = 28.dp,
-                    shape = RoundedCornerShape(28.dp),
-                    spotColor = Color(0xB8000000),
+                    elevation = 24.dp,
+                    shape = RoundedCornerShape(27.dp),
+                    spotColor = Color(0xB3000000),
                     ambientColor = Color(0x66000000)
                 )
-                .clip(RoundedCornerShape(28.dp))
+                .clip(RoundedCornerShape(27.dp))
                 // Layer 1: Dense Smoked Obsidian Frosted Base (stops text bleed-through)
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            Color(0xFA11131A),
-                            Color(0xFE090A0E)
+                            Color(0xF7151722),
+                            Color(0xFD0D0E14)
                         )
                     )
                 )
@@ -293,7 +277,7 @@ private fun MinimalFloatingNavDock(
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            Color(0x24FFFFFF),
+                            Color(0x28FFFFFF),
                             Color(0x0CFFFFFF),
                             Color(0x00FFFFFF)
                         )
@@ -306,12 +290,12 @@ private fun MinimalFloatingNavDock(
                         Brush.verticalGradient(
                             colors = listOf(
                                 Color(0x55FFFFFF),
-                                Color(0x1CFFFFFF),
+                                Color(0x20FFFFFF),
                                 Color(0x08FFFFFF)
                             )
                         )
                     ),
-                    shape = RoundedCornerShape(28.dp)
+                    shape = RoundedCornerShape(27.dp)
                 )
                 .onSizeChanged { barWidthPx = it.width.toFloat() }
                 // Hold-to-Swipe Gesture Scrubbing across the dock
@@ -343,7 +327,7 @@ private fun MinimalFloatingNavDock(
                         onDragEnd = {
                             isDragging = false
                             val closest = dragPosition.roundToInt().coerceIn(0, NAV_TABS.size - 1)
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             onTabSelected(NAV_TABS[closest].tab)
                         },
                         onDragCancel = {
@@ -397,18 +381,12 @@ private fun MinimalFloatingNavDock(
                             scaleY = pillScaleY
                             transformOrigin = TransformOrigin(0.5f, 0.5f)
                         }
-                        .shadow(
-                            elevation = 8.dp,
-                            shape = RoundedCornerShape(24.dp),
-                            spotColor = Color(0x35000000),
-                            ambientColor = Color(0x18000000)
-                        )
-                        .clip(RoundedCornerShape(24.dp))
+                        .clip(RoundedCornerShape(23.dp))
                         .background(
                             Brush.verticalGradient(
                                 colors = listOf(
-                                    Color(0x33FFFFFF), // Elevated frosted highlight
-                                    Color(0x14FFFFFF)
+                                    Color(0x38FFFFFF), // Elevated frosted highlight
+                                    Color(0x16FFFFFF)
                                 )
                             )
                         )
@@ -417,12 +395,12 @@ private fun MinimalFloatingNavDock(
                                 1.dp,
                                 Brush.verticalGradient(
                                     colors = listOf(
-                                        Color(0x55FFFFFF),
-                                        Color(0x20FFFFFF)
+                                        Color(0x60FFFFFF),
+                                        Color(0x24FFFFFF)
                                     )
                                 )
                             ),
-                            shape = RoundedCornerShape(24.dp)
+                            shape = RoundedCornerShape(23.dp)
                         )
                 )
 
@@ -441,12 +419,10 @@ private fun MinimalFloatingNavDock(
                             item = item,
                             isSelected = isSelected,
                             closeness = closeness,
-                            isServerRunning = if (item.tab == AppTab.HOME) isServerRunning else false,
-                            hasUpdateAvailable = if (item.tab == AppTab.SETTINGS) hasUpdateAvailable else false,
                             avatarUrl = if (item.tab == AppTab.SETTINGS) avatarUrl else null,
                             userInitials = if (item.tab == AppTab.SETTINGS) userInitials else "",
                             onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 onTabSelected(item.tab)
                             },
                             modifier = Modifier.weight(1f)
@@ -459,13 +435,7 @@ private fun MinimalFloatingNavDock(
 }
 
 /**
- * Individual navigation item with Emil Kowalski motion craftsmanship:
- * - Immediate tactile depression on touch down (pressScale = 0.88f)
- * - Organic spring recoil on touch release
- * - Crisp micro-haptics (TextHandleMove)
- * - Live server status pulsing indicator
- * - Live update badge indicator
- * - Illuminated specular avatar ring on Settings tab
+ * Individual navigation item (pure icon, perfectly centered, no text).
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -473,41 +443,21 @@ private fun MinimalNavItem(
     item: NavItemData,
     isSelected: Boolean,
     closeness: Float,
-    isServerRunning: Boolean,
-    hasUpdateAvailable: Boolean,
     avatarUrl: String?,
     userInitials: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val isSettings = item.tab == AppTab.SETTINGS
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-
-    // Emil Kowalski touch-down sink: instant tactile depression on contact, bouncy recoil on release
-    val pressScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.88f else 1.0f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = if (isPressed) 2500f else Spring.StiffnessMedium
-        ),
-        label = "nav_item_press"
-    )
 
     // Micro bounce scale on selection
-    val selectionScale = 1.0f + (closeness * 0.08f)
-    val totalScale = pressScale * selectionScale
-
-    // Live Server Pulse animation for Home icon
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse_transition")
-    val pulseAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.45f,
-        targetValue = 1.0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 850, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
+    val bounceScale by animateFloatAsState(
+        targetValue = 1.0f + (closeness * 0.08f),
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
         ),
-        label = "pulse_alpha"
+        label = "nav_item_bounce"
     )
 
     // Load local or cached avatar bitmap synchronously, fallback to remote fetch
@@ -539,9 +489,9 @@ private fun MinimalNavItem(
                         if (resp.isSuccessful) {
                             resp.body?.byteStream()?.use { stream ->
                                 val bmp = BitmapFactory.decodeStream(stream)
-                                bmp?.let {
+                                if (bmp != null) {
                                     withContext(Dispatchers.Main) {
-                                        avatarBitmap = it.asImageBitmap()
+                                        avatarBitmap = bmp.asImageBitmap()
                                     }
                                 }
                             }
@@ -556,9 +506,9 @@ private fun MinimalNavItem(
     Box(
         modifier = modifier
             .fillMaxHeight()
-            .clip(RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(23.dp))
             .combinedClickable(
-                interactionSource = interactionSource,
+                interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick,
                 onLongClick = onClick
@@ -566,7 +516,7 @@ private fun MinimalNavItem(
         contentAlignment = Alignment.Center
     ) {
         Box(
-            modifier = Modifier.scale(totalScale),
+            modifier = Modifier.scale(bounceScale),
             contentAlignment = Alignment.Center
         ) {
             if (isSettings) {
@@ -578,7 +528,7 @@ private fun MinimalNavItem(
                         .background(Color(0xFF1E2028))
                         .border(
                             width = if (closeness > 0.5f) 1.8.dp else 1.dp,
-                            color = if (closeness > 0.5f) Color.White else Color.White.copy(alpha = 0.28f),
+                            color = if (closeness > 0.5f) Color.White else Color.White.copy(alpha = 0.25f),
                             shape = CircleShape
                         ),
                     contentAlignment = Alignment.Center
@@ -589,7 +539,7 @@ private fun MinimalNavItem(
                             contentDescription = "Profile Avatar",
                             modifier = Modifier
                                 .fillMaxSize()
-                                .alpha(0.70f + closeness * 0.30f),
+                                .alpha(0.65f + closeness * 0.35f),
                             contentScale = ContentScale.Crop
                         )
                     } else if (userInitials.isNotBlank()) {
@@ -603,55 +553,26 @@ private fun MinimalNavItem(
                         Icon(
                             imageVector = if (closeness > 0.5f) Icons.Filled.Settings else Icons.Outlined.Settings,
                             contentDescription = "Settings",
-                            tint = Color.White.copy(alpha = 0.70f + closeness * 0.30f),
-                            modifier = Modifier.size(18.dp)
+                            tint = Color.White.copy(alpha = 0.65f + closeness * 0.35f),
+                            modifier = Modifier.size(17.dp)
                         )
                     }
-                }
-
-                // Update Available Notification Dot
-                if (hasUpdateAvailable) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .offset(x = 3.dp, y = (-2).dp)
-                            .size(6.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFFA855F7))
-                            .border(1.dp, Color(0xFF11131A), CircleShape)
-                    )
                 }
             } else {
                 // Standard Tabs (Home, Library, Channels)
                 // Color smoothly interpolates from muted slate-silver to crisp pure white
                 val iconColor = lerp(
-                    Color(0xFF8B8E99),
+                    Color(0xFF7E8088),
                     Color.White,
                     closeness
                 )
 
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = if (closeness > 0.5f) item.selectedIcon else item.unselectedIcon,
-                        contentDescription = null,
-                        tint = iconColor,
-                        modifier = Modifier.size(if (closeness > 0.5f) 23.dp else 22.dp)
-                    )
-
-                    // Live Streaming Server Running Neon Green Dot on Home Tab
-                    if (item.tab == AppTab.HOME && isServerRunning) {
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .offset(x = 3.dp, y = (-2).dp)
-                                .size(5.dp)
-                                .clip(CircleShape)
-                                .alpha(pulseAlpha)
-                                .background(Color(0xFF00E676))
-                                .border(0.8.dp, Color(0xFF11131A), CircleShape)
-                        )
-                    }
-                }
+                Icon(
+                    imageVector = if (closeness > 0.5f) item.selectedIcon else item.unselectedIcon,
+                    contentDescription = null,
+                    tint = iconColor,
+                    modifier = Modifier.size(if (closeness > 0.5f) 23.dp else 22.dp)
+                )
             }
         }
     }
