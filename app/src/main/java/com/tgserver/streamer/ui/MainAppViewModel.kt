@@ -18,6 +18,7 @@ import com.tgserver.streamer.data.model.ChannelInfo
 import com.tgserver.streamer.data.model.MediaGroup
 import com.tgserver.streamer.data.model.MediaItem
 import com.tgserver.streamer.data.model.ServerConfig
+import com.tgserver.streamer.data.model.toMediaGroups
 import com.tgserver.streamer.metadata.EnrichedMetadata
 import com.tgserver.streamer.metadata.MetadataEnricher
 import com.tgserver.streamer.server.LocalHttpServer
@@ -81,6 +82,36 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     val session: StateFlow<AuthSession> = tgClient.sessionState
     val channels: StateFlow<List<ChannelInfo>> = tgClient.channelsState
     val media: StateFlow<List<MediaItem>> = tgClient.mediaState
+
+    // Background pre-computed media groups (off the UI main thread; 0ms latency on tab switch)
+    val mediaGroups: StateFlow<List<MediaGroup>> = media
+        .kotlinx.coroutines.flow.map { list ->
+            withContext(Dispatchers.Default) {
+                list.toMediaGroups()
+            }
+        }
+        .kotlinx.coroutines.flow.stateIn(
+            scope = viewModelScope,
+            started = kotlinx.coroutines.flow.SharingStarted.Eagerly,
+            initialValue = emptyList()
+        )
+
+    val isPerformanceMode: StateFlow<Boolean> = com.tgserver.streamer.util.DevicePerformanceManager.isPerformanceMode
+
+    fun getPerformanceProfile(): String {
+        return com.tgserver.streamer.util.DevicePerformanceManager.getPerformanceProfile(getApplication())
+    }
+
+    fun setPerformanceProfile(profile: String) {
+        com.tgserver.streamer.util.DevicePerformanceManager.setPerformanceProfile(getApplication(), profile)
+    }
+
+    val is32BitDevice: Boolean
+        get() = com.tgserver.streamer.util.DevicePerformanceManager.is32BitDevice
+
+    val totalMemoryMb: Long
+        get() = com.tgserver.streamer.util.DevicePerformanceManager.totalMemoryMb
+
     val unmatchedMedia: StateFlow<List<com.tgserver.streamer.data.model.UnmatchedItem>> = tgClient.unmatchedState
     val scanProgress: StateFlow<Map<Long, com.tgserver.streamer.data.model.ScanProgressState>> = tgClient.scanProgress
     val apiCredentials: StateFlow<Pair<Int, String>> = tgClient.apiCredentials

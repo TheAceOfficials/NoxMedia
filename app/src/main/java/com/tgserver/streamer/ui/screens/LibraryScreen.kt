@@ -98,54 +98,69 @@ import java.util.concurrent.TimeUnit
 // Authentic Nothing Ndot Dot-Matrix Font
 private val NdotFont = FontFamily(Font(R.font.ndot))
 
-// Smart poster URL optimizer: seamlessly upgrades lower resolution URLs from TMDB/TVDB/Kitsu
-// so existing and incoming library items load crystal clear HD posters without manual database re-scans.
-fun optimizePosterUrl(url: String?): String? {
+// Smart poster URL optimizer: seamlessly scales resolution based on hardware profile.
+// Low-RAM / 32-bit: Uses w342 for TMDB (~30KB WebP, ~350KB decoded RAM) avoiding Dalvik GC pressure.
+// Standard / 64-bit: Uses w500 (~60KB WebP, sharp HD, avoids massive w780 4MB bitmaps).
+fun optimizePosterUrl(
+    url: String?,
+    isLowRam: Boolean = com.tgserver.streamer.util.DevicePerformanceManager.isPerformanceMode.value
+): String? {
     if (url.isNullOrBlank()) return null
     var optimized = url.trim()
 
-    // 1. TMDB: Upgrade lower resolutions (w92, w154, w185, w342, w500) to w780.
-    // w780 is the optimal HD sweet spot: crystal sharp on mobile/tablet/TV displays while loading almost instantly (~100-150KB WebP/JPEG).
+    // 1. TMDB: Upgrade lower resolutions or downscale to optimal device sweet spot
     if (optimized.contains("image.tmdb.org/t/p/")) {
-        optimized = optimized.replace(Regex("/t/p/(?:w92|w154|w185|w342|w500)/"), "/t/p/w780/")
+        val targetRes = if (isLowRam) "w342" else "w500"
+        optimized = optimized.replace(Regex("/t/p/(?:original|w780|w500|w342|w185|w154|w92)/"), "/t/p/$targetRes/")
     }
 
-    // 2. TheTVDB: Upgrade thumbnail suffixes (_t.jpg or _cache) to full resolution artwork
+    // 2. TheTVDB: Upgrade thumbnail suffixes to full resolution artwork (on standard profile)
     if (optimized.contains("artworks.thetvdb.com")) {
-        if (optimized.endsWith("_t.jpg")) {
-            optimized = optimized.replace(Regex("_t\\.jpg$"), ".jpg")
-        } else if (optimized.contains("/_cache/")) {
-            optimized = optimized.replace("/_cache/", "/")
+        if (!isLowRam) {
+            if (optimized.endsWith("_t.jpg")) {
+                optimized = optimized.replace(Regex("_t\\.jpg$"), ".jpg")
+            } else if (optimized.contains("/_cache/")) {
+                optimized = optimized.replace("/_cache/", "/")
+            }
         }
     }
 
-    // 3. Kitsu Anime: Upgrade medium/small/tiny thumbnails to large for crisp anime art
+    // 3. Kitsu Anime: Upgrade medium/small/tiny thumbnails to large on standard profile
     if (optimized.contains("kitsu.io")) {
-        optimized = optimized
-            .replace("/medium.", "/large.")
-            .replace("/small.", "/large.")
-            .replace("/tiny.", "/large.")
+        if (!isLowRam) {
+            optimized = optimized
+                .replace("/medium.", "/large.")
+                .replace("/small.", "/large.")
+                .replace("/tiny.", "/large.")
+        }
     }
 
-    // 4. Cinemeta / Metahub: Upgrade small to medium
+    // 4. Cinemeta / Metahub: Upgrade small to medium on standard profile
     if (optimized.contains("images.metahub.space/poster/small/")) {
-        optimized = optimized.replace("/poster/small/", "/poster/medium/")
+        if (!isLowRam) {
+            optimized = optimized.replace("/poster/small/", "/poster/medium/")
+        }
     }
 
     return optimized
 }
 
-// In-memory poster and backdrop cache with safe heap sizing (avoids OOM, caches up to 64MB of decoded bitmaps)
+// In-memory poster and backdrop cache with safe heap sizing (avoids OOM, dynamic based on device profile)
 object ImageMemoryCache {
     private val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt() // KB
-    private val cacheSizeKb = (maxMemory / 8).coerceIn(32 * 1024, 64 * 1024)
+    private val isLowRam = com.tgserver.streamer.util.DevicePerformanceManager.isLowRamDevice
+    private val cacheSizeKb = if (isLowRam) {
+        (maxMemory / 12).coerceIn(12 * 1024, 24 * 1024)
+    } else {
+        (maxMemory / 8).coerceIn(24 * 1024, 64 * 1024)
+    }
 
     private val cache = object : LruCache<String, ImageBitmap>(cacheSizeKb) {
         override fun sizeOf(key: String, value: ImageBitmap): Int {
             return try {
                 (value.asAndroidBitmap().allocationByteCount / 1024).coerceAtLeast(1)
             } catch (_: Exception) {
-                1024
+                512
             }
         }
     }
@@ -196,7 +211,8 @@ fun RemoteImage(
             bitmap = null
             return@LaunchedEffect
         }
-        val targetUrl = optimizePosterUrl(url) ?: url
+        val isPerfMode = com.tgserver.streamer.util.DevicePerformanceManager.isPerformanceMode.value
+        val targetUrl = optimizePosterUrl(url, isPerfMode) ?: url
 
         // Check memory cache: either optimized URL or original URL
         val cached = ImageMemoryCache.get(targetUrl) ?: ImageMemoryCache.get(url)
@@ -209,7 +225,7 @@ fun RemoteImage(
         withContext(Dispatchers.IO) {
             try {
                 var loadedBmp: ImageBitmap? = null
-                // Attempt high-quality optimized URL first; fall back to original url if necessary
+                // Attempt optimized URL first; fall back to original url if necessary
                 val candidates = if (targetUrl != url) listOf(targetUrl, url) else listOf(targetUrl)
                 for (candUrl in candidates) {
                     try {
@@ -221,11 +237,30 @@ fun RemoteImage(
                             if (resp.isSuccessful) {
                                 val bytes = resp.body?.bytes()
                                 if (bytes != null && bytes.isNotEmpty()) {
-                                    // Use ARGB_8888 for full 32-bit color fidelity (eliminates 16-bit color banding/blur)
-                                    val options = BitmapFactory.Options().apply {
-                                        inPreferredConfig = Bitmap.Config.ARGB_8888
+                                    // 1. Measure dimensions without allocating memory
+                                    val boundsOptions = BitmapFactory.Options().apply {
+                                        inJustDecodeBounds = true
                                     }
-                                    val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+                                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, boundsOptions)
+
+                                    // 2. Compute inSampleSize for target display size (~360px width on low-ram, ~540px standard)
+                                    val reqWidth = if (isPerfMode) 360 else 540
+                                    val reqHeight = if (isPerfMode) 540 else 810
+                                    var sampleSize = 1
+                                    if (boundsOptions.outHeight > reqHeight || boundsOptions.outWidth > reqWidth) {
+                                        val halfHeight = boundsOptions.outHeight / 2
+                                        val halfWidth = boundsOptions.outWidth / 2
+                                        while ((halfHeight / sampleSize) >= reqHeight && (halfWidth / sampleSize) >= reqWidth) {
+                                            sampleSize *= 2
+                                        }
+                                    }
+
+                                    // 3. Decode with optimal sample size & bit-depth (RGB_565 saves 50% RAM & 0 alpha overhead)
+                                    val decodeOptions = BitmapFactory.Options().apply {
+                                        inSampleSize = sampleSize
+                                        inPreferredConfig = if (isPerfMode) Bitmap.Config.RGB_565 else Bitmap.Config.ARGB_8888
+                                    }
+                                    val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOptions)
                                     if (decoded != null) {
                                         loadedBmp = decoded.asImageBitmap()
                                     }
@@ -366,7 +401,7 @@ private fun matchesGroupAudio(group: MediaGroup, lang: String): Boolean {
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun LibraryScreen(viewModel: MainAppViewModel) {
-    val allMedia by viewModel.media.collectAsState()
+    val mediaGroups by viewModel.mediaGroups.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val selectedCategory by viewModel.selectedCategory.collectAsState()
     val telemetry by viewModel.telemetry.collectAsState()
@@ -374,14 +409,9 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
     val haptic = LocalHapticFeedback.current
     val gridState = rememberLazyGridState()
 
-    // Group raw files into distinct titles (Movies and Series entities)
-    val mediaGroups = remember(allMedia) {
-        allMedia.toMediaGroups()
-    }
-
-    // Dynamic animated search placeholders from user library & popular titles
+    // Dynamic animated search placeholders from user library & popular titles (capped to 20 to prevent main-thread allocation)
     val searchPlaceholders = remember(mediaGroups) {
-        val libraryTitles = mediaGroups.map { it.title.trim() }.filter { it.isNotBlank() }.distinct()
+        val libraryTitles = mediaGroups.take(20).map { it.title.trim() }.filter { it.isNotBlank() }.distinct()
         val defaultExamples = listOf(
             "Naruto",
             "One Piece",
@@ -441,34 +471,46 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
         }
     }
 
-    // Dynamic Category Tabs: Only show tabs that have content in the library
-    val unhiddenGroups = remember(mediaGroups) { mediaGroups.filter { !it.isHidden } }
-    val hiddenGroups = remember(mediaGroups) { mediaGroups.filter { it.isHidden } }
-
-    val movieCount = remember(unhiddenGroups) { unhiddenGroups.count { it.type == "movie" } }
-    val seriesCount = remember(unhiddenGroups) { unhiddenGroups.count { it.type == "series" } }
-    val animeCount = remember(unhiddenGroups) { unhiddenGroups.count { it.type == "anime" } }
-    val personalCount = remember(unhiddenGroups) { unhiddenGroups.count { it.type == "personal" } }
+    // Dynamic Category Tabs: Single-pass partition and type tallying (zero main-thread stutter)
+    val (unhiddenGroups, hiddenGroups) = remember(mediaGroups) {
+        mediaGroups.partition { !it.isHidden }
+    }
+    val (movieCount, seriesCount, animeCount, personalCount) = remember(unhiddenGroups) {
+        var m = 0; var s = 0; var a = 0; var p = 0
+        for (g in unhiddenGroups) {
+            when (g.type) {
+                "movie" -> m++
+                "series" -> s++
+                "anime" -> a++
+                "personal" -> p++
+            }
+        }
+        arrayOf(m, s, a, p)
+    }
     val hiddenCount = remember(hiddenGroups) { hiddenGroups.size }
 
-    // Precomputed filter chip options and counts (Cached on mediaGroups change, 0ms latency when opening sheet)
-    val availableFilterOptions = remember(mediaGroups) {
-        val allResolutions = listOf("4K", "1080p (FHD)", "720p (HD)", "SD")
-        val allEditions = listOf("IMAX", "BluRay", "WEB-DL", "HDR / DV", "10-Bit", "Remux")
-        val allPlatforms = listOf("Netflix", "Crunchyroll", "Prime Video", "Disney+ / Hotstar", "Apple TV", "Zee5")
-        val allAudios = listOf("Hindi", "English", "Japanese", "Dual Audio", "Multi Audio")
+    // Precomputed filter chip options and counts: computed ONLY when the filter sheet is opened
+    val availableFilterOptions = remember(mediaGroups, showFilterSheet) {
+        if (!showFilterSheet) {
+            FilterSheetOptions()
+        } else {
+            val allResolutions = listOf("4K", "1080p (FHD)", "720p (HD)", "SD")
+            val allEditions = listOf("IMAX", "BluRay", "WEB-DL", "HDR / DV", "10-Bit", "Remux")
+            val allPlatforms = listOf("Netflix", "Crunchyroll", "Prime Video", "Disney+ / Hotstar", "Apple TV", "Zee5")
+            val allAudios = listOf("Hindi", "English", "Japanese", "Dual Audio", "Multi Audio")
 
-        val res = allResolutions.map { r -> r to mediaGroups.count { matchesGroupResolution(it, r) } }.filter { it.second > 0 }
-        val ed = allEditions.map { e -> e to mediaGroups.count { matchesGroupEdition(it, e) } }.filter { it.second > 0 }
-        val plat = allPlatforms.map { p -> p to mediaGroups.count { matchesGroupPlatform(it, p) } }.filter { it.second > 0 }
-        val aud = allAudios.map { a -> a to mediaGroups.count { matchesGroupAudio(it, a) } }.filter { it.second > 0 }
+            val res = allResolutions.map { r -> r to mediaGroups.count { matchesGroupResolution(it, r) } }.filter { it.second > 0 }
+            val ed = allEditions.map { e -> e to mediaGroups.count { matchesGroupEdition(it, e) } }.filter { it.second > 0 }
+            val plat = allPlatforms.map { p -> p to mediaGroups.count { matchesGroupPlatform(it, p) } }.filter { it.second > 0 }
+            val aud = allAudios.map { a -> a to mediaGroups.count { matchesGroupAudio(it, a) } }.filter { it.second > 0 }
 
-        FilterSheetOptions(
-            resolutions = res,
-            editions = ed,
-            platforms = plat,
-            audios = aud
-        )
+            FilterSheetOptions(
+                resolutions = res,
+                editions = ed,
+                platforms = plat,
+                audios = aud
+            )
+        }
     }
 
     val categories = remember(unhiddenGroups.size, movieCount, seriesCount, animeCount, personalCount, hiddenCount) {
@@ -974,7 +1016,7 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                                 modifier = Modifier.fillMaxSize(),
                                 contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 100.dp)
                             ) {
-                                items(filteredGroups, key = { it.key }) { group ->
+                                items(filteredGroups, key = { it.key }, contentType = { "poster_card" }) { group ->
                                     val isSelected = group.key in selectedGroupKeys
                                     PosterCard(
                                         group = group,

@@ -85,6 +85,7 @@ fun AppRootScreen(viewModel: MainAppViewModel) {
     val selectedTab by viewModel.selectedTab.collectAsState()
     val apiCreds by viewModel.apiCredentials.collectAsState()
     val session by viewModel.session.collectAsState()
+    val isPerformanceMode by viewModel.isPerformanceMode.collectAsState()
     val haptic = LocalHapticFeedback.current
 
     val hasCredentials = apiCreds.first > 0 && apiCreds.second.isNotBlank()
@@ -131,15 +132,19 @@ fun AppRootScreen(viewModel: MainAppViewModel) {
                 AnimatedContent(
                     targetState = selectedTab,
                     transitionSpec = {
-                        // Emil Kowalski Principle: Navigation tabs are high-frequency actions (50+ times/day).
-                        // Full horizontal sliding causes visual exhaustion.
-                        // Subtle scale (0.982f -> 1.0f) + snappy 160ms crossfade feels instant, calm and responsive.
-                        (fadeIn(animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing)) +
-                         scaleIn(initialScale = 0.982f, animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing)))
-                            .togetherWith(
-                                fadeOut(animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing)) +
-                                scaleOut(targetScale = 0.982f, animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing))
-                            )
+                        if (isPerformanceMode) {
+                            // Low-RAM / 32-bit: Zero GPU offscreen buffer allocation, lightning-fast crossfade (no scale layer)
+                            fadeIn(animationSpec = tween(durationMillis = 110))
+                                .togetherWith(fadeOut(animationSpec = tween(durationMillis = 90)))
+                        } else {
+                            // Standard 64-bit: Emil Kowalski Principle subtle scale (0.982f -> 1.0f) + snappy 160ms crossfade
+                            (fadeIn(animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing)) +
+                             scaleIn(initialScale = 0.982f, animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing)))
+                                .togetherWith(
+                                    fadeOut(animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing)) +
+                                    scaleOut(targetScale = 0.982f, animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing))
+                                )
+                        }
                     },
                     label = "tab_content_switch"
                 ) { tab ->

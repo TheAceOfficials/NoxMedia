@@ -33,6 +33,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        com.tgserver.streamer.util.DevicePerformanceManager.init(applicationContext)
         enableEdgeToEdge()
 
         // Request notification permission on Android 13+ for foreground service notifications.
