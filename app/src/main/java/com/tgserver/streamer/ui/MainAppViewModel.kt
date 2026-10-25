@@ -27,8 +27,11 @@ import com.tgserver.streamer.telegram.TelegramClientManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -85,14 +88,14 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
 
     // Background pre-computed media groups (off the UI main thread; 0ms latency on tab switch)
     val mediaGroups: StateFlow<List<MediaGroup>> = media
-        .kotlinx.coroutines.flow.map { list ->
+        .map { list ->
             withContext(Dispatchers.Default) {
                 list.toMediaGroups()
             }
         }
-        .kotlinx.coroutines.flow.stateIn(
+        .stateIn(
             scope = viewModelScope,
-            started = kotlinx.coroutines.flow.SharingStarted.Eagerly,
+            started = SharingStarted.Eagerly,
             initialValue = emptyList()
         )
 

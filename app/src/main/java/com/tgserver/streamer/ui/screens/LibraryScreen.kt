@@ -471,22 +471,14 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
         }
     }
 
-    // Dynamic Category Tabs: Single-pass partition and type tallying (zero main-thread stutter)
-    val (unhiddenGroups, hiddenGroups) = remember(mediaGroups) {
-        mediaGroups.partition { !it.isHidden }
-    }
-    val (movieCount, seriesCount, animeCount, personalCount) = remember(unhiddenGroups) {
-        var m = 0; var s = 0; var a = 0; var p = 0
-        for (g in unhiddenGroups) {
-            when (g.type) {
-                "movie" -> m++
-                "series" -> s++
-                "anime" -> a++
-                "personal" -> p++
-            }
-        }
-        arrayOf(m, s, a, p)
-    }
+    // Dynamic Category Tabs: Only show tabs that have content in the library
+    val unhiddenGroups = remember(mediaGroups) { mediaGroups.filter { !it.isHidden } }
+    val hiddenGroups = remember(mediaGroups) { mediaGroups.filter { it.isHidden } }
+
+    val movieCount = remember(unhiddenGroups) { unhiddenGroups.count { it.type == "movie" } }
+    val seriesCount = remember(unhiddenGroups) { unhiddenGroups.count { it.type == "series" } }
+    val animeCount = remember(unhiddenGroups) { unhiddenGroups.count { it.type == "anime" } }
+    val personalCount = remember(unhiddenGroups) { unhiddenGroups.count { it.type == "personal" } }
     val hiddenCount = remember(hiddenGroups) { hiddenGroups.size }
 
     // Precomputed filter chip options and counts: computed ONLY when the filter sheet is opened
