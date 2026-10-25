@@ -1850,6 +1850,20 @@ class TelegramClientManager(private val context: Context) {
         return newHidden
     }
 
+    fun setMediaItemsHidden(itemIds: Collection<String>, isHidden: Boolean) {
+        var changed = false
+        for (id in itemIds) {
+            val existing = mediaIndex[id] ?: continue
+            if (existing.isHidden != isHidden) {
+                mediaIndex[id] = existing.copy(isHidden = isHidden)
+                changed = true
+            }
+        }
+        if (changed) {
+            saveMediaIndex()
+        }
+    }
+
     suspend fun enrichExistingMedia(itemId: String): MediaItem? = withContext(Dispatchers.IO) {
         val existing = mediaIndex[itemId] ?: return@withContext null
         val tmdbKey = prefs.getString("tmdb_api_key", "") ?: ""

@@ -125,7 +125,7 @@ class MetadataEnricher {
                                 val startDate = attr.get("startDate")?.asString
                                 val cleanYear = startDate?.split("-")?.firstOrNull()
                                 val posterObj = attr.getAsJsonObject("posterImage")
-                                val poster = posterObj?.get("medium")?.asString ?: posterObj?.get("original")?.asString
+                                val poster = posterObj?.get("large")?.asString ?: posterObj?.get("original")?.asString ?: posterObj?.get("medium")?.asString
                                 val coverObj = attr.getAsJsonObject("coverImage")
                                 val bg = coverObj?.get("original")?.asString ?: coverObj?.get("large")?.asString
 
@@ -277,7 +277,7 @@ class MetadataEnricher {
                                 title = resultMeta.title ?: name,
                                 year = cleanYear ?: resultMeta.year,
                                 overview = if (resultMeta.overview.isNullOrBlank()) desc else resultMeta.overview,
-                                posterUrl = resultMeta.posterUrl ?: posterPath?.let { "https://image.tmdb.org/t/p/w500$it" },
+                                posterUrl = resultMeta.posterUrl ?: posterPath?.let { "https://image.tmdb.org/t/p/w780$it" },
                                 backdropUrl = resultMeta.backdropUrl ?: bgPath?.let { "https://image.tmdb.org/t/p/original$it" },
                                 imdbId = resultMeta.imdbId ?: resolvedImdb
                             )
@@ -576,7 +576,7 @@ class MetadataEnricher {
                         val year = startDate?.split("-")?.firstOrNull()
 
                         val posterObj = attr.getAsJsonObject("posterImage")
-                        val posterUrl = posterObj?.get("medium")?.asString ?: posterObj?.get("original")?.asString
+                        val posterUrl = posterObj?.get("large")?.asString ?: posterObj?.get("original")?.asString ?: posterObj?.get("medium")?.asString
 
                         val coverObj = attr.getAsJsonObject("coverImage")
                         val backdropUrl = coverObj?.get("original")?.asString ?: coverObj?.get("large")?.asString
@@ -667,7 +667,20 @@ class MetadataEnricher {
                         bestScore = score
                         val year = cand.get("year")?.asString
                         val overview = cand.get("overview")?.asString
-                        val imageUrl = cand.get("image_url")?.asString
+                        val rawImg = cand.get("image_url")?.asString ?: cand.get("thumbnail")?.asString
+                        val imageUrl = if (!rawImg.isNullOrBlank()) {
+                            var fixed = if (!rawImg.startsWith("http://") && !rawImg.startsWith("https://")) {
+                                "https://artworks.thetvdb.com/" + rawImg.removePrefix("/")
+                            } else {
+                                rawImg
+                            }
+                            if (fixed.endsWith("_t.jpg")) {
+                                fixed = fixed.replace(Regex("_t\\.jpg$"), ".jpg")
+                            } else if (fixed.contains("/_cache/")) {
+                                fixed = fixed.replace("/_cache/", "/")
+                            }
+                            fixed
+                        } else null
 
                         bestCandidate = EnrichedMetadata(
                             title = name,
@@ -755,7 +768,7 @@ class MetadataEnricher {
                         val releaseDate = if (type == "movie") cand.get("release_date")?.asString else cand.get("first_air_date")?.asString
                         val year = releaseDate?.split("-")?.firstOrNull()
 
-                        val posterUrl = if (!posterPath.isNullOrBlank()) "https://image.tmdb.org/t/p/w500$posterPath" else null
+                        val posterUrl = if (!posterPath.isNullOrBlank()) "https://image.tmdb.org/t/p/w780$posterPath" else null
                         val backdropUrl = if (!backdropPath.isNullOrBlank()) "https://image.tmdb.org/t/p/original$backdropPath" else null
 
                         var epTitle: String? = null
@@ -971,7 +984,7 @@ class MetadataEnricher {
                                     val year = startDate?.split("-")?.firstOrNull()
                                     val overview = attr?.get("synopsis")?.asString
                                     val posterObj = attr?.getAsJsonObject("posterImage")
-                                    val posterUrl = posterObj?.get("medium")?.asString ?: posterObj?.get("original")?.asString
+                                    val posterUrl = posterObj?.get("large")?.asString ?: posterObj?.get("original")?.asString ?: posterObj?.get("medium")?.asString
                                     val coverObj = attr?.getAsJsonObject("coverImage")
                                     val bgUrl = coverObj?.get("original")?.asString ?: coverObj?.get("large")?.asString
 
@@ -1026,7 +1039,7 @@ class MetadataEnricher {
                                         type = type,
                                         year = year,
                                         overview = overview,
-                                        posterUrl = posterPath?.let { "https://image.tmdb.org/t/p/w500$it" },
+                                        posterUrl = posterPath?.let { "https://image.tmdb.org/t/p/w780$it" },
                                         backdropUrl = bgPath?.let { "https://image.tmdb.org/t/p/original$it" },
                                         imdbId = targetImdb,
                                         tmdbId = tId
@@ -1111,7 +1124,7 @@ class MetadataEnricher {
                                                 type = type,
                                                 year = year,
                                                 overview = overview,
-                                                posterUrl = posterPath?.let { "https://image.tmdb.org/t/p/w500$it" },
+                                                posterUrl = posterPath?.let { "https://image.tmdb.org/t/p/w780$it" },
                                                 backdropUrl = bgPath?.let { "https://image.tmdb.org/t/p/original$it" },
                                                 imdbId = resolvedImdb,
                                                 tmdbId = tId
@@ -1197,7 +1210,7 @@ class MetadataEnricher {
                                     val overview = attr.get("synopsis")?.asString
 
                                     val posterObj = attr.getAsJsonObject("posterImage")
-                                    val posterUrl = posterObj?.get("medium")?.asString ?: posterObj?.get("original")?.asString
+                                    val posterUrl = posterObj?.get("large")?.asString ?: posterObj?.get("original")?.asString ?: posterObj?.get("medium")?.asString
 
                                     val coverObj = attr.getAsJsonObject("coverImage")
                                     val bgUrl = coverObj?.get("original")?.asString ?: coverObj?.get("large")?.asString
@@ -1252,7 +1265,7 @@ class MetadataEnricher {
                                     val relDate = if (type == "movie") obj.get("release_date")?.asString else obj.get("first_air_date")?.asString
                                     val year = relDate?.split("-")?.firstOrNull()
 
-                                    val posterUrl = if (!posterPath.isNullOrBlank()) "https://image.tmdb.org/t/p/w500$posterPath" else null
+                                    val posterUrl = if (!posterPath.isNullOrBlank()) "https://image.tmdb.org/t/p/w780$posterPath" else null
                                     val bgUrl = if (!bgPath.isNullOrBlank()) "https://image.tmdb.org/t/p/original$bgPath" else null
 
                                     seenTmdb.add(tmdbId)

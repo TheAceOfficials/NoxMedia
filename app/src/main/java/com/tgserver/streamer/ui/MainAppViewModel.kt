@@ -613,6 +613,20 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         return newState
     }
 
+    fun setGroupHidden(group: MediaGroup, hide: Boolean) {
+        val ids = group.items.map { it.id }
+        tgClient.setMediaItemsHidden(ids, hide)
+        val action = if (hide) "hidden & blacklisted" else "unhidden"
+        Toast.makeText(getApplication(), "✓ \"${group.title}\" $action", Toast.LENGTH_SHORT).show()
+    }
+
+    fun setMultipleGroupsHidden(groups: List<MediaGroup>, hide: Boolean) {
+        val ids = groups.flatMap { g -> g.items.map { it.id } }
+        tgClient.setMediaItemsHidden(ids, hide)
+        val action = if (hide) "hidden & blacklisted" else "unhidden"
+        Toast.makeText(getApplication(), "✓ ${groups.size} titles $action", Toast.LENGTH_SHORT).show()
+    }
+
     suspend fun searchMetadataCandidates(query: String, type: String): List<EnrichedMetadata> = withContext(Dispatchers.IO) {
         val tmdbKey = prefs.getString("tmdb_api_key", "") ?: ""
         MetadataEnricher.searchCandidates(query, type, tmdbKey)

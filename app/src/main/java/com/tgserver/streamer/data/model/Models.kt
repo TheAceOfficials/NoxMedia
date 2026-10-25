@@ -146,6 +146,9 @@ data class MediaGroup(
             val mb = totalBytes.toDouble() / (1024.0 * 1024.0)
             return String.format(java.util.Locale.US, "%.0f MB", mb)
         }
+
+    val isHidden: Boolean
+        get() = items.isNotEmpty() && items.all { it.isHidden }
 }
 
 enum class LibrarySortOrder(val label: String) {

@@ -32,11 +32,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -46,6 +51,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
@@ -56,6 +62,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -90,9 +97,58 @@ import java.util.concurrent.TimeUnit
 // Authentic Nothing Ndot Dot-Matrix Font
 private val NdotFont = FontFamily(Font(R.font.ndot))
 
-// In-memory poster and backdrop cache
+// Smart poster URL optimizer: seamlessly upgrades lower resolution URLs from TMDB/TVDB/Kitsu
+// so existing and incoming library items load crystal clear HD posters without manual database re-scans.
+fun optimizePosterUrl(url: String?): String? {
+    if (url.isNullOrBlank()) return null
+    var optimized = url.trim()
+
+    // 1. TMDB: Upgrade lower resolutions (w92, w154, w185, w342, w500) to w780.
+    // w780 is the optimal HD sweet spot: crystal sharp on mobile/tablet/TV displays while loading almost instantly (~100-150KB WebP/JPEG).
+    if (optimized.contains("image.tmdb.org/t/p/")) {
+        optimized = optimized.replace(Regex("/t/p/(?:w92|w154|w185|w342|w500)/"), "/t/p/w780/")
+    }
+
+    // 2. TheTVDB: Upgrade thumbnail suffixes (_t.jpg or _cache) to full resolution artwork
+    if (optimized.contains("artworks.thetvdb.com")) {
+        if (optimized.endsWith("_t.jpg")) {
+            optimized = optimized.replace(Regex("_t\\.jpg$"), ".jpg")
+        } else if (optimized.contains("/_cache/")) {
+            optimized = optimized.replace("/_cache/", "/")
+        }
+    }
+
+    // 3. Kitsu Anime: Upgrade medium/small/tiny thumbnails to large for crisp anime art
+    if (optimized.contains("kitsu.io")) {
+        optimized = optimized
+            .replace("/medium.", "/large.")
+            .replace("/small.", "/large.")
+            .replace("/tiny.", "/large.")
+    }
+
+    // 4. Cinemeta / Metahub: Upgrade small to medium
+    if (optimized.contains("images.metahub.space/poster/small/")) {
+        optimized = optimized.replace("/poster/small/", "/poster/medium/")
+    }
+
+    return optimized
+}
+
+// In-memory poster and backdrop cache with safe heap sizing (avoids OOM, caches up to 64MB of decoded bitmaps)
 object ImageMemoryCache {
-    private val cache = LruCache<String, ImageBitmap>(250)
+    private val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt() // KB
+    private val cacheSizeKb = (maxMemory / 8).coerceIn(32 * 1024, 64 * 1024)
+
+    private val cache = object : LruCache<String, ImageBitmap>(cacheSizeKb) {
+        override fun sizeOf(key: String, value: ImageBitmap): Int {
+            return try {
+                (value.asAndroidBitmap().allocationByteCount / 1024).coerceAtLeast(1)
+            } catch (_: Exception) {
+                1024
+            }
+        }
+    }
+
     fun get(url: String): ImageBitmap? = cache.get(url)
     fun put(url: String, bmp: ImageBitmap) {
         cache.put(url, bmp)
@@ -108,11 +164,11 @@ fun getImageHttpClient(context: Context): OkHttpClient {
     return diskCachedHttpClient ?: synchronized(ImageMemoryCache) {
         diskCachedHttpClient ?: run {
             val cacheDir = File(context.cacheDir, "nox_poster_disk_cache")
-            val cache = okhttp3.Cache(cacheDir, 120L * 1024 * 1024)
+            val cache = okhttp3.Cache(cacheDir, 200L * 1024 * 1024) // 200MB disk cache for instant poster reuse
             val client = OkHttpClient.Builder()
                 .cache(cache)
-                .connectTimeout(5, TimeUnit.SECONDS)
-                .readTimeout(8, TimeUnit.SECONDS)
+                .connectTimeout(6, TimeUnit.SECONDS)
+                .readTimeout(10, TimeUnit.SECONDS)
                 .build()
             diskCachedHttpClient = client
             client
@@ -138,33 +194,54 @@ fun RemoteImage(
             bitmap = null
             return@LaunchedEffect
         }
-        val cached = ImageMemoryCache.get(url)
+        val targetUrl = optimizePosterUrl(url) ?: url
+
+        // Check memory cache: either optimized URL or original URL
+        val cached = ImageMemoryCache.get(targetUrl) ?: ImageMemoryCache.get(url)
         if (cached != null) {
             bitmap = cached
             return@LaunchedEffect
         }
+
         isLoading = true
         withContext(Dispatchers.IO) {
             try {
-                val req = Request.Builder()
-                    .url(url)
-                    .header("User-Agent", "NoxMedia/1.0 (Android)")
-                    .build()
-                client.newCall(req).execute().use { resp ->
-                    if (resp.isSuccessful) {
-                        resp.body?.byteStream()?.use { stream ->
-                            val options = BitmapFactory.Options().apply {
-                                inPreferredConfig = Bitmap.Config.RGB_565
-                            }
-                            val decoded = BitmapFactory.decodeStream(stream, null, options)
-                            if (decoded != null) {
-                                val imgBmp = decoded.asImageBitmap()
-                                ImageMemoryCache.put(url, imgBmp)
-                                withContext(Dispatchers.Main) {
-                                    bitmap = imgBmp
+                var loadedBmp: ImageBitmap? = null
+                // Attempt high-quality optimized URL first; fall back to original url if necessary
+                val candidates = if (targetUrl != url) listOf(targetUrl, url) else listOf(targetUrl)
+                for (candUrl in candidates) {
+                    try {
+                        val req = Request.Builder()
+                            .url(candUrl)
+                            .header("User-Agent", "NoxMedia/1.0 (Android)")
+                            .build()
+                        client.newCall(req).execute().use { resp ->
+                            if (resp.isSuccessful) {
+                                val bytes = resp.body?.bytes()
+                                if (bytes != null && bytes.isNotEmpty()) {
+                                    // Use ARGB_8888 for full 32-bit color fidelity (eliminates 16-bit color banding/blur)
+                                    val options = BitmapFactory.Options().apply {
+                                        inPreferredConfig = Bitmap.Config.ARGB_8888
+                                    }
+                                    val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+                                    if (decoded != null) {
+                                        loadedBmp = decoded.asImageBitmap()
+                                    }
                                 }
                             }
                         }
+                    } catch (_: Exception) {}
+                    if (loadedBmp != null) break
+                }
+
+                if (loadedBmp != null) {
+                    val finalBmp = loadedBmp!!
+                    ImageMemoryCache.put(targetUrl, finalBmp)
+                    if (targetUrl != url) {
+                        ImageMemoryCache.put(url, finalBmp)
+                    }
+                    withContext(Dispatchers.Main) {
+                        bitmap = finalBmp
                     }
                 }
             } catch (_: Exception) {
@@ -210,7 +287,69 @@ fun RemoteImage(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+// User-configurable library filters and sort criteria
+data class ActiveFilters(
+    val sortOrder: LibrarySortOrder = LibrarySortOrder.RECENT,
+    val resolutions: Set<String> = emptySet(),
+    val editions: Set<String> = emptySet(),
+    val platforms: Set<String> = emptySet(),
+    val audioLanguages: Set<String> = emptySet()
+) {
+    val totalFilterCount: Int
+        get() = resolutions.size + editions.size + platforms.size + audioLanguages.size + (if (sortOrder != LibrarySortOrder.RECENT) 1 else 0)
+
+    val hasActiveFilters: Boolean
+        get() = totalFilterCount > 0
+
+    fun clear(): ActiveFilters = ActiveFilters(sortOrder = LibrarySortOrder.RECENT)
+}
+
+private fun matchesGroupResolution(group: MediaGroup, res: String): Boolean {
+    return when (res) {
+        "4K" -> group.items.any { it.quality.contains("4K", true) || it.quality.contains("2160", true) || it.fileName.contains("4K", true) || it.fileName.contains("2160p", true) }
+        "1080p (FHD)" -> group.items.any { it.quality.contains("1080", true) || it.quality.contains("FHD", true) || it.fileName.contains("1080p", true) }
+        "720p (HD)" -> group.items.any { it.quality.contains("720", true) || it.quality.contains("HD", true) || it.fileName.contains("720p", true) }
+        "SD" -> group.items.any { it.quality.contains("480", true) || it.fileName.contains("480p", true) }
+        else -> false
+    }
+}
+
+private fun matchesGroupEdition(group: MediaGroup, ed: String): Boolean {
+    return when (ed) {
+        "IMAX" -> group.items.any { it.fileName.contains("IMAX", true) }
+        "BluRay" -> group.items.any { it.fileName.contains(Regex("""(?i)\b(bluray|bdrip|brrip)\b""")) }
+        "WEB-DL" -> group.items.any { it.fileName.contains(Regex("""(?i)\b(web-?dl|web-?rip)\b""")) }
+        "HDR / DV" -> group.items.any { it.fileName.contains(Regex("""(?i)\b(hdr|hdr10|dovi|dv|dolby\s*vision)\b""")) }
+        "10-Bit" -> group.items.any { it.fileName.contains(Regex("""(?i)\b(10-?bit|hevc|x265)\b""")) }
+        "Remux" -> group.items.any { it.fileName.contains("remux", true) }
+        else -> false
+    }
+}
+
+private fun matchesGroupPlatform(group: MediaGroup, plat: String): Boolean {
+    return when (plat) {
+        "Netflix" -> group.items.any { it.fileName.contains(Regex("""(?i)\b(nf|netflix)\b""")) }
+        "Crunchyroll" -> group.items.any { it.fileName.contains(Regex("""(?i)\b(cr|crunchyroll)\b""")) }
+        "Prime Video" -> group.items.any { it.fileName.contains(Regex("""(?i)\b(amzn|amazon|prime)\b""")) }
+        "Disney+ / Hotstar" -> group.items.any { it.fileName.contains(Regex("""(?i)\b(dsnp|disney|hotstar)\b""")) }
+        "Apple TV" -> group.items.any { it.fileName.contains(Regex("""(?i)\b(atvp|apple)\b""")) }
+        "Zee5" -> group.items.any { it.fileName.contains("zee5", true) }
+        else -> false
+    }
+}
+
+private fun matchesGroupAudio(group: MediaGroup, lang: String): Boolean {
+    return when (lang) {
+        "Hindi" -> group.items.any { it.fileName.contains(Regex("""(?i)\b(hindi|hin)\b""")) }
+        "English" -> group.items.any { it.fileName.contains(Regex("""(?i)\b(english|eng)\b""")) }
+        "Japanese" -> group.items.any { it.fileName.contains(Regex("""(?i)\b(japanese|jap|jpn)\b""")) }
+        "Dual Audio" -> group.items.any { it.fileName.contains(Regex("""(?i)\b(dual|dual\s*audio)\b""")) }
+        "Multi Audio" -> group.items.any { it.fileName.contains(Regex("""(?i)\b(multi|multi\s*audio)\b""")) }
+        else -> false
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun LibraryScreen(viewModel: MainAppViewModel) {
     val allMedia by viewModel.media.collectAsState()
@@ -262,36 +401,105 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
     var selectedGroupKey by remember(navGroupKey) { mutableStateOf(navGroupKey) }
     val selectedGroup = mediaGroups.find { it.key == selectedGroupKey }
 
-    var sortOrder by remember { mutableStateOf(LibrarySortOrder.RECENT) }
-    var showSortSheet by remember { mutableStateOf(false) }
+    var activeFilters by remember { mutableStateOf(ActiveFilters()) }
+    var showFilterSheet by remember { mutableStateOf(false) }
+    var quickActionGroup by remember { mutableStateOf<MediaGroup?>(null) }
+    var isMultiSelectMode by remember { mutableStateOf(false) }
+    val selectedGroupKeys = remember { mutableStateListOf<String>() }
 
-    // Intercept hardware / gesture back navigation when inside details view
-    BackHandler(enabled = selectedGroup != null) {
-        selectedGroupKey = null
-        viewModel.clearSelectedMediaGroup()
+    // Intercept hardware / gesture back navigation when inside details view, multi-select, or modal
+    BackHandler(enabled = selectedGroup != null || isMultiSelectMode || quickActionGroup != null || showFilterSheet) {
+        when {
+            selectedGroup != null -> {
+                selectedGroupKey = null
+                viewModel.clearSelectedMediaGroup()
+            }
+            quickActionGroup != null -> {
+                quickActionGroup = null
+            }
+            showFilterSheet -> {
+                showFilterSheet = false
+            }
+            isMultiSelectMode -> {
+                isMultiSelectMode = false
+                selectedGroupKeys.clear()
+            }
+        }
     }
 
-    // Filter media groups by category & search, then sort by selected criteria
-    val filteredGroups = remember(mediaGroups, searchQuery, selectedCategory, sortOrder) {
+    // Dynamic Category Tabs: Only show tabs that have content in the library
+    val unhiddenGroups = remember(mediaGroups) { mediaGroups.filter { !it.isHidden } }
+    val hiddenGroups = remember(mediaGroups) { mediaGroups.filter { it.isHidden } }
+
+    val movieCount = remember(unhiddenGroups) { unhiddenGroups.count { it.type == "movie" } }
+    val seriesCount = remember(unhiddenGroups) { unhiddenGroups.count { it.type == "series" } }
+    val animeCount = remember(unhiddenGroups) { unhiddenGroups.count { it.type == "anime" } }
+    val hiddenCount = remember(hiddenGroups) { hiddenGroups.size }
+
+    val categories = remember(unhiddenGroups.size, movieCount, seriesCount, animeCount, hiddenCount) {
+        buildList {
+            add("all" to "ALL")
+            if (movieCount > 0) add("movies" to "MOVIES")
+            if (seriesCount > 0) add("series" to "SERIES")
+            if (animeCount > 0) add("anime" to "ANIME")
+            if (hiddenCount > 0) add("hide" to "HIDE")
+        }
+    }
+
+    LaunchedEffect(categories) {
+        if (categories.none { it.first == selectedCategory }) {
+            viewModel.setSelectedCategory("all")
+        }
+    }
+
+    // Filter media groups by category, search & multi-filters, then sort
+    val filteredGroups = remember(mediaGroups, searchQuery, selectedCategory, activeFilters) {
         val filtered = mediaGroups.filter { group ->
             val matchesCategory = when (selectedCategory) {
-                "all" -> true
-                "movies" -> group.type == "movie"
-                "series" -> group.type == "series"
-                "anime" -> group.type == "anime"
-                "4k" -> group.qualityBadge.contains("4K", ignoreCase = true) || group.qualityBadge.contains("2160", ignoreCase = true)
-                else -> true
+                "all" -> !group.isHidden
+                "movies" -> !group.isHidden && group.type == "movie"
+                "series" -> !group.isHidden && group.type == "series"
+                "anime" -> !group.isHidden && group.type == "anime"
+                "hide" -> group.isHidden
+                else -> !group.isHidden
             }
+            if (!matchesCategory) return@filter false
+
             val matchesQuery = searchQuery.isBlank() ||
                     group.title.contains(searchQuery, ignoreCase = true) ||
                     (group.year?.contains(searchQuery, ignoreCase = true) == true) ||
                     (group.imdbId?.contains(searchQuery, ignoreCase = true) == true) ||
                     group.items.any { it.fileName.contains(searchQuery, ignoreCase = true) || it.episodeTitle?.contains(searchQuery, ignoreCase = true) == true }
+            if (!matchesQuery) return@filter false
 
-            matchesCategory && matchesQuery
+            // Resolutions: OR match within selected resolutions
+            if (activeFilters.resolutions.isNotEmpty()) {
+                val match = activeFilters.resolutions.any { matchesGroupResolution(group, it) }
+                if (!match) return@filter false
+            }
+
+            // Editions & Formats: OR match within selected editions
+            if (activeFilters.editions.isNotEmpty()) {
+                val match = activeFilters.editions.any { matchesGroupEdition(group, it) }
+                if (!match) return@filter false
+            }
+
+            // Platform / OTT: OR match within selected platforms
+            if (activeFilters.platforms.isNotEmpty()) {
+                val match = activeFilters.platforms.any { matchesGroupPlatform(group, it) }
+                if (!match) return@filter false
+            }
+
+            // Audio & Languages: OR match within selected languages
+            if (activeFilters.audioLanguages.isNotEmpty()) {
+                val match = activeFilters.audioLanguages.any { matchesGroupAudio(group, it) }
+                if (!match) return@filter false
+            }
+
+            true
         }
 
-        when (sortOrder) {
+        when (activeFilters.sortOrder) {
             LibrarySortOrder.RECENT -> filtered.sortedByDescending { group ->
                 val date = group.dateAdded.takeIf { it > 0L }
                 date ?: (group.items.maxOfOrNull { it.messageId }?.toLong() ?: 0L)
@@ -490,15 +698,7 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                         }
                     }
 
-                    // IOS GLASS SEGMENTED CONTROL TABS (Inspired by cc-ios-tabs)
-                    val categories = listOf(
-                        "all" to "ALL",
-                        "movies" to "MOVIES",
-                        "series" to "SERIES",
-                        "anime" to "ANIME",
-                        "4k" to "4K"
-                    )
-
+                    // IOS GLASS SEGMENTED CONTROL TABS (Dynamic tabs with spring sliding thumb)
                     BoxWithConstraints(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -576,7 +776,7 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                         }
                     }
 
-                    // SORT & SUMMARY TOOLBAR
+                    // FILTERS & ACTIONS TOOLBAR
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -593,31 +793,103 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                         )
 
                         Row(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFF1B1D25))
-                                .border(1.dp, Color(0xFF2C2F3A), RoundedCornerShape(8.dp))
-                                .clickable {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    showSortSheet = true
-                                }
-                                .padding(horizontal = 9.dp, vertical = 5.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text(
-                                text = "Sort: ${sortOrder.label}",
-                                color = Color.White,
-                                fontSize = 11.sp,
-                                fontFamily = NdotFont,
-                                letterSpacing = 0.5.sp
-                            )
-                            Icon(
-                                imageVector = Icons.Default.KeyboardArrowDown,
-                                contentDescription = "Select sort order",
-                                tint = Color(0xFFA855F7),
-                                modifier = Modifier.size(14.dp)
-                            )
+                            // Multi-Select Toggle Button
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isMultiSelectMode) Color(0xFF2E1A47) else Color(0xFF1B1D25))
+                                    .border(
+                                        1.dp,
+                                        if (isMultiSelectMode) Color(0xFFA855F7) else Color(0xFF2C2F3A),
+                                        RoundedCornerShape(8.dp)
+                                    )
+                                    .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        isMultiSelectMode = !isMultiSelectMode
+                                        if (!isMultiSelectMode) selectedGroupKeys.clear()
+                                    }
+                                    .padding(horizontal = 9.dp, vertical = 5.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Checklist,
+                                        contentDescription = "Select multiple",
+                                        tint = if (isMultiSelectMode) Color(0xFFC084FC) else Color(0xFFCBD5E1),
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = if (isMultiSelectMode) "Done" else "Select",
+                                        color = if (isMultiSelectMode) Color(0xFFC084FC) else Color.White,
+                                        fontSize = 11.sp,
+                                        fontFamily = NdotFont,
+                                        letterSpacing = 0.5.sp
+                                    )
+                                }
+                            }
+
+                            // Filters & Sort Button
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (activeFilters.hasActiveFilters) Color(0xFF2E1A47) else Color(0xFF1B1D25))
+                                    .border(
+                                        1.dp,
+                                        if (activeFilters.hasActiveFilters) Color(0xFFA855F7) else Color(0xFF2C2F3A),
+                                        RoundedCornerShape(8.dp)
+                                    )
+                                    .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        showFilterSheet = true
+                                    }
+                                    .padding(horizontal = 9.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Tune,
+                                    contentDescription = "Filters",
+                                    tint = if (activeFilters.hasActiveFilters) Color(0xFFC084FC) else Color(0xFFA855F7),
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    text = "Filters",
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontFamily = NdotFont,
+                                    letterSpacing = 0.5.sp
+                                )
+                                if (activeFilters.totalFilterCount > 0) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(CircleShape)
+                                            .background(Color(0xFFA855F7))
+                                            .padding(horizontal = 5.dp, vertical = 1.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "${activeFilters.totalFilterCount}",
+                                            color = Color.White,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = NdotFont
+                                        )
+                                    }
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.KeyboardArrowDown,
+                                        contentDescription = null,
+                                        tint = Color(0xFFA855F7),
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -663,14 +935,29 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                                 horizontalArrangement = Arrangement.spacedBy(14.dp),
                                 verticalArrangement = Arrangement.spacedBy(18.dp),
                                 modifier = Modifier.fillMaxSize(),
-                                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 84.dp)
+                                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 100.dp)
                             ) {
                                 items(filteredGroups, key = { it.key }) { group ->
+                                    val isSelected = group.key in selectedGroupKeys
                                     PosterCard(
                                         group = group,
+                                        isMultiSelectMode = isMultiSelectMode,
+                                        isSelected = isSelected,
                                         onClick = {
+                                            if (isMultiSelectMode) {
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                if (isSelected) selectedGroupKeys.remove(group.key)
+                                                else selectedGroupKeys.add(group.key)
+                                            } else {
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                selectedGroupKey = group.key
+                                            }
+                                        },
+                                        onLongClick = {
                                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            selectedGroupKey = group.key
+                                            if (!isMultiSelectMode) {
+                                                quickActionGroup = group
+                                            }
                                         }
                                     )
                                 }
@@ -698,93 +985,162 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
             }
         }
 
-        if (showSortSheet) {
-            ModalBottomSheet(
-                onDismissRequest = { showSortSheet = false },
-                containerColor = Color(0xFF14151B),
-                contentColor = Color.White,
-                dragHandle = {
-                    Box(
-                        modifier = Modifier
-                            .padding(vertical = 10.dp)
-                            .width(36.dp)
-                            .height(4.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF3F414D))
-                    )
-                },
-                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+        // MULTI-SELECT FLOATING ACTION BAR (Emil Kowalski style spring physics)
+        AnimatedVisibility(
+            visible = isMultiSelectMode,
+            enter = slideInVertically(
+                initialOffsetY = { it },
+                animationSpec = spring(dampingRatio = 0.8f, stiffness = 400f)
+            ) + fadeIn(),
+            exit = slideOutVertically(
+                targetOffsetY = { it },
+                animationSpec = spring(dampingRatio = 0.8f, stiffness = 400f)
+            ) + fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 86.dp, start = 16.dp, end = 16.dp)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(999.dp),
+                color = Color(0xFF14151E),
+                border = BorderStroke(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.7f)),
+                shadowElevation = 16.dp
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp)
-                        .padding(bottom = 36.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    IconButton(
+                        onClick = {
+                            isMultiSelectMode = false
+                            selectedGroupKeys.clear()
+                        },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Cancel",
+                            tint = Color(0xFF9CA3AF),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
                     Text(
-                        text = "Sort Library",
+                        text = "${selectedGroupKeys.size} selected",
                         color = Color.White,
                         fontFamily = NdotFont,
-                        fontSize = 15.sp,
-                        letterSpacing = 0.8.sp,
-                        modifier = Modifier.padding(bottom = 8.dp)
+                        fontSize = 12.sp
                     )
 
-                    LibrarySortOrder.values().forEach { option ->
-                        val isSelected = sortOrder == option
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(if (isSelected) Color(0xFF28103F) else Color.Transparent)
-                                .clickable {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    sortOrder = option
-                                    showSortSheet = false
+                    // Select All / Deselect All
+                    Text(
+                        text = if (selectedGroupKeys.size == filteredGroups.size && filteredGroups.isNotEmpty()) "Deselect" else "Select All",
+                        color = Color(0xFFC084FC),
+                        fontFamily = NdotFont,
+                        fontSize = 11.sp,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                if (selectedGroupKeys.size == filteredGroups.size) {
+                                    selectedGroupKeys.clear()
+                                } else {
+                                    selectedGroupKeys.clear()
+                                    selectedGroupKeys.addAll(filteredGroups.map { it.key })
                                 }
-                                .padding(horizontal = 14.dp, vertical = 11.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = option.label,
-                                color = if (isSelected) Color(0xFFC084FC) else Color(0xFFD4D4D8),
-                                fontSize = 13.5.sp,
-                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                                fontFamily = FontFamily.Default
-                            )
-
-                            if (isSelected) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(7.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFFA855F7))
-                                )
                             }
-                        }
+                            .padding(horizontal = 6.dp, vertical = 4.dp)
+                    )
+
+                    val isHideTab = selectedCategory == "hide"
+                    Button(
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            val groupsToUpdate = mediaGroups.filter { it.key in selectedGroupKeys }
+                            viewModel.setMultipleGroupsHidden(groupsToUpdate, hide = !isHideTab)
+                            isMultiSelectMode = false
+                            selectedGroupKeys.clear()
+                        },
+                        enabled = selectedGroupKeys.isNotEmpty(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isHideTab) Color(0xFF059669) else Color(0xFFDC2626),
+                            disabledContainerColor = Color(0xFF262837)
+                        ),
+                        shape = RoundedCornerShape(999.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isHideTab) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = Color.White
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = if (isHideTab) "Unhide (${selectedGroupKeys.size})" else "Hide (${selectedGroupKeys.size})",
+                            color = Color.White,
+                            fontFamily = NdotFont,
+                            fontSize = 11.5.sp
+                        )
                     }
                 }
             }
+        }
+
+        // DYNAMIC FILTER BOTTOM SHEET
+        if (showFilterSheet) {
+            FilterBottomSheet(
+                mediaGroups = mediaGroups,
+                activeFilters = activeFilters,
+                onApply = { updated ->
+                    activeFilters = updated
+                    showFilterSheet = false
+                },
+                onDismiss = { showFilterSheet = false }
+            )
+        }
+
+        // QUICK ACTION MODAL (Emil Kowalski style spring pop-out on poster long-press)
+        if (quickActionGroup != null) {
+            QuickActionModal(
+                group = quickActionGroup!!,
+                onDismiss = { quickActionGroup = null },
+                onToggleHide = {
+                    val g = quickActionGroup!!
+                    quickActionGroup = null
+                    viewModel.setGroupHidden(g, hide = !g.isHidden)
+                },
+                onStartMultiSelect = {
+                    val g = quickActionGroup!!
+                    quickActionGroup = null
+                    isMultiSelectMode = true
+                    selectedGroupKeys.clear()
+                    selectedGroupKeys.add(g.key)
+                }
+            )
         }
     }
 }
 
 /**
- * Minimalist Poster Grid Item (Clean Poster without messy overlay badges, normal title font)
+ * Minimalist Poster Grid Item with Multi-Select & Long-Press Support
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PosterCard(
     group: MediaGroup,
-    onClick: () -> Unit
+    isMultiSelectMode: Boolean,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
 
-    // Emil Kowalski Principle: Pressable media cards must have active scale feedback (0.965f)
+    // Emil Kowalski Principle: Pressable media cards must have active scale feedback (0.955f)
     val cardScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.962f else 1f,
+        targetValue = if (isPressed) 0.955f else if (isSelected) 0.97f else 1f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessMedium
@@ -797,10 +1153,11 @@ private fun PosterCard(
             .fillMaxWidth()
             .scale(cardScale)
             .clip(RoundedCornerShape(14.dp))
-            .clickable(
+            .combinedClickable(
                 interactionSource = interactionSource,
                 indication = null,
-                onClick = onClick
+                onClick = onClick,
+                onLongClick = onLongClick
             ),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
@@ -810,7 +1167,13 @@ private fun PosterCard(
                 .fillMaxWidth()
                 .aspectRatio(2f / 3f)
                 .clip(RoundedCornerShape(14.dp))
-                .border(BorderStroke(1.dp, Color(0xFF2A1C3C)), RoundedCornerShape(14.dp))
+                .border(
+                    BorderStroke(
+                        if (isSelected) 2.dp else 1.dp,
+                        if (isSelected) Color(0xFFA855F7) else Color(0xFF2A1C3C)
+                    ),
+                    RoundedCornerShape(14.dp)
+                )
         ) {
             RemoteImage(
                 url = group.posterUrl,
@@ -818,6 +1181,65 @@ private fun PosterCard(
                 isSeries = group.type == "series" || group.type == "anime",
                 modifier = Modifier.fillMaxSize()
             )
+
+            // Multi-Select Checkbox overlay
+            if (isMultiSelectMode) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .size(24.dp)
+                        .clip(CircleShape)
+                        .background(if (isSelected) Color(0xFFA855F7) else Color(0x99000000))
+                        .border(
+                            BorderStroke(
+                                1.5.dp,
+                                if (isSelected) Color.White else Color(0x99FFFFFF)
+                            ),
+                            CircleShape
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isSelected) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = "Selected",
+                            tint = Color.White,
+                            modifier = Modifier.size(15.dp)
+                        )
+                    }
+                }
+            }
+
+            // Hidden status indicator pill
+            if (group.isHidden) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(6.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color(0xFFDC2626).copy(alpha = 0.9f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.VisibilityOff,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(9.dp)
+                        )
+                        Text(
+                            text = "HIDDEN",
+                            color = Color.White,
+                            fontFamily = NdotFont,
+                            fontSize = 8.5.sp
+                        )
+                    }
+                }
+            }
 
             // Clean Episode Count badge for Series/Anime (Bottom Left)
             if (group.type == "series" || group.type == "anime") {
@@ -866,6 +1288,534 @@ private fun PosterCard(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
+    }
+}
+
+/**
+ * Long-Press Quick Action Pop-out Modal (Emil Kowalski micro-interaction)
+ */
+@Composable
+private fun QuickActionModal(
+    group: MediaGroup,
+    onDismiss: () -> Unit,
+    onToggleHide: () -> Unit,
+    onStartMultiSelect: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        var visible by remember { mutableStateOf(false) }
+        LaunchedEffect(Unit) { visible = true }
+
+        val scale by animateFloatAsState(
+            targetValue = if (visible) 1f else 0.88f,
+            animationSpec = spring(
+                dampingRatio = 0.76f,
+                stiffness = 380f
+            ),
+            label = "modal_scale"
+        )
+        val alpha by animateFloatAsState(
+            targetValue = if (visible) 1f else 0f,
+            animationSpec = tween(180),
+            label = "modal_alpha"
+        )
+
+        // Floating Title Hover Effect
+        val infiniteTransition = rememberInfiniteTransition(label = "title_hover")
+        val hoverOffsetY by infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = -3f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(1400, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "hover_anim"
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.82f))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onDismiss
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                modifier = Modifier
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                        this.alpha = alpha
+                    }
+                    .padding(24.dp)
+                    .widthIn(max = 330.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(Color(0xFF14151E))
+                    .border(
+                        BorderStroke(
+                            1.5.dp,
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color(0xFFA855F7).copy(alpha = 0.6f),
+                                    Color(0xFF2E1A47)
+                                )
+                            )
+                        ),
+                        RoundedCornerShape(24.dp)
+                    )
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {}
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                // Scaled Pop-out Poster
+                Box(
+                    modifier = Modifier
+                        .width(150.dp)
+                        .aspectRatio(2f / 3f)
+                        .clip(RoundedCornerShape(16.dp))
+                        .border(
+                            BorderStroke(1.5.dp, Color(0xFFA855F7).copy(alpha = 0.8f)),
+                            RoundedCornerShape(16.dp)
+                        )
+                ) {
+                    RemoteImage(
+                        url = group.posterUrl,
+                        contentDescription = group.title,
+                        isSeries = group.type == "series" || group.type == "anime",
+                        modifier = Modifier.fillMaxSize()
+                    )
+
+                    if (group.type == "series" || group.type == "anime") {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .padding(6.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(0xFF6B21A8).copy(alpha = 0.9f))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "${group.distinctEpisodeCount} EPS",
+                                color = Color.White,
+                                fontFamily = NdotFont,
+                                fontSize = 9.sp
+                            )
+                        }
+                    }
+                }
+
+                // Title with subtle floating hover effect
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.graphicsLayer { translationY = hoverOffsetY }
+                ) {
+                    Text(
+                        text = group.title,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "${group.year ?: "2026"} · ${group.type.uppercase()} · ${group.formattedTotalSize}",
+                        color = Color(0xFF9CA3AF),
+                        fontFamily = NdotFont,
+                        fontSize = 10.5.sp,
+                        letterSpacing = 0.5.sp
+                    )
+                }
+
+                HorizontalDivider(color = Color(0xFF262837), thickness = 1.dp)
+
+                // Actions: Hide/Unhide
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(if (group.isHidden) Color(0xFF064E3B) else Color(0xFF450A0A))
+                        .border(
+                            1.dp,
+                            if (group.isHidden) Color(0xFF10B981) else Color(0xFFEF4444),
+                            RoundedCornerShape(14.dp)
+                        )
+                        .clickable(onClick = onToggleHide)
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(
+                        imageVector = if (group.isHidden) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                        contentDescription = null,
+                        tint = if (group.isHidden) Color(0xFF34D399) else Color(0xFFFCA5A5),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Column {
+                        Text(
+                            text = if (group.isHidden) "Unhide Title" else "Hide & Blacklist",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            fontFamily = NdotFont
+                        )
+                        Text(
+                            text = if (group.isHidden) "Restore to Library and Stremio addon" else "Remove from Library & Stremio streams",
+                            color = if (group.isHidden) Color(0xFF6EE7B7) else Color(0xFFFCA5A5),
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+
+                // Action: Select Multiple
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFF1F212D))
+                        .border(1.dp, Color(0xFF323648), RoundedCornerShape(14.dp))
+                        .clickable(onClick = onStartMultiSelect)
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Checklist,
+                        contentDescription = null,
+                        tint = Color(0xFFC084FC),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Column {
+                        Text(
+                            text = "Select Multiple",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            fontFamily = NdotFont
+                        )
+                        Text(
+                            text = "Batch hide or unhide multiple titles",
+                            color = Color(0xFF9CA3AF),
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+
+                // Close Button
+                Text(
+                    text = "Close",
+                    color = Color(0xFF717482),
+                    fontSize = 12.sp,
+                    fontFamily = NdotFont,
+                    modifier = Modifier
+                        .clickable(onClick = onDismiss)
+                        .padding(top = 2.dp)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Modern Filter & Sort Bottom Sheet with Dynamic Multi-Select Chips
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun FilterBottomSheet(
+    mediaGroups: List<MediaGroup>,
+    activeFilters: ActiveFilters,
+    onApply: (ActiveFilters) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var tempFilters by remember { mutableStateOf(activeFilters) }
+    val haptic = LocalHapticFeedback.current
+
+    val allResolutions = listOf("4K", "1080p (FHD)", "720p (HD)", "SD")
+    val allEditions = listOf("IMAX", "BluRay", "WEB-DL", "HDR / DV", "10-Bit", "Remux")
+    val allPlatforms = listOf("Netflix", "Crunchyroll", "Prime Video", "Disney+ / Hotstar", "Apple TV", "Zee5")
+    val allAudios = listOf("Hindi", "English", "Japanese", "Dual Audio", "Multi Audio")
+
+    val availableResolutions = remember(mediaGroups) {
+        allResolutions.map { res -> res to mediaGroups.count { matchesGroupResolution(it, res) } }
+            .filter { it.second > 0 }
+    }
+    val availableEditions = remember(mediaGroups) {
+        allEditions.map { ed -> ed to mediaGroups.count { matchesGroupEdition(it, ed) } }
+            .filter { it.second > 0 }
+    }
+    val availablePlatforms = remember(mediaGroups) {
+        allPlatforms.map { plat -> plat to mediaGroups.count { matchesGroupPlatform(it, plat) } }
+            .filter { it.second > 0 }
+    }
+    val availableAudios = remember(mediaGroups) {
+        allAudios.map { aud -> aud to mediaGroups.count { matchesGroupAudio(it, aud) } }
+            .filter { it.second > 0 }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF12131A),
+        contentColor = Color.White,
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 10.dp)
+                    .width(36.dp)
+                    .height(4.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF3F414D))
+            )
+        },
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(bottom = 36.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Header Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Filters & Sorting",
+                    color = Color.White,
+                    fontFamily = NdotFont,
+                    fontSize = 16.sp,
+                    letterSpacing = 0.8.sp
+                )
+
+                if (tempFilters.hasActiveFilters) {
+                    Text(
+                        text = "Reset All",
+                        color = Color(0xFFC084FC),
+                        fontFamily = NdotFont,
+                        fontSize = 12.sp,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                tempFilters = ActiveFilters()
+                            }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+
+            // 1. Sort Section
+            FilterSection(title = "SORT BY") {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    LibrarySortOrder.values().forEach { order ->
+                        val isSelected = tempFilters.sortOrder == order
+                        FilterChipItem(
+                            label = order.label,
+                            isSelected = isSelected,
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                tempFilters = tempFilters.copy(sortOrder = order)
+                            }
+                        )
+                    }
+                }
+            }
+
+            // 2. Resolution Section
+            if (availableResolutions.isNotEmpty()) {
+                FilterSection(title = "RESOLUTION") {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        availableResolutions.forEach { (res, count) ->
+                            val isSelected = res in tempFilters.resolutions
+                            FilterChipItem(
+                                label = "$res ($count)",
+                                isSelected = isSelected,
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    val updated = if (isSelected) tempFilters.resolutions - res else tempFilters.resolutions + res
+                                    tempFilters = tempFilters.copy(resolutions = updated)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 3. Edition & Quality Section
+            if (availableEditions.isNotEmpty()) {
+                FilterSection(title = "EDITION & QUALITY") {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        availableEditions.forEach { (ed, count) ->
+                            val isSelected = ed in tempFilters.editions
+                            FilterChipItem(
+                                label = "$ed ($count)",
+                                isSelected = isSelected,
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    val updated = if (isSelected) tempFilters.editions - ed else tempFilters.editions + ed
+                                    tempFilters = tempFilters.copy(editions = updated)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 4. Platform & Source Section
+            if (availablePlatforms.isNotEmpty()) {
+                FilterSection(title = "PLATFORM & SOURCE") {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        availablePlatforms.forEach { (plat, count) ->
+                            val isSelected = plat in tempFilters.platforms
+                            FilterChipItem(
+                                label = "$plat ($count)",
+                                isSelected = isSelected,
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    val updated = if (isSelected) tempFilters.platforms - plat else tempFilters.platforms + plat
+                                    tempFilters = tempFilters.copy(platforms = updated)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 5. Audio & Languages Section
+            if (availableAudios.isNotEmpty()) {
+                FilterSection(title = "AUDIO & LANGUAGES") {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        availableAudios.forEach { (aud, count) ->
+                            val isSelected = aud in tempFilters.audioLanguages
+                            FilterChipItem(
+                                label = "$aud ($count)",
+                                isSelected = isSelected,
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    val updated = if (isSelected) tempFilters.audioLanguages - aud else tempFilters.audioLanguages + aud
+                                    tempFilters = tempFilters.copy(audioLanguages = updated)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Apply Button
+            Button(
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onApply(tempFilters)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .clip(RoundedCornerShape(14.dp)),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFA855F7)
+                )
+            ) {
+                Text(
+                    text = "Apply Filters",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = NdotFont,
+                    fontSize = 13.sp,
+                    letterSpacing = 0.6.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FilterSection(
+    title: String,
+    content: @Composable () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = title,
+            color = Color(0xFF717482),
+            fontFamily = NdotFont,
+            fontSize = 11.sp,
+            letterSpacing = 0.6.sp
+        )
+        content()
+    }
+}
+
+@Composable
+private fun FilterChipItem(
+    label: String,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(
+                if (isSelected) Brush.horizontalGradient(listOf(Color(0xFF8B5CF6), Color(0xFFA855F7)))
+                else Brush.horizontalGradient(listOf(Color(0xFF1B1D25), Color(0xFF1B1D25)))
+            )
+            .border(
+                BorderStroke(
+                    1.dp,
+                    if (isSelected) Color(0x66FFFFFF) else Color(0xFF2C2F3A)
+                ),
+                shape = RoundedCornerShape(999.dp)
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            if (isSelected) {
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(12.dp)
+                )
+            }
+            Text(
+                text = label,
+                color = if (isSelected) Color.White else Color(0xFFCBD5E1),
+                fontSize = 12.sp,
+                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+            )
+        }
     }
 }
 

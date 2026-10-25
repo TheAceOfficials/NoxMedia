@@ -111,7 +111,7 @@ class SpatialPosterService {
                                     } else null
 
                                     if (!posterPath.isNullOrBlank()) {
-                                        val posterUrl = "https://image.tmdb.org/t/p/w500$posterPath"
+                                        val posterUrl = "https://image.tmdb.org/t/p/w780$posterPath"
                                         posterCache[cleanQuery] = posterUrl
                                         return posterUrl
                                     }
