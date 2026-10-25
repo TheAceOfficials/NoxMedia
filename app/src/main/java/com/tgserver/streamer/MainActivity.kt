@@ -33,8 +33,20 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        com.tgserver.streamer.util.DevicePerformanceManager.init(applicationContext)
         enableEdgeToEdge()
+
+        // Global Crash Guard: Safely catches OOM and unexpected crashes on low-end 32-bit devices
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            try {
+                com.tgserver.streamer.server.StreamLog.e("CRASH_GUARD", "Uncaught exception on thread ${thread.name}: ${throwable.message}", throwable)
+                if (throwable is OutOfMemoryError) {
+                    com.tgserver.streamer.ui.screens.ImageMemoryCache.clear()
+                    System.gc()
+                }
+            } catch (_: Throwable) {}
+            defaultHandler?.uncaughtException(thread, throwable)
+        }
 
         // Request notification permission on Android 13+ for foreground service notifications.
         // We do NOT auto-start the server — the user controls it via the toggle after login.

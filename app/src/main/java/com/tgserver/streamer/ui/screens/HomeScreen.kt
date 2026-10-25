@@ -147,7 +147,7 @@ fun HomeScreen(viewModel: MainAppViewModel) {
         }
     }
 
-    // Recently Added media groups (newest 15) - Instant precomputed
+    // Recently Added media groups (newest 15) - Pre-computed in background (0ms UI latency)
     val recentlyAdded = remember(mediaGroups) {
         mediaGroups
             .sortedByDescending { group ->

@@ -98,68 +98,55 @@ import java.util.concurrent.TimeUnit
 // Authentic Nothing Ndot Dot-Matrix Font
 private val NdotFont = FontFamily(Font(R.font.ndot))
 
-// Smart poster URL optimizer: seamlessly scales resolution based on hardware profile.
-// Low-RAM / 32-bit: Uses w342 for TMDB (~30KB WebP, ~350KB decoded RAM) avoiding Dalvik GC pressure.
-// Standard / 64-bit: Uses w500 (~60KB WebP, sharp HD, avoids massive w780 4MB bitmaps).
-fun optimizePosterUrl(
-    url: String?,
-    isLowRam: Boolean = com.tgserver.streamer.util.DevicePerformanceManager.isPerformanceMode.value
-): String? {
+// Smart poster URL optimizer: seamlessly upgrades lower resolution URLs from TMDB/TVDB/Kitsu
+// so existing and incoming library items load crystal clear HD posters without manual database re-scans.
+fun optimizePosterUrl(url: String?, isLowEnd: Boolean = false): String? {
     if (url.isNullOrBlank()) return null
     var optimized = url.trim()
 
-    // 1. TMDB: Upgrade lower resolutions or downscale to optimal device sweet spot
+    // 1. TMDB: Upgrade lower resolutions to optimal sizes.
+    // For low-end/32-bit devices, w342 saves ~75% download size and memory while remaining sharp in grids.
+    // For 64-bit devices, w500 delivers crystal sharp HD artwork.
     if (optimized.contains("image.tmdb.org/t/p/")) {
-        val targetRes = if (isLowRam) "w342" else "w500"
-        optimized = optimized.replace(Regex("/t/p/(?:original|w780|w500|w342|w185|w154|w92)/"), "/t/p/$targetRes/")
+        val targetRes = if (isLowEnd) "w342" else "w500"
+        optimized = optimized.replace(Regex("/t/p/(?:w92|w154|w185|w342|w500|w780)/"), "/t/p/$targetRes/")
     }
 
-    // 2. TheTVDB: Upgrade thumbnail suffixes to full resolution artwork (on standard profile)
+    // 2. TheTVDB: Upgrade thumbnail suffixes (_t.jpg or _cache) to full resolution artwork
     if (optimized.contains("artworks.thetvdb.com")) {
-        if (!isLowRam) {
-            if (optimized.endsWith("_t.jpg")) {
-                optimized = optimized.replace(Regex("_t\\.jpg$"), ".jpg")
-            } else if (optimized.contains("/_cache/")) {
-                optimized = optimized.replace("/_cache/", "/")
-            }
+        if (optimized.endsWith("_t.jpg")) {
+            optimized = optimized.replace(Regex("_t\\.jpg$"), ".jpg")
+        } else if (optimized.contains("/_cache/")) {
+            optimized = optimized.replace("/_cache/", "/")
         }
     }
 
-    // 3. Kitsu Anime: Upgrade medium/small/tiny thumbnails to large on standard profile
+    // 3. Kitsu Anime: Upgrade medium/small/tiny thumbnails to large for crisp anime art
     if (optimized.contains("kitsu.io")) {
-        if (!isLowRam) {
-            optimized = optimized
-                .replace("/medium.", "/large.")
-                .replace("/small.", "/large.")
-                .replace("/tiny.", "/large.")
-        }
+        optimized = optimized
+            .replace("/medium.", "/large.")
+            .replace("/small.", "/large.")
+            .replace("/tiny.", "/large.")
     }
 
-    // 4. Cinemeta / Metahub: Upgrade small to medium on standard profile
+    // 4. Cinemeta / Metahub: Upgrade small to medium
     if (optimized.contains("images.metahub.space/poster/small/")) {
-        if (!isLowRam) {
-            optimized = optimized.replace("/poster/small/", "/poster/medium/")
-        }
+        optimized = optimized.replace("/poster/small/", "/poster/medium/")
     }
 
     return optimized
 }
 
-// In-memory poster and backdrop cache with safe heap sizing (avoids OOM, dynamic based on device profile)
+// In-memory poster and backdrop cache with safe heap sizing (avoids OOM, dynamically sizes between 12MB-48MB)
 object ImageMemoryCache {
     private val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt() // KB
-    private val isLowRam = com.tgserver.streamer.util.DevicePerformanceManager.isLowRamDevice
-    private val cacheSizeKb = if (isLowRam) {
-        (maxMemory / 12).coerceIn(12 * 1024, 24 * 1024)
-    } else {
-        (maxMemory / 8).coerceIn(24 * 1024, 64 * 1024)
-    }
+    private val cacheSizeKb = (maxMemory / 10).coerceIn(12 * 1024, 48 * 1024)
 
     private val cache = object : LruCache<String, ImageBitmap>(cacheSizeKb) {
         override fun sizeOf(key: String, value: ImageBitmap): Int {
             return try {
                 (value.asAndroidBitmap().allocationByteCount / 1024).coerceAtLeast(1)
-            } catch (_: Exception) {
+            } catch (_: Throwable) {
                 512
             }
         }
@@ -202,6 +189,7 @@ fun RemoteImage(
     mediaType: String? = null
 ) {
     val context = LocalContext.current.applicationContext
+    val isLowEnd = remember(context) { com.tgserver.streamer.util.DeviceProfile.isLowEnd(context) }
     val client = remember(context) { getImageHttpClient(context) }
     var bitmap by remember(url) { mutableStateOf<ImageBitmap?>(null) }
     var isLoading by remember(url) { mutableStateOf(false) }
@@ -211,8 +199,7 @@ fun RemoteImage(
             bitmap = null
             return@LaunchedEffect
         }
-        val isPerfMode = com.tgserver.streamer.util.DevicePerformanceManager.isPerformanceMode.value
-        val targetUrl = optimizePosterUrl(url, isPerfMode) ?: url
+        val targetUrl = optimizePosterUrl(url, isLowEnd) ?: url
 
         // Check memory cache: either optimized URL or original URL
         val cached = ImageMemoryCache.get(targetUrl) ?: ImageMemoryCache.get(url)
@@ -225,7 +212,7 @@ fun RemoteImage(
         withContext(Dispatchers.IO) {
             try {
                 var loadedBmp: ImageBitmap? = null
-                // Attempt optimized URL first; fall back to original url if necessary
+                // Attempt high-quality optimized URL first; fall back to original url if necessary
                 val candidates = if (targetUrl != url) listOf(targetUrl, url) else listOf(targetUrl)
                 for (candUrl in candidates) {
                     try {
@@ -237,37 +224,19 @@ fun RemoteImage(
                             if (resp.isSuccessful) {
                                 val bytes = resp.body?.bytes()
                                 if (bytes != null && bytes.isNotEmpty()) {
-                                    // 1. Measure dimensions without allocating memory
-                                    val boundsOptions = BitmapFactory.Options().apply {
-                                        inJustDecodeBounds = true
-                                    }
-                                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, boundsOptions)
-
-                                    // 2. Compute inSampleSize for target display size (~360px width on low-ram, ~540px standard)
-                                    val reqWidth = if (isPerfMode) 360 else 540
-                                    val reqHeight = if (isPerfMode) 540 else 810
-                                    var sampleSize = 1
-                                    if (boundsOptions.outHeight > reqHeight || boundsOptions.outWidth > reqWidth) {
-                                        val halfHeight = boundsOptions.outHeight / 2
-                                        val halfWidth = boundsOptions.outWidth / 2
-                                        while ((halfHeight / sampleSize) >= reqHeight && (halfWidth / sampleSize) >= reqWidth) {
-                                            sampleSize *= 2
-                                        }
-                                    }
-
-                                    // 3. Decode with optimal sample size & bit-depth (RGB_565 saves 50% RAM & 0 alpha overhead)
-                                    val decodeOptions = BitmapFactory.Options().apply {
-                                        inSampleSize = sampleSize
-                                        inPreferredConfig = if (isPerfMode) Bitmap.Config.RGB_565 else Bitmap.Config.ARGB_8888
-                                    }
-                                    val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOptions)
+                                    // Safe decode with dynamic inSampleSize downsampling and memory savings
+                                    val options = com.tgserver.streamer.util.DeviceProfile.getSafePosterDecodeOptions(bytes, isLowEnd)
+                                    val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
                                     if (decoded != null) {
                                         loadedBmp = decoded.asImageBitmap()
                                     }
                                 }
                             }
                         }
-                    } catch (_: Exception) {}
+                    } catch (oom: OutOfMemoryError) {
+                        ImageMemoryCache.clear()
+                        System.gc()
+                    } catch (_: Throwable) {}
                     if (loadedBmp != null) break
                 }
 
@@ -281,10 +250,14 @@ fun RemoteImage(
                         bitmap = finalBmp
                     }
                 }
-            } catch (_: Exception) {
-            }
-            withContext(Dispatchers.Main) {
-                isLoading = false
+            } catch (oom: OutOfMemoryError) {
+                ImageMemoryCache.clear()
+                System.gc()
+            } catch (_: Throwable) {
+            } finally {
+                withContext(Dispatchers.Main) {
+                    isLoading = false
+                }
             }
         }
     }
@@ -409,9 +382,9 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
     val haptic = LocalHapticFeedback.current
     val gridState = rememberLazyGridState()
 
-    // Dynamic animated search placeholders from user library & popular titles (capped to 20 to prevent main-thread allocation)
+    // Dynamic animated search placeholders from user library & popular titles (capped to 30 for low CPU footprint)
     val searchPlaceholders = remember(mediaGroups) {
-        val libraryTitles = mediaGroups.take(20).map { it.title.trim() }.filter { it.isNotBlank() }.distinct()
+        val libraryTitles = mediaGroups.take(30).map { it.title.trim() }.filter { it.isNotBlank() }.distinct()
         val defaultExamples = listOf(
             "Naruto",
             "One Piece",
@@ -471,14 +444,22 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
         }
     }
 
-    // Dynamic Category Tabs: Only show tabs that have content in the library
-    val unhiddenGroups = remember(mediaGroups) { mediaGroups.filter { !it.isHidden } }
-    val hiddenGroups = remember(mediaGroups) { mediaGroups.filter { it.isHidden } }
-
-    val movieCount = remember(unhiddenGroups) { unhiddenGroups.count { it.type == "movie" } }
-    val seriesCount = remember(unhiddenGroups) { unhiddenGroups.count { it.type == "series" } }
-    val animeCount = remember(unhiddenGroups) { unhiddenGroups.count { it.type == "anime" } }
-    val personalCount = remember(unhiddenGroups) { unhiddenGroups.count { it.type == "personal" } }
+    // Dynamic Category Tabs: Single-pass partition and type tallying (zero main-thread stutter)
+    val (unhiddenGroups, hiddenGroups) = remember(mediaGroups) {
+        mediaGroups.partition { !it.isHidden }
+    }
+    val (movieCount, seriesCount, animeCount, personalCount) = remember(unhiddenGroups) {
+        var m = 0; var s = 0; var a = 0; var p = 0
+        for (g in unhiddenGroups) {
+            when (g.type) {
+                "movie" -> m++
+                "series" -> s++
+                "anime" -> a++
+                "personal" -> p++
+            }
+        }
+        arrayOf(m, s, a, p)
+    }
     val hiddenCount = remember(hiddenGroups) { hiddenGroups.size }
 
     // Precomputed filter chip options and counts: computed ONLY when the filter sheet is opened
@@ -1222,7 +1203,10 @@ private fun PosterCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .scale(cardScale)
+            .graphicsLayer {
+                scaleX = cardScale
+                scaleY = cardScale
+            }
             .clip(RoundedCornerShape(14.dp))
             .combinedClickable(
                 interactionSource = interactionSource,

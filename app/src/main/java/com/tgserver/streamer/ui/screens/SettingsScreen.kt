@@ -110,8 +110,6 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
     var expandedServer by remember { mutableStateOf(false) }
     var expandedStorage by remember { mutableStateOf(false) }
     var expandedPerformance by remember { mutableStateOf(false) }
-    var perfProfile by remember { mutableStateOf(viewModel.getPerformanceProfile()) }
-    val isPerformanceActive by viewModel.isPerformanceMode.collectAsState()
     var expandedAutomation by remember { mutableStateOf(false) }
     var expandedBackup by remember { mutableStateOf(false) }
     var expandedUpdates by remember { mutableStateOf(false) }
@@ -1690,15 +1688,20 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 )
             }
 
-            // ==================== 7. PERFORMANCE & HARDWARE ====================
+            // ==================== 7. PERFORMANCE & SMOOTHNESS ====================
+            val is32Bit = viewModel.is32BitDevice
+            val totalRam = viewModel.totalMemoryMb
+            val maxHeap = viewModel.maxHeapMb
+            val isBoostActive = config.lowEndOptimization
+
             MinimalSettingsCard(
                 icon = Icons.Default.Speed,
                 title = "Performance & Smoothness",
-                subtitle = "${if (viewModel.is32BitDevice) "32-bit Architecture" else "64-bit Architecture"} • ${if (isPerformanceActive) "Low-RAM Boost Active" else "Smooth Mode"}",
+                subtitle = "${if (is32Bit) "32-bit Architecture" else "64-bit Architecture"} • ${if (isBoostActive) "Low-End Boost Active" else "Standard HD Mode"}",
                 isExpanded = expandedPerformance,
                 onToggleExpand = { expandedPerformance = !expandedPerformance }
             ) {
-                // Hardware Diagnostic Badge
+                // Hardware Diagnostic Banner
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1719,21 +1722,21 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "${if (viewModel.is32BitDevice) "32-bit Architecture" else "64-bit Architecture"} • ${viewModel.totalMemoryMb} MB RAM",
+                            text = "${if (is32Bit) "32-bit CPU" else "64-bit CPU"} • $totalRam MB RAM • ${maxHeap}MB Heap",
                             color = Color.White,
-                            fontSize = 13.sp,
+                            fontSize = 12.5.sp,
                             fontWeight = FontWeight.Medium
                         )
                     }
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .background(if (isPerformanceActive) Color(0xFF1B381E) else Color(0xFF1B2638))
+                            .background(if (isBoostActive) Color(0xFF1B381E) else Color(0xFF1B2638))
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            text = if (isPerformanceActive) "BOOST ON" else "HD READY",
-                            color = if (isPerformanceActive) Color(0xFF00E676) else Color(0xFF64B5F6),
+                            text = if (isBoostActive) "BOOST ON" else "HD READY",
+                            color = if (isBoostActive) Color(0xFF00E676) else Color(0xFF64B5F6),
                             fontSize = 10.sp,
                             fontFamily = NdotFont,
                             letterSpacing = 0.5.sp
@@ -1743,65 +1746,20 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                Text(
-                    text = "OPTIMIZATION PROFILE",
-                    color = TextTertiary,
-                    fontSize = 10.sp,
-                    fontFamily = NdotFont,
-                    letterSpacing = 1.sp
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Tune rendering, bitmap downsampling, and transitions for maximum frame rate on low-end and 32-bit devices.",
-                    color = TextSecondary,
-                    fontSize = 12.sp,
-                    lineHeight = 16.sp
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Profile Selector: Auto / Low-RAM Boost / High Quality
-                val profiles = listOf(
-                    Triple("auto", "Auto", "Auto-detects device CPU & RAM"),
-                    Triple("enabled", "Low-RAM Boost", "Fastest, 10x less RAM, no lag"),
-                    Triple("disabled", "High Quality", "Full 32-bit color fidelity")
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    profiles.forEach { (mode, label, _) ->
-                        val isSelected = perfProfile == mode
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(38.dp)
-                                .clip(RoundedCornerShape(9.dp))
-                                .background(if (isSelected) Color(0xFFFFFFFF) else Color(0xFF1B1D25))
-                                .border(1.dp, if (isSelected) Color.Transparent else Color(0xFF2C2F3A), RoundedCornerShape(9.dp))
-                                .clickable {
-                                    perfProfile = mode
-                                    viewModel.setPerformanceProfile(mode)
-                                    Toast.makeText(context, "Profile switched to $label", Toast.LENGTH_SHORT).show()
-                                }
-                        ) {
-                            Text(
-                                text = label,
-                                color = if (isSelected) Color(0xFF070709) else TextSecondary,
-                                fontSize = 11.5.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                            )
-                        }
+                SettingToggleRow(
+                    title = "Low-End Device Boost",
+                    description = "Downsamples poster artwork, decodes bitmaps in 16-bit RGB_565 (saving 50-80% RAM), bounds image caches, and streamlines tab transitions to zero-overhead crossfades. Recommended for 32-bit and budget devices.",
+                    checked = isBoostActive,
+                    onCheckedChange = {
+                        viewModel.toggleLowEndOptimization()
                     }
-                }
+                )
 
                 Spacer(modifier = Modifier.height(12.dp))
                 Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(Color(0xFF22242D)))
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Explanation Note
+                // Diagnostic / Explanatory Note
                 Row(
                     verticalAlignment = Alignment.Top,
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1818,7 +1776,10 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         modifier = Modifier.size(16.dp).padding(top = 1.dp)
                     )
                     Text(
-                        text = "Low-RAM Boost downsamples posters to w342, renders bitmaps in 16-bit RGB_565 (saving 50% memory), and streamlines screen transitions to pure crossfades. This eliminates Dalvik/ART Garbage Collection freezes and keeps scrolling at 60fps+ even on 32-bit hardware.",
+                        text = if (is32Bit)
+                            "Your device is running 32-bit Android with strict memory limits (~${maxHeap}MB). Low-End Boost prevents OutOfMemoryError crashes and maintains 60 FPS smooth scrolling."
+                        else
+                            "On 64-bit hardware with abundant RAM, you can leave this off for full 32-bit color fidelity (ARGB_8888) and animated screen scaling, or enable it for maximum battery and memory savings.",
                         color = TextTertiary,
                         fontSize = 11.sp,
                         lineHeight = 15.sp

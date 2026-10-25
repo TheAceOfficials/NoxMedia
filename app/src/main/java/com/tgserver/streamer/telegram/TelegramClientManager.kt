@@ -399,7 +399,10 @@ class TelegramClientManager(private val context: Context) {
         cleanupSplitDuplicates()
         _mediaState.value = mediaIndex.values.toList()
 
-        autoEnrichMissingMetadata()
+        managerScope.launch {
+            delay(15_000L) // Defer background metadata auto-enrichment so initial app launch & UI render are 100% fluid
+            autoEnrichMissingMetadata()
+        }
     }
 
     fun cleanupSplitDuplicates(): Int {

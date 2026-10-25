@@ -86,7 +86,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     val channels: StateFlow<List<ChannelInfo>> = tgClient.channelsState
     val media: StateFlow<List<MediaItem>> = tgClient.mediaState
 
-    // Background pre-computed media groups (off the UI main thread; 0ms latency on tab switch)
+    // Background pre-computed media groups (computed off UI main thread; 0ms latency on tab switch)
     val mediaGroups: StateFlow<List<MediaGroup>> = media
         .map { list ->
             withContext(Dispatchers.Default) {
@@ -99,21 +99,14 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             initialValue = emptyList()
         )
 
-    val isPerformanceMode: StateFlow<Boolean> = com.tgserver.streamer.util.DevicePerformanceManager.isPerformanceMode
-
-    fun getPerformanceProfile(): String {
-        return com.tgserver.streamer.util.DevicePerformanceManager.getPerformanceProfile(getApplication())
-    }
-
-    fun setPerformanceProfile(profile: String) {
-        com.tgserver.streamer.util.DevicePerformanceManager.setPerformanceProfile(getApplication(), profile)
-    }
-
     val is32BitDevice: Boolean
-        get() = com.tgserver.streamer.util.DevicePerformanceManager.is32BitDevice
+        get() = com.tgserver.streamer.util.DeviceProfile.is32BitDevice
 
     val totalMemoryMb: Long
-        get() = com.tgserver.streamer.util.DevicePerformanceManager.totalMemoryMb
+        get() = com.tgserver.streamer.util.DeviceProfile.getTotalMemoryMb(getApplication())
+
+    val maxHeapMb: Int
+        get() = com.tgserver.streamer.util.DeviceProfile.getMaxHeapMb()
 
     val unmatchedMedia: StateFlow<List<com.tgserver.streamer.data.model.UnmatchedItem>> = tgClient.unmatchedState
     val scanProgress: StateFlow<Map<Long, com.tgserver.streamer.data.model.ScanProgressState>> = tgClient.scanProgress
@@ -240,6 +233,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
 
     init {
         val loaded = loadStoredConfig()
+        com.tgserver.streamer.util.DeviceProfile.userForcedOptimization = loaded.lowEndOptimization
         _config.value = loaded
         StreamerForegroundService.activeConfig = loaded
         tgClient.setBackupJsonProvider { exportBackupJson() }
@@ -948,7 +942,8 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             receiveBetaUpdates = prefs.getBoolean("receive_beta_updates", false),
             animeMetadataPreference = prefs.getString("anime_metadata_preference", "seasonal") ?: "seasonal",
             backupDestination = prefs.getString("backup_destination", "") ?: "",
-            cloudSyncLibrary = prefs.getBoolean("cloud_sync_library", true)
+            cloudSyncLibrary = prefs.getBoolean("cloud_sync_library", true),
+            lowEndOptimization = prefs.getBoolean("low_end_optimization", com.tgserver.streamer.util.DeviceProfile.isLowEnd(getApplication()))
         )
     }
 
@@ -979,6 +974,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             putString("anime_metadata_preference", cfg.animeMetadataPreference)
             putString("backup_destination", cfg.backupDestination)
             putBoolean("cloud_sync_library", cfg.cloudSyncLibrary)
+            putBoolean("low_end_optimization", cfg.lowEndOptimization)
             apply()
         }
         _config.value = cfg
@@ -1166,6 +1162,15 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             updateManager.resetUpdateState()
         }
         checkForAppUpdate(manual = false)
+    }
+
+    fun toggleLowEndOptimization() {
+        val current = _config.value.lowEndOptimization
+        val newCfg = _config.value.copy(lowEndOptimization = !current)
+        com.tgserver.streamer.util.DeviceProfile.userForcedOptimization = newCfg.lowEndOptimization
+        saveStoredConfig(newCfg)
+        val msg = if (newCfg.lowEndOptimization) "✓ Low-End Performance Boost enabled" else "✓ Low-End Performance Boost disabled"
+        Toast.makeText(getApplication(), msg, Toast.LENGTH_SHORT).show()
     }
 
     fun updateAnimeMetadataPreference(pref: String) {

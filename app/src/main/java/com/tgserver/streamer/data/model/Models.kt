@@ -151,7 +151,7 @@ data class MediaGroup(
     val isHidden: Boolean
         get() = items.isNotEmpty() && items.all { it.isHidden }
 
-    // Lazy-computed filter tags so opening and applying filters is instant and object allocation has zero CPU overhead
+    // Pre-computed filter tags evaluated lazily to prevent lag and frame drops during library grouping
     val has4K: Boolean by lazy(LazyThreadSafetyMode.NONE) { items.any { it.quality.contains("4K", true) || it.quality.contains("2160", true) || it.fileName.contains("4K", true) || it.fileName.contains("2160p", true) } }
     val has1080p: Boolean by lazy(LazyThreadSafetyMode.NONE) { items.any { it.quality.contains("1080", true) || it.quality.contains("FHD", true) || it.fileName.contains("1080p", true) } }
     val has720p: Boolean by lazy(LazyThreadSafetyMode.NONE) { items.any { it.quality.contains("720", true) || it.quality.contains("HD", true) || it.fileName.contains("720p", true) } }
@@ -368,7 +368,8 @@ data class ServerConfig(
     var receiveBetaUpdates: Boolean = false,
     var animeMetadataPreference: String = "seasonal",
     var backupDestination: String = "",
-    var cloudSyncLibrary: Boolean = true
+    var cloudSyncLibrary: Boolean = true,
+    var lowEndOptimization: Boolean = false
 )
 
 data class AuthSession(

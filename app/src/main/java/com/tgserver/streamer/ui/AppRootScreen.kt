@@ -85,7 +85,7 @@ fun AppRootScreen(viewModel: MainAppViewModel) {
     val selectedTab by viewModel.selectedTab.collectAsState()
     val apiCreds by viewModel.apiCredentials.collectAsState()
     val session by viewModel.session.collectAsState()
-    val isPerformanceMode by viewModel.isPerformanceMode.collectAsState()
+    val config by viewModel.config.collectAsState()
     val haptic = LocalHapticFeedback.current
 
     val hasCredentials = apiCreds.first > 0 && apiCreds.second.isNotBlank()
@@ -132,12 +132,12 @@ fun AppRootScreen(viewModel: MainAppViewModel) {
                 AnimatedContent(
                     targetState = selectedTab,
                     transitionSpec = {
-                        if (isPerformanceMode) {
-                            // Low-RAM / 32-bit: Zero GPU offscreen buffer allocation, lightning-fast crossfade (no scale layer)
+                        if (config.lowEndOptimization) {
+                            // Low-RAM / 32-bit: Zero GPU offscreen texture passes, lightning-fast instant crossfade
                             fadeIn(animationSpec = tween(durationMillis = 110))
                                 .togetherWith(fadeOut(animationSpec = tween(durationMillis = 90)))
                         } else {
-                            // Standard 64-bit: Emil Kowalski Principle subtle scale (0.982f -> 1.0f) + snappy 160ms crossfade
+                            // Standard 64-bit flagships: Emil Kowalski Principle subtle scale (0.982f -> 1.0f) + snappy 160ms crossfade
                             (fadeIn(animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing)) +
                              scaleIn(initialScale = 0.982f, animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing)))
                                 .togetherWith(
