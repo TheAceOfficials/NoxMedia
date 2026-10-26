@@ -93,11 +93,21 @@ def parse_split_part(filename: str) -> Optional[Tuple[str, int]]:
         return clean_name, part_num
     return None
 
+def is_bare_episode_name(name: str) -> bool:
+    cleaned = name.strip()
+    if re.match(r"^#\s*\d+", cleaned):
+        return True
+    if re.match(r"(?i)^(?:ep|episode|e)\s*\d+[\s._\-]", cleaned):
+        return True
+    if re.match(r"^\d{1,3}\s*[-–—.]", cleaned):
+        return True
+    return False
+
 def extract_best_filename(filename: str, caption: str = "") -> str:
     """
     Chooses the best filename between Telegram's document attribute and caption.
-    Priority 1: Real Telegram document filename (accurate, uncorrupted by multi-line caption formats).
-    Priority 2: Caption fallback (used when filename is generic like 'video_123.mp4' or truncated).
+    Priority 1: Real Telegram document filename with show title.
+    Priority 2: Caption fallback (used when filename is generic, truncated, or only an episode number/title without show name).
     """
     fn = (filename or "").strip()
     cap = (caption or "").strip()
@@ -106,15 +116,16 @@ def extract_best_filename(filename: str, caption: str = "") -> str:
         not fn or
         fn.lower().startswith("video_") or
         fn.lower().startswith("document") or
-        len(fn) < 8
+        len(fn) < 8 or
+        is_bare_episode_name(fn)
     )
     has_broken_bracket = (fn.count("[") != fn.count("]")) or (fn.count("(") != fn.count(")"))
 
-    # If fn is a real, complete Telegram document name, prioritize it!
+    # If fn is a real, complete Telegram document name with a show title, prioritize it!
     if not is_generic and not has_broken_bracket:
         return fn
 
-    # Fallback to caption when filename is generic or truncated
+    # Fallback to caption when filename is generic, truncated, or bare episode name
     if cap:
         ext_pattern = re.compile(r"(?i)\.(mkv|mp4|avi|ts|webm|m4v|mov|rar|zip|7z)(?:\.\d{3})?$")
         split_pattern = re.compile(r"(?i)\.\d{3}$")
@@ -138,6 +149,10 @@ def extract_best_filename(filename: str, caption: str = "") -> str:
             if re.match(r"^[\(\[][^\)\]]+[\)\]]\.(?:mkv|mp4|avi)$", cleaned_val, re.I):
                 continue
 
+            # Skip lines that are just bare numbers or bare episode titles without series
+            if is_bare_episode_name(cleaned_val):
+                continue
+
             # Check if this line is a valid filename or media title
             if ext_pattern.search(cleaned_val) or split_pattern.search(cleaned_val):
                 candidate_lines.append(cleaned_val)
@@ -151,7 +166,15 @@ def extract_best_filename(filename: str, caption: str = "") -> str:
                 candidate_lines.append(cleaned_val)
 
         if candidate_lines:
-            best_cand = max(candidate_lines, key=len)
+            # Prefer candidates that have season/episode or year over bare lines
+            best_cand = max(
+                candidate_lines, 
+                key=lambda c: (
+                    bool(re.search(r"(?i)\b(?:s\d{1,2}|season|ep\d+|e\d+)\b", c)),
+                    bool(ext_pattern.search(c) or split_pattern.search(c)),
+                    len(c)
+                )
+            )
             best_cand = re.sub(r"[\s\-_]+$", "", best_cand).strip()
 
             has_ext = bool(re.search(r"\.[a-zA-Z0-9]{2,4}(?:\.\d{3})?$", best_cand))

@@ -1405,6 +1405,7 @@ class MetadataEnricher {
 
     private fun normalizeForComparison(s: String): String {
         return s.lowercase()
+            .replace(Regex("['’`]"), "")
             .replace(Regex("^(the|a|an)\\s+"), "")
             .replace(Regex("[^a-z0-9\\s]"), " ")
             .replace(Regex("\\s+"), " ")
