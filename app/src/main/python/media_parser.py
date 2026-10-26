@@ -93,13 +93,15 @@ def parse_split_part(filename: str) -> Optional[Tuple[str, int]]:
         return clean_name, part_num
     return None
 
+_INVISIBLE_CHARS_RE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff\x00-\x1f\x7f-\x9f]")
+
 def is_bare_episode_name(name: str) -> bool:
-    cleaned = name.strip()
-    if re.match(r"^#\s*\d+", cleaned):
+    cleaned = _INVISIBLE_CHARS_RE.sub("", name or "").strip()
+    if re.match(r"^[#№]\s*\d+", cleaned):
         return True
     if re.match(r"(?i)^(?:ep|episode|e)\s*\d+[\s._\-]", cleaned):
         return True
-    if re.match(r"^\d{1,3}\s*[-–—.]", cleaned):
+    if re.match(r"^\d{1,4}\s*[-–—.]", cleaned):
         return True
     return False
 
@@ -107,10 +109,10 @@ def extract_best_filename(filename: str, caption: str = "") -> str:
     """
     Chooses the best filename between Telegram's document attribute and caption.
     Priority 1: Real Telegram document filename with show title.
-    Priority 2: Caption fallback (used when filename is generic, truncated, or only an episode number/title without show name).
+    Priority 2: Caption fallback (used when filename is generic, truncated, bare episode name, or lacks series metadata present in caption).
     """
-    fn = (filename or "").strip()
-    cap = (caption or "").strip()
+    fn = _INVISIBLE_CHARS_RE.sub("", filename or "").strip()
+    cap = _INVISIBLE_CHARS_RE.sub("", caption or "").strip()
 
     is_generic = (
         not fn or
@@ -121,8 +123,12 @@ def extract_best_filename(filename: str, caption: str = "") -> str:
     )
     has_broken_bracket = (fn.count("[") != fn.count("]")) or (fn.count("(") != fn.count(")"))
 
-    # If fn is a real, complete Telegram document name with a show title, prioritize it!
-    if not is_generic and not has_broken_bracket:
+    # Check if caption has explicit Season & Episode (e.g. S01E188, 1x188) while document filename does not
+    fn_has_season_ep = bool(_SXXEXX_RE.search(fn) or _NXNN_RE.search(fn))
+    cap_has_season_ep = bool(_SXXEXX_RE.search(cap) or _NXNN_RE.search(cap)) if cap else False
+
+    # If fn is a real, complete Telegram document name with a show title (and caption does not contain richer SxxExx series metadata), prioritize it!
+    if not is_generic and not has_broken_bracket and not (cap_has_season_ep and not fn_has_season_ep):
         return fn
 
     # Fallback to caption when filename is generic, truncated, or bare episode name
@@ -329,8 +335,9 @@ def parse_media_filename(filename: str, caption: str = "", is_anime: bool = Fals
     clean_title = re.sub(r"(?i)\b(2160p|1080p|720p|480p|4k|uhd|hdr|hevc|x264|x265|aac|dts|bluray|web-?dl|web-?rip|proper|repack)\b.*$", "", clean_title)
 
     # Clean delimiters
+    clean_title = _INVISIBLE_CHARS_RE.sub("", clean_title)
     clean_title = re.sub(r"[\._\(\)\[\]\-]+", " ", clean_title).strip()
-    clean_title = re.sub(r"\s+", " ", clean_title)
+    clean_title = re.sub(r"\s+", " ", clean_title).strip()
     
     # Build quality badge string for Stremio stream items
     badge_parts = [quality]

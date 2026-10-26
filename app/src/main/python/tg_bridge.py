@@ -705,7 +705,7 @@ def sync_channel_media(api_id: int, api_hash: str, session_str: str, channel_id:
             mime_type = getattr(media, "mime_type", "video/mp4") or "video/mp4"
             duration = getattr(media, "duration", 0) or 0
 
-            caption = msg.caption or ""
+            caption = msg.caption or msg.text or ""
             best_file_name = media_parser.extract_best_filename(file_name, caption)
 
             # Only process if video mime or video extension
@@ -855,7 +855,7 @@ def scan_channel_batch(api_id: int, api_hash: str, session_str: str, channel_id:
                 file_size = getattr(media, "file_size", 0) or 0
                 mime_type = getattr(media, "mime_type", "") or ""
                 duration = getattr(media, "duration", 0) or 0
-                caption = msg.caption or ""
+                caption = msg.caption or msg.text or ""
 
                 best_file_name = media_parser.extract_best_filename(file_name, caption)
                 split_info = media_parser.parse_split_part(best_file_name)

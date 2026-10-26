@@ -428,6 +428,14 @@ class MetadataEnricher {
             }
         }
 
+        // Kitsu fallback for series/anime when Cinemeta/TMDB did not match
+        if (result == null && item.type == "series") {
+            val kitsuRes = tryKitsu(queryTitle)
+            if (kitsuRes != null) {
+                result = kitsuRes
+            }
+        }
+
         if (result != null) {
             cache[cacheKey] = result
             if (item.type == "series") {
@@ -565,6 +573,16 @@ class MetadataEnricher {
                             if (!altTitle.isNullOrBlank()) {
                                 val altScore = calculateSimilarity(title, altTitle)
                                 if (altScore > matchScore) matchScore = altScore
+                            }
+                        }
+                    }
+                    val abbrArray = attr.getAsJsonArray("abbreviatedTitles")
+                    if (abbrArray != null) {
+                        for (j in 0 until abbrArray.size()) {
+                            val abbr = abbrArray.get(j)?.asString
+                            if (!abbr.isNullOrBlank()) {
+                                val abbrScore = calculateSimilarity(title, abbr)
+                                if (abbrScore > matchScore) matchScore = abbrScore
                             }
                         }
                     }
@@ -1382,6 +1400,22 @@ class MetadataEnricher {
                     if (qw.length >= 3 && cAlpha.any { cw -> cw.length >= 3 && (cw.contains(qw) || qw.contains(cw)) }) {
                         substrFound = true
                         break
+                    }
+                }
+                // Check compound anime abbreviation / portmanteau (e.g. "kochikame" from "kochira" + "kameari")
+                if (!substrFound && qAlpha.size == 1) {
+                    val singleWord = qAlpha.first()
+                    if (singleWord.length >= 6) {
+                        for (i in 3..(singleWord.length - 3)) {
+                            val p1 = singleWord.substring(0, i)
+                            val p2 = singleWord.substring(i)
+                            val m1 = cAlpha.any { it.length >= 3 && it.startsWith(p1) }
+                            val m2 = cAlpha.any { it.length >= 3 && it.startsWith(p2) }
+                            if (m1 && m2) {
+                                substrFound = true
+                                return 0.85
+                            }
+                        }
                     }
                 }
                 if (!substrFound) return 0.0
