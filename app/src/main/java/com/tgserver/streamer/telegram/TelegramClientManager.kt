@@ -84,6 +84,7 @@ class TelegramClientManager(private val context: Context) {
     private val mediaIndex = ConcurrentHashMap<String, MediaItem>()
     private val unmatchedIndex = ConcurrentHashMap<String, UnmatchedItem>()
     private val activeScanJobs = ConcurrentHashMap<Long, Job>()
+    private val preservedManualOverrides = ConcurrentHashMap<String, MediaItem>()
     private val detectedDeadIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val managerScope = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
     private var autoScanJob: Job? = null
@@ -1667,7 +1668,21 @@ class TelegramClientManager(private val context: Context) {
 
     suspend fun rescanFromScratch(channelId: Long): Result<Int> = withContext(Dispatchers.IO) {
         stopChannelScan(channelId)
-        val toRemove = mediaIndex.values.filter { it.channelId == channelId }.map { it.id }
+
+        // 1. Preserve any manually matched or merged items and hidden states before clearing
+        val channelItems = mediaIndex.values.filter { it.channelId == channelId }
+        val manualItems = channelItems.filter { it.isManuallyMatched || it.isHidden }
+        manualItems.forEach { m ->
+            preservedManualOverrides[m.id] = m
+            preservedManualOverrides["${channelId}_${m.messageId}"] = m
+            if (m.isSplit) {
+                m.parts.forEach { part ->
+                    preservedManualOverrides["${channelId}_${part.messageId}"] = m
+                }
+            }
+        }
+
+        val toRemove = channelItems.map { it.id }
         toRemove.forEach { mediaIndex.remove(it) }
         saveMediaIndex()
         clearUnmatched(channelId)
@@ -1675,7 +1690,16 @@ class TelegramClientManager(private val context: Context) {
             channels[channelId] = chInfo.copy(videoCount = 0, lastScannedMsgId = 0)
             saveChannels()
         }
-        scanChannelLive(channelId, incremental = false)
+        val res = scanChannelLive(channelId, incremental = false)
+
+        // Cleanup temporary cache for this channel once scan finishes
+        val chPrefix1 = "tg_${channelId}_"
+        val chPrefix2 = "${channelId}_"
+        preservedManualOverrides.keys.filter { it.startsWith(chPrefix1) || it.startsWith(chPrefix2) }.forEach {
+            preservedManualOverrides.remove(it)
+        }
+
+        res
     }
 
     // --- Unmatched Content Operations ---
@@ -2078,41 +2102,71 @@ class TelegramClientManager(private val context: Context) {
                             rating = mObj.optDouble("rating", 0.0)
                         )
 
-                        // Enrich metadata
-                        metadataEnricher.enrich(
-                            item = item,
-                            isAnimeChannel = isAnime,
-                            tmdbKey = tmdbKey,
-                            tvdbKey = tvdbKey,
-                            animePreference = animePref
-                        )
+                        // Check if item had a preserved manual match/override (e.g. from rescanFromScratch or previous edit)
+                        val manualOverride = preservedManualOverrides[item.id]
+                            ?: preservedManualOverrides["${channelId}_${item.messageId}"]
+                            ?: mediaIndex[item.id]?.takeIf { it.isManuallyMatched || it.isHidden }
 
-                        val isMatched = !item.posterUrl.isNullOrBlank() ||
-                                !item.imdbId.isNullOrBlank() ||
-                                item.tmdbId != null ||
-                                item.kitsuId != null
+                        val finalItem = if (manualOverride != null && manualOverride.isManuallyMatched) {
+                            item.copy(
+                                title = manualOverride.title,
+                                type = manualOverride.type,
+                                year = manualOverride.year,
+                                season = manualOverride.season ?: item.season,
+                                episode = manualOverride.episode ?: item.episode,
+                                overview = manualOverride.overview,
+                                posterUrl = manualOverride.posterUrl,
+                                backdropUrl = manualOverride.backdropUrl,
+                                episodeTitle = manualOverride.episodeTitle,
+                                imdbId = manualOverride.imdbId,
+                                tmdbId = manualOverride.tmdbId,
+                                kitsuId = manualOverride.kitsuId,
+                                isManuallyMatched = true,
+                                isHidden = manualOverride.isHidden,
+                                lastModified = manualOverride.lastModified
+                            )
+                        } else {
+                            // Enrich metadata
+                            metadataEnricher.enrich(
+                                item = item,
+                                isAnimeChannel = isAnime,
+                                tmdbKey = tmdbKey,
+                                tvdbKey = tvdbKey,
+                                animePreference = animePref
+                            )
+                            if (manualOverride != null && manualOverride.isHidden) {
+                                item.copy(isHidden = true)
+                            } else {
+                                item
+                            }
+                        }
+
+                        val isMatched = !finalItem.posterUrl.isNullOrBlank() ||
+                                !finalItem.imdbId.isNullOrBlank() ||
+                                finalItem.tmdbId != null ||
+                                finalItem.kitsuId != null
 
                         if (isMatched) {
-                            mediaIndex[item.id] = item
-                            unmatchedIndex.remove("unmatched_${item.channelId}_${item.messageId}")
+                            mediaIndex[finalItem.id] = finalItem
+                            unmatchedIndex.remove("unmatched_${finalItem.channelId}_${finalItem.messageId}")
                             newItemsAdded++
-                            totalBytesScanned += item.sizeBytes
+                            totalBytesScanned += finalItem.sizeBytes
                         } else {
                             // Unmatched media item
-                            val rawFn = mObj.optString("rawFileName", item.fileName)
+                            val rawFn = mObj.optString("rawFileName", finalItem.fileName)
                             val un = UnmatchedItem(
-                                id = "unmatched_${item.channelId}_${item.messageId}",
-                                channelId = item.channelId,
+                                id = "unmatched_${finalItem.channelId}_${finalItem.messageId}",
+                                channelId = finalItem.channelId,
                                 channelTitle = ch?.title ?: "",
-                                messageId = item.messageId,
-                                fileName = if (item.fileName.isNotBlank()) item.fileName else item.title,
+                                messageId = finalItem.messageId,
+                                fileName = if (finalItem.fileName.isNotBlank()) finalItem.fileName else finalItem.title,
                                 rawFileName = rawFn,
-                                sizeBytes = item.sizeBytes,
+                                sizeBytes = finalItem.sizeBytes,
                                 scannedAt = System.currentTimeMillis(),
-                                reason = if (item.title.isNotBlank()) "Uncertain match / low confidence for '${item.title}'" else "No match found on TMDB / TVDB / Kitsu",
-                                mimeType = item.mimeType,
+                                reason = if (finalItem.title.isNotBlank()) "Uncertain match / low confidence for '${finalItem.title}'" else "No match found on TMDB / TVDB / Kitsu",
+                                mimeType = finalItem.mimeType,
                                 isVideo = true,
-                                parsedMediaItem = item
+                                parsedMediaItem = finalItem
                             )
                             unmatchedIndex[un.id] = un
                         }
@@ -2188,23 +2242,54 @@ class TelegramClientManager(private val context: Context) {
                             parts = computedParts
                         )
 
-                        // Enrich metadata
-                        metadataEnricher.enrich(
-                            item = splitItem,
-                            isAnimeChannel = isAnime,
-                            tmdbKey = tmdbKey,
-                            tvdbKey = tvdbKey,
-                            animePreference = animePref
-                        )
+                        // Check if split item had a preserved manual match/override
+                        val manualOverride = preservedManualOverrides[splitItem.id]
+                            ?: preservedManualOverrides["${channelId}_${firstMsgId}"]
+                            ?: computedParts.firstNotNullOfOrNull { p -> preservedManualOverrides["${channelId}_${p.messageId}"] }
+                            ?: mediaIndex[splitItem.id]?.takeIf { it.isManuallyMatched || it.isHidden }
 
-                        val isMatched = !splitItem.posterUrl.isNullOrBlank() ||
-                                !splitItem.imdbId.isNullOrBlank() ||
-                                splitItem.tmdbId != null ||
-                                splitItem.kitsuId != null
+                        val finalSplitItem = if (manualOverride != null && manualOverride.isManuallyMatched) {
+                            splitItem.copy(
+                                title = manualOverride.title,
+                                type = manualOverride.type,
+                                year = manualOverride.year,
+                                season = manualOverride.season ?: splitItem.season,
+                                episode = manualOverride.episode ?: splitItem.episode,
+                                overview = manualOverride.overview,
+                                posterUrl = manualOverride.posterUrl,
+                                backdropUrl = manualOverride.backdropUrl,
+                                episodeTitle = manualOverride.episodeTitle,
+                                imdbId = manualOverride.imdbId,
+                                tmdbId = manualOverride.tmdbId,
+                                kitsuId = manualOverride.kitsuId,
+                                isManuallyMatched = true,
+                                isHidden = manualOverride.isHidden,
+                                lastModified = manualOverride.lastModified
+                            )
+                        } else {
+                            // Enrich metadata
+                            metadataEnricher.enrich(
+                                item = splitItem,
+                                isAnimeChannel = isAnime,
+                                tmdbKey = tmdbKey,
+                                tvdbKey = tvdbKey,
+                                animePreference = animePref
+                            )
+                            if (manualOverride != null && manualOverride.isHidden) {
+                                splitItem.copy(isHidden = true)
+                            } else {
+                                splitItem
+                            }
+                        }
+
+                        val isMatched = !finalSplitItem.posterUrl.isNullOrBlank() ||
+                                !finalSplitItem.imdbId.isNullOrBlank() ||
+                                finalSplitItem.tmdbId != null ||
+                                finalSplitItem.kitsuId != null
 
                         if (isMatched) {
-                            val wasAlreadyInIndex = mediaIndex.containsKey(splitItem.id)
-                            mediaIndex[splitItem.id] = splitItem
+                            val wasAlreadyInIndex = mediaIndex.containsKey(finalSplitItem.id)
+                            mediaIndex[finalSplitItem.id] = finalSplitItem
                             unmatchedIndex.remove("unmatched_${channelId}_${firstMsgId}")
                             if (!wasAlreadyInIndex) newItemsAdded++
                             totalBytesScanned += pSize
@@ -2219,10 +2304,10 @@ class TelegramClientManager(private val context: Context) {
                                 rawFileName = rawFn,
                                 sizeBytes = runningStart,
                                 scannedAt = System.currentTimeMillis(),
-                                reason = if (splitItem.title.isNotBlank()) "Uncertain match / low confidence for '${splitItem.title}'" else "No match found on TMDB / TVDB / Kitsu",
-                                mimeType = splitItem.mimeType,
+                                reason = if (finalSplitItem.title.isNotBlank()) "Uncertain match / low confidence for '${finalSplitItem.title}'" else "No match found on TMDB / TVDB / Kitsu",
+                                mimeType = finalSplitItem.mimeType,
                                 isVideo = true,
-                                parsedMediaItem = splitItem
+                                parsedMediaItem = finalSplitItem
                             )
                             unmatchedIndex[un.id] = un
                         }
