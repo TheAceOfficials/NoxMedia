@@ -54,7 +54,7 @@ _LANGUAGES_MAP = {
 
 
 # Season & Episode patterns
-_SXXEXX_RE = re.compile(r"(?i)\b(?:s|season\s*)(\d{1,2})[\s._-]*(?:e|ep|episode\s*)(\d{1,3})\b")
+_SXXEXX_RE = re.compile(r"(?i)\b(?:s|season\s*)(\d{1,2})[\s._-]*(?:e|ep|episode\s*)(\d{1,3})(?:[._-]?v\d+)?\b")
 _NXNN_RE = re.compile(r"(?i)\b(\d{1,2})x(\d{2,3})\b")
 _SEASON_ONLY_RE = re.compile(r"(?i)\b(?:s|season\s*)(\d{1,2})\b")
 _EPISODE_ONLY_RE = re.compile(r"(?i)\b(?:e|ep|episode\s*)(\d{1,4})\b")
@@ -95,20 +95,30 @@ def parse_split_part(filename: str) -> Optional[Tuple[str, int]]:
 
 def extract_best_filename(filename: str, caption: str = "") -> str:
     """
-    Chooses the filename prioritizing message caption first, falling back to Telegram's 
-    actual document filename if caption is missing or contains no valid media title/filename.
-    
-    Priority 1: Caption-derived filename (handles complete titles, avoids TG bot 60-64 char truncation).
-    Priority 2: Telegram document filename attribute (safe fallback).
+    Chooses the best filename between Telegram's document attribute and caption.
+    Priority 1: Real Telegram document filename (accurate, uncorrupted by multi-line caption formats).
+    Priority 2: Caption fallback (used when filename is generic like 'video_123.mp4' or truncated).
     """
     fn = (filename or "").strip()
     cap = (caption or "").strip()
 
-    # Priority 1: Check caption first
+    is_generic = (
+        not fn or
+        fn.lower().startswith("video_") or
+        fn.lower().startswith("document") or
+        len(fn) < 8
+    )
+    has_broken_bracket = (fn.count("[") != fn.count("]")) or (fn.count("(") != fn.count(")"))
+
+    # If fn is a real, complete Telegram document name, prioritize it!
+    if not is_generic and not has_broken_bracket:
+        return fn
+
+    # Fallback to caption when filename is generic or truncated
     if cap:
-        candidate_lines = []
         ext_pattern = re.compile(r"(?i)\.(mkv|mp4|avi|ts|webm|m4v|mov|rar|zip|7z)(?:\.\d{3})?$")
         split_pattern = re.compile(r"(?i)\.\d{3}$")
+        candidate_lines = []
 
         for line in cap.splitlines():
             cleaned = line.strip()
@@ -124,6 +134,10 @@ def extract_best_filename(filename: str, caption: str = "") -> str:
             if re.match(r"(?i)^(?:https?://|t\.me/|@|join\b)", cleaned_val):
                 continue
 
+            # Skip standalone release group / watermark lines like "(MomStealer).mkv" or "[Judas].mkv"
+            if re.match(r"^[\(\[][^\)\]]+[\)\]]\.(?:mkv|mp4|avi)$", cleaned_val, re.I):
+                continue
+
             # Check if this line is a valid filename or media title
             if ext_pattern.search(cleaned_val) or split_pattern.search(cleaned_val):
                 candidate_lines.append(cleaned_val)
@@ -131,25 +145,15 @@ def extract_best_filename(filename: str, caption: str = "") -> str:
                 candidate_lines.append(cleaned_val)
             elif has_label and len(cleaned_val) > 2:
                 candidate_lines.append(cleaned_val)
-            elif any(tag in cleaned_val.lower() for tag in ("1080p", "720p", "2160p", "4k", "s0", "e0", "ep", "season", "episode", "web-dl", "webrip", "bluray", "bdrip", "hevc", "x264", "x265", "dual", "multi")):
+            elif any(tag in cleaned_val.lower() for tag in ("1080p", "720p", "2160p", "4k", "s0", "e0", "ep", "season", "episode", "web-dl", "webrip", "bluray", "bdrip")):
                 candidate_lines.append(cleaned_val)
             elif re.search(r"\b(19|20)\d{2}\b", cleaned_val) and len(cleaned_val.split()) >= 2:
                 candidate_lines.append(cleaned_val)
 
         if candidate_lines:
-            # Pick the best candidate (preferring lines with explicit extensions or rich details)
-            best_cand = max(
-                candidate_lines, 
-                key=lambda c: (
-                    bool(ext_pattern.search(c) or split_pattern.search(c)),
-                    any(ext in c.lower() for ext in (".mkv", ".mp4", ".avi", ".ts")),
-                    len(c)
-                )
-            )
+            best_cand = max(candidate_lines, key=len)
             best_cand = re.sub(r"[\s\-_]+$", "", best_cand).strip()
 
-            # Ensure extension is preserved: if candidate doesn't have a video/archive extension,
-            # borrow extension from fn (or fallback to .mkv)
             has_ext = bool(re.search(r"\.[a-zA-Z0-9]{2,4}(?:\.\d{3})?$", best_cand))
             if not has_ext:
                 m_ext = re.search(r"\.[a-zA-Z0-9]+(?:\.\d{3})?$", fn) if fn else None
@@ -161,7 +165,7 @@ def extract_best_filename(filename: str, caption: str = "") -> str:
             return best_cand
 
     # Priority 2: Fallback to actual file name
-    return fn
+    return fn if fn else (cap.splitlines()[0].strip() if cap else "")
 
 def parse_media_filename(filename: str, caption: str = "", is_anime: bool = False) -> Dict[str, Any]:
     """
@@ -223,7 +227,8 @@ def parse_media_filename(filename: str, caption: str = "", is_anime: bool = Fals
     cleaned_work = _CRC_RE.sub("", base_no_ext)
     cleaned_work = _TAG_BRACKET_RE.sub("", cleaned_work)
     cleaned_work = _REL_RE.sub("", cleaned_work)
-    cleaned_work = re.sub(r"^\[[^\]]{1,12}\]\s*", "", cleaned_work)
+    cleaned_work = re.sub(r"^\[[^\]]{1,40}\]\s*", "", cleaned_work)
+    cleaned_work = re.sub(r"^\([^\)]{1,40}\)\s*", "", cleaned_work)
 
     # Extract Season & Episode
     season = None
