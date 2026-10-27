@@ -517,6 +517,12 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         tgClient.removeUnmatchedItem(unmatchedId)
     }
 
+    fun removeUnmatchedItems(unmatchedIds: Collection<String>) {
+        if (unmatchedIds.isEmpty()) return
+        tgClient.removeUnmatchedItems(unmatchedIds)
+        Toast.makeText(getApplication(), "✓ Removed ${unmatchedIds.size} items", Toast.LENGTH_SHORT).show()
+    }
+
     fun clearAllUnmatched(channelId: Long? = null) {
         tgClient.clearUnmatched(channelId)
         Toast.makeText(getApplication(), "Cleared unmatched items", Toast.LENGTH_SHORT).show()
@@ -557,6 +563,43 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             } else {
                 Toast.makeText(getApplication(), "Could not match item", Toast.LENGTH_SHORT).show()
                 onDone(false)
+            }
+        }
+    }
+
+    fun matchUnmatchedItemsBatch(
+        unmatchedIds: List<String>,
+        matchedMeta: EnrichedMetadata,
+        targetType: String? = null,
+        onDone: (Int) -> Unit = {}
+    ) {
+        if (unmatchedIds.isEmpty()) {
+            onDone(0)
+            return
+        }
+        viewModelScope.launch {
+            val tmdbKey = prefs.getString("tmdb_api_key", "") ?: ""
+            val (enriched, episodeMap) = withContext(Dispatchers.IO) {
+                MetadataEnricher.fetchFullMetadataDetails(matchedMeta, tmdbKey)
+            }
+            val finalMeta = matchedMeta.copy(
+                title = enriched.title ?: matchedMeta.title,
+                year = enriched.year ?: matchedMeta.year,
+                overview = enriched.overview ?: matchedMeta.overview,
+                posterUrl = enriched.posterUrl ?: matchedMeta.posterUrl,
+                backdropUrl = enriched.backdropUrl ?: matchedMeta.backdropUrl,
+                imdbId = enriched.imdbId ?: matchedMeta.imdbId,
+                tmdbId = enriched.tmdbId ?: matchedMeta.tmdbId,
+                kitsuId = enriched.kitsuId ?: matchedMeta.kitsuId
+            )
+            val matched = tgClient.matchUnmatchedItemsBatch(unmatchedIds, finalMeta, targetType, episodeMap)
+            if (matched.isNotEmpty()) {
+                triggerAutoCloudBackupDebounced(4000L)
+                Toast.makeText(getApplication(), "✓ Matched ${matched.size} items to ${finalMeta.title}", Toast.LENGTH_SHORT).show()
+                onDone(matched.size)
+            } else {
+                Toast.makeText(getApplication(), "Could not match selected items", Toast.LENGTH_SHORT).show()
+                onDone(0)
             }
         }
     }

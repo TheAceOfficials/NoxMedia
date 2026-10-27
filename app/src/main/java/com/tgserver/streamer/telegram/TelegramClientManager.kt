@@ -1687,6 +1687,12 @@ class TelegramClientManager(private val context: Context) {
         saveUnmatchedIndex()
     }
 
+    fun removeUnmatchedItems(ids: Collection<String>) {
+        if (ids.isEmpty()) return
+        ids.forEach { unmatchedIndex.remove(it) }
+        saveUnmatchedIndex()
+    }
+
     fun clearUnmatched(channelId: Long? = null) {
         if (channelId == null) {
             unmatchedIndex.clear()
@@ -1748,6 +1754,76 @@ class TelegramClientManager(private val context: Context) {
         }
 
         baseItem
+    }
+
+    suspend fun matchUnmatchedItemsBatch(
+        unmatchedIds: Collection<String>,
+        matchedMeta: com.tgserver.streamer.metadata.EnrichedMetadata,
+        targetType: String? = null,
+        episodeMap: Map<Pair<Int, Int>, String> = emptyMap()
+    ): List<MediaItem> = withContext(Dispatchers.IO) {
+        val matchedList = mutableListOf<MediaItem>()
+        val touchedChannels = mutableSetOf<Long>()
+
+        for (unmatchedId in unmatchedIds) {
+            val unmatched = unmatchedIndex[unmatchedId] ?: continue
+            val origItem = unmatched.parsedMediaItem
+            val resolvedType = when {
+                targetType == "anime" || matchedMeta.kitsuId != null -> "series"
+                targetType == "movie" -> "movie"
+                targetType == "series" -> "series"
+                origItem?.season != null || origItem?.episode != null -> "series"
+                origItem != null && origItem.type.isNotBlank() -> origItem.type
+                else -> "movie"
+            }
+            val baseItem = origItem ?: MediaItem(
+                id = "tg_${unmatched.channelId}_${unmatched.messageId}",
+                channelId = unmatched.channelId,
+                messageId = unmatched.messageId,
+                title = matchedMeta.title ?: unmatched.fileName,
+                type = resolvedType,
+                sizeBytes = unmatched.sizeBytes,
+                mimeType = unmatched.mimeType,
+                fileName = unmatched.fileName
+            )
+            baseItem.type = resolvedType
+
+            if (!matchedMeta.title.isNullOrBlank()) baseItem.title = matchedMeta.title
+            if (!matchedMeta.year.isNullOrBlank()) baseItem.year = matchedMeta.year
+            if (!matchedMeta.overview.isNullOrBlank()) baseItem.overview = matchedMeta.overview
+            if (!matchedMeta.posterUrl.isNullOrBlank()) baseItem.posterUrl = matchedMeta.posterUrl
+            if (!matchedMeta.backdropUrl.isNullOrBlank()) baseItem.backdropUrl = matchedMeta.backdropUrl
+            if (!matchedMeta.imdbId.isNullOrBlank()) baseItem.imdbId = matchedMeta.imdbId
+            if (matchedMeta.tmdbId != null && matchedMeta.tmdbId > 0) baseItem.tmdbId = matchedMeta.tmdbId
+            if (matchedMeta.kitsuId != null && matchedMeta.kitsuId > 0) baseItem.kitsuId = matchedMeta.kitsuId
+
+            val s = baseItem.season ?: 1
+            val e = baseItem.episode
+            if (e != null && episodeMap.containsKey(Pair(s, e))) {
+                baseItem.episodeTitle = episodeMap[Pair(s, e)]
+            }
+
+            baseItem.isManuallyMatched = true
+            baseItem.lastModified = System.currentTimeMillis()
+
+            mediaIndex[baseItem.id] = baseItem
+            unmatchedIndex.remove(unmatchedId)
+            touchedChannels.add(baseItem.channelId)
+            matchedList.add(baseItem)
+        }
+
+        if (matchedList.isNotEmpty()) {
+            saveMediaIndex()
+            saveUnmatchedIndex()
+            for (chId in touchedChannels) {
+                channels[chId]?.let { ch ->
+                    channels[chId] = ch.copy(videoCount = mediaIndex.values.count { it.channelId == chId })
+                }
+            }
+            saveChannels()
+        }
+
+        matchedList
     }
 
     fun addUnmatchedToLibraryAnyway(unmatchedId: String): MediaItem? {
