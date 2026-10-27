@@ -1144,6 +1144,7 @@ private fun UnmatchedContentBottomSheet(
             ) {
                 if (isSelectionMode) {
                     Row(
+                        modifier = Modifier.weight(1f),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
@@ -1203,7 +1204,10 @@ private fun UnmatchedContentBottomSheet(
                         }
                     }
                 } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1236,9 +1240,13 @@ private fun UnmatchedContentBottomSheet(
                         Text(
                             text = "Total volume: $totalSizeStr • Items skipped or lacking metadata",
                             color = Color(0xFF94A3B8),
-                            fontSize = 11.5.sp
+                            fontSize = 11.5.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
+
+                    Spacer(modifier = Modifier.width(8.dp))
 
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -2111,7 +2119,8 @@ private fun ManualMatchCandidateDialog(
     var searchTitle by remember { mutableStateOf(initialTitle) }
     var searchType by remember { mutableStateOf(initialType) }
     var isLoading by remember { mutableStateOf(false) }
-    var isMatching by remember { mutableStateOf(false) }
+    var matchingCandidateKey by remember { mutableStateOf<String?>(null) }
+    val isAnyMatching = matchingCandidateKey != null
     var results by remember { mutableStateOf<List<EnrichedMetadata>>(emptyList()) }
     var searchAttempted by remember { mutableStateOf(false) }
 
@@ -2131,7 +2140,7 @@ private fun ManualMatchCandidateDialog(
     }
 
     AlertDialog(
-        onDismissRequest = { if (!isMatching) onDismiss() },
+        onDismissRequest = { if (!isAnyMatching) onDismiss() },
         containerColor = Color(0xFF13141B),
         titleContentColor = Color.White,
         shape = RoundedCornerShape(18.dp),
@@ -2148,7 +2157,7 @@ private fun ManualMatchCandidateDialog(
                     fontSize = 17.sp,
                     letterSpacing = 0.5.sp
                 )
-                if (!isMatching) {
+                if (!isAnyMatching) {
                     IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
                         Icon(
                             imageVector = Icons.Default.Close,
@@ -2298,23 +2307,25 @@ private fun ManualMatchCandidateDialog(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         items(results) { cand ->
+                            val candKey = "${cand.tmdbId}_${cand.imdbId}_${cand.kitsuId}_${cand.title}"
+                            val isThisMatching = matchingCandidateKey == candKey
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(Color(0xFF181A22))
                                     .border(1.dp, Color(0xFF282A36), RoundedCornerShape(12.dp))
-                                    .clickable(enabled = !isMatching) {
-                                        isMatching = true
+                                    .clickable(enabled = !isAnyMatching) {
+                                        matchingCandidateKey = candKey
                                         if (unmatchedItems.size == 1) {
                                             viewModel.matchUnmatchedItem(firstUnmatched.id, cand, targetType = searchType) { success ->
-                                                isMatching = false
+                                                matchingCandidateKey = null
                                                 if (success) onDismiss()
                                             }
                                         } else {
                                             val ids = unmatchedItems.map { it.id }
                                             viewModel.matchMultipleUnmatchedItems(ids, cand, targetType = searchType) { count ->
-                                                isMatching = false
+                                                matchingCandidateKey = null
                                                 if (count > 0) onDismiss()
                                             }
                                         }
@@ -2399,7 +2410,7 @@ private fun ManualMatchCandidateDialog(
                                             .border(1.dp, Color(0xFFA855F7), RoundedCornerShape(6.dp))
                                             .padding(horizontal = 8.dp, vertical = 4.dp)
                                     ) {
-                                        if (isMatching) {
+                                        if (isThisMatching) {
                                             CircularProgressIndicator(
                                                 color = Color(0xFFD8B4FE),
                                                 modifier = Modifier.size(12.dp),
@@ -2408,7 +2419,7 @@ private fun ManualMatchCandidateDialog(
                                         } else {
                                             Text(
                                                 text = if (unmatchedItems.size > 1) "APPLY ALL" else "MATCH",
-                                                color = Color(0xFFD8B4FE),
+                                                color = if (isAnyMatching) Color(0xFF6B7280) else Color(0xFFD8B4FE),
                                                 fontFamily = NdotFont,
                                                 fontSize = 9.5.sp,
                                                 fontWeight = FontWeight.Bold
@@ -2424,7 +2435,7 @@ private fun ManualMatchCandidateDialog(
         },
         confirmButton = {},
         dismissButton = {
-            if (!isMatching) {
+            if (!isAnyMatching) {
                 TextButton(onClick = onDismiss) {
                     Text("Cancel", color = Color(0xFF94A3B8))
                 }
