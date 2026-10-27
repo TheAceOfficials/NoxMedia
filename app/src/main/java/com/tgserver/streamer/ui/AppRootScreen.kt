@@ -56,10 +56,13 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.tgserver.streamer.R
 import com.tgserver.streamer.theme.*
 import com.tgserver.streamer.ui.screens.ApiCredentialsScreen
 import com.tgserver.streamer.ui.screens.ChannelsScreen
@@ -72,6 +75,8 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.math.abs
 import kotlin.math.roundToInt
+
+private val NdotFont = FontFamily(Font(R.font.ndot))
 
 private data class NavItemData(
     val tab: AppTab,
@@ -194,7 +199,7 @@ fun AppRootScreen(viewModel: MainAppViewModel) {
                 visible = syncProgress != null,
                 enter = slideInVertically(
                     initialOffsetY = { -it },
-                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)
+                    animationSpec = tween(200, easing = FastOutSlowInEasing)
                 ) + fadeIn(animationSpec = tween(200)),
                 exit = slideOutVertically(
                     targetOffsetY = { -it },

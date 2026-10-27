@@ -100,11 +100,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
      * The Main UI looper / composition thread is NEVER blocked!
      */
     val mediaGroups: StateFlow<List<MediaGroup>> = media
-        .map { list ->
-            withContext(Dispatchers.Default) {
-                list.toMediaGroups()
-            }
-        }
+        .map { list -> list.toMediaGroups() }
         .flowOn(Dispatchers.Default)
         .stateIn(
             scope = viewModelScope,
@@ -117,12 +113,10 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
      */
     val recentlyAddedGroups: StateFlow<List<MediaGroup>> = mediaGroups
         .map { groups ->
-            withContext(Dispatchers.Default) {
-                groups.sortedByDescending { group ->
-                    val date = group.dateAdded.takeIf { it > 0L }
-                    date ?: (group.items.maxOfOrNull { it.messageId }?.toLong() ?: 0L)
-                }.take(15)
-            }
+            groups.sortedByDescending { group ->
+                val date = group.dateAdded.takeIf { it > 0L }
+                date ?: (group.items.maxOfOrNull { it.messageId }?.toLong() ?: 0L)
+            }.take(15)
         }
         .flowOn(Dispatchers.Default)
         .stateIn(
