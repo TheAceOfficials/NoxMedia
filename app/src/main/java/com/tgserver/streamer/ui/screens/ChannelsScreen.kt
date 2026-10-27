@@ -1118,10 +1118,11 @@ private fun UnmatchedContentBottomSheet(
         containerColor = Color(0xFF101117),
         tonalElevation = 0.dp,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        windowInsets = WindowInsets.navigationBars,
         dragHandle = {
             Box(
                 modifier = Modifier
-                    .padding(vertical = 10.dp)
+                    .padding(top = 8.dp, bottom = 4.dp)
                     .width(36.dp)
                     .height(4.dp)
                     .clip(RoundedCornerShape(2.dp))
@@ -1134,7 +1135,7 @@ private fun UnmatchedContentBottomSheet(
                 .fillMaxWidth()
                 .fillMaxHeight(0.9f)
                 .padding(horizontal = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             // Top Bar
             Row(
@@ -1153,7 +1154,7 @@ private fun UnmatchedContentBottomSheet(
                                 isSelectionMode = false
                                 selectedItemIds.clear()
                             },
-                            modifier = Modifier.size(32.dp)
+                            modifier = Modifier.size(30.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Close,
@@ -1210,14 +1211,15 @@ private fun UnmatchedContentBottomSheet(
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Text(
                                 text = "UNMATCHED CONTENT",
                                 color = Color.White,
                                 fontFamily = NdotFont,
-                                fontSize = 16.sp,
-                                letterSpacing = 0.5.sp
+                                fontSize = 15.sp,
+                                letterSpacing = 0.5.sp,
+                                maxLines = 1
                             )
 
                             Box(
@@ -1225,10 +1227,10 @@ private fun UnmatchedContentBottomSheet(
                                     .clip(RoundedCornerShape(6.dp))
                                     .background(Color(0xFF2E1C0A))
                                     .border(1.dp, Color(0xFFF59E0B), RoundedCornerShape(6.dp))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    .padding(horizontal = 5.dp, vertical = 1.dp)
                             ) {
                                 Text(
-                                    text = "${unmatchedItems.size} ITEMS",
+                                    text = "${unmatchedItems.size}",
                                     color = Color(0xFFFBBF24),
                                     fontFamily = NdotFont,
                                     fontSize = 9.sp,
@@ -1240,16 +1242,16 @@ private fun UnmatchedContentBottomSheet(
                         Text(
                             text = "Total volume: $totalSizeStr • Items skipped or lacking metadata",
                             color = Color(0xFF94A3B8),
-                            fontSize = 11.5.sp,
+                            fontSize = 11.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
 
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
 
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         if (unmatchedItems.isNotEmpty()) {
@@ -1286,7 +1288,7 @@ private fun UnmatchedContentBottomSheet(
 
                             IconButton(
                                 onClick = { showClearConfirm = true },
-                                modifier = Modifier.size(32.dp)
+                                modifier = Modifier.size(30.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.DeleteSweep,
@@ -1299,7 +1301,7 @@ private fun UnmatchedContentBottomSheet(
 
                         IconButton(
                             onClick = onDismiss,
-                            modifier = Modifier.size(32.dp)
+                            modifier = Modifier.size(30.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Close,
@@ -1319,7 +1321,7 @@ private fun UnmatchedContentBottomSheet(
                     .clip(RoundedCornerShape(12.dp))
                     .background(Color(0xFF181A24))
                     .border(1.dp, Color(0xFF282B3A), RoundedCornerShape(12.dp))
-                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),

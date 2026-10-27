@@ -582,11 +582,11 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
     }
 
     // Netflix & Apple TV style Windowing / Pagination:
-    // Render initial 24 items immediately (<4ms render time), append 24 on scroll
-    val pageSize = 24
+    // Render initial 36 items immediately (<4ms render time), append 36 on scroll
+    val pageSize = 36
     var visibleItemCount by remember { mutableIntStateOf(pageSize) }
 
-    LaunchedEffect(searchQuery, selectedCategory, activeFilters) {
+    LaunchedEffect(searchQuery, selectedCategory, activeFilters, sortOrder) {
         visibleItemCount = pageSize
     }
 
@@ -594,17 +594,14 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
         filteredGroups.take(visibleItemCount)
     }
 
-    val shouldLoadMore by remember {
-        derivedStateOf {
+    LaunchedEffect(gridState, filteredGroups.size) {
+        snapshotFlow {
             val lastVisible = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            val total = displayedGroups.size
-            lastVisible >= total - 6 && total < filteredGroups.size
-        }
-    }
-
-    LaunchedEffect(shouldLoadMore) {
-        if (shouldLoadMore) {
-            visibleItemCount = (visibleItemCount + pageSize).coerceAtMost(filteredGroups.size)
+            lastVisible to filteredGroups.size
+        }.collect { (lastVisible, totalSize) ->
+            if (totalSize > 0 && lastVisible >= visibleItemCount - 8 && visibleItemCount < totalSize) {
+                visibleItemCount = (visibleItemCount + pageSize).coerceAtMost(totalSize)
+            }
         }
     }
 
