@@ -54,19 +54,88 @@ _LANGUAGES_MAP = {
 
 
 # Season & Episode patterns
-_SXXEXX_RE = re.compile(r"(?i)\b(?:s|season\s*)(\d{1,2})[\s._-]*(?:e|ep|episode\s*)(\d{1,3})\b")
-_NXNN_RE = re.compile(r"(?i)\b(\d{1,2})x(\d{2,3})\b")
-_SEASON_ONLY_RE = re.compile(r"(?i)\b(?:s|season\s*)(\d{1,2})\b")
-_EPISODE_ONLY_RE = re.compile(r"(?i)\b(?:e|ep|episode\s*)(\d{1,4})\b")
+_SXXEXX_RE = re.compile(r"(?i)(?<![a-zA-Z0-9])(?:s|season\s*)(\d{1,2})[\s._-]*(?:e|ep|episode\s*)(\d{1,4})(?:v\d+)?(?![a-zA-Z0-9])")
+_NXNN_RE = re.compile(r"(?i)(?<![a-zA-Z0-9])(\d{1,2})x(\d{2,4})(?:v\d+)?(?![a-zA-Z0-9])")
+_SEASON_ONLY_RE = re.compile(r"(?i)(?<![a-zA-Z0-9])(?:s|season\s*)(\d{1,2})(?![a-zA-Z0-9])")
+_EPISODE_ONLY_RE = re.compile(r"(?i)(?<![a-zA-Z0-9])(?:e|ep|episode\s*|#\s*)(\d{1,4})(?:v\d+)?(?![a-zA-Z0-9])")
 
 # Anime Absolute Episode: e.g. "One Piece - 1120" or "One Piece 1120"
 _ANIME_ABS_RE = re.compile(r"(?i)\s*[-–—]\s*(\d{2,4})(?:\s|$|\[|\()")
 _YEAR_RE = re.compile(r"(?:^|[\s._\-\(\[])((?:19|20)\d{2})(?:[\s._\-\)\]]|$)")
 
 # Bracket tags: quality, audio, codec, release group, CRC
-_TAG_BRACKET_RE = re.compile(r'[\(\[]\s*(?:1080p|720p|2160p|4k|bd|bluray|web-?rip|web-?dl|dual|multi|flac|hevc|x264|x265|ddp[^\]\)]*|atmos|hdr|dv|h\.?264|h\.?265|aac)[^\)\]]*[\)\]]', re.I)
-_REL_RE = re.compile(r'[\(\[](?:MomStealer|Anipulse|Judas|SubsPlease|Erai|YTS|PSA|TGx|Pahe|GalaxyRG)[^\)\]]*[\)\]]', re.I)
+_TAG_BRACKET_RE = re.compile(r'[\(\[]\s*(?:1080p|720p|480p|360p|2160p|4k|uhd|bd|bluray|web-?rip|web-?dl|dual|multi|flac|hevc|x264|x265|ddp[^\]\)]*|atmos|hdr|dv|h\.?264|h\.?265|aac)[^\)\]]*[\)\]]', re.I)
+_REL_RE = re.compile(r'[\(\[](?:MomStealer|Anipulse|Judas|SubsPlease|Erai|YTS|YIFY|PSA|TGx|Pahe|GalaxyRG|GalaxyTV|Toonworld4all|QxR|Vyndros|EMBER|Tigole|SAMPA|KaKa|rarbg|SEV|FLUX|MeGusta|ION10|EZTV|Vegamovies|KatmovieHD)[^\)\]]*[\)\]]', re.I)
 _CRC_RE = re.compile(r'\[[0-9A-Fa-f]{8}\]')
+
+_MEDIA_TAGS_RE = re.compile(
+    r"(?i)\b(2160p|1080p|720p|480p|4k|uhd|hdr|hevc|x265|x264|h\.?265|h\.?264|bluray|blu-ray|bdrip|web-?dl|webrip|dvdrip|remux|dual|multi|hindi|english|flac|aac|dts|atmos|ddp|dd\+|truehd|hq)\b|"
+    r"(?<![a-zA-Z0-9])(?:s|season\s*)\d{1,2}|"
+    r"(?<![a-zA-Z0-9])(?:e|ep|episode\s*|#\s*)\d{1,4}|"
+    r"(?<![a-zA-Z0-9])\d{1,2}x\d{2,4}|"
+    r"(?:^|[\s._\-\(\[])(?:19|20)\d{2}(?:[\s._\-\)\]]|$)|"
+    r"(?:MomStealer|Anipulse|Judas|SubsPlease|Erai|YTS|YIFY|PSA|TGx|Pahe|GalaxyRG|GalaxyTV|Toonworld4all|QxR|Vyndros|EMBER|Tigole|SAMPA|KaKa|Vegamovies|KatmovieHD)"
+)
+
+def is_media_like(text: str) -> bool:
+    """Checks whether a string contains identifiable media indicators (season, episode, year, resolution, codecs, release groups)."""
+    if not text:
+        return False
+    return bool(_MEDIA_TAGS_RE.search(text))
+
+def clean_caption_text(caption: str) -> str:
+    """
+    Cleans raw Telegram message caption:
+    - Strips URLs (http, https, t.me, tg://, www)
+    - Strips Telegram channel handles and mentions (@username)
+    - Strips emojis and decorative pictographs
+    - Strips spam/promo lines (join channel, download link, etc.) and decorative divider lines
+    - Strips leading labels (Title:, File Name:, Name:, etc.)
+    Returns cleaned, normalized caption string or "" if no media info remains.
+    """
+    if not caption or not caption.strip():
+        return ""
+
+    # 1. Strip URLs and @usernames first
+    cap = re.sub(r"https?://\S+|t\.me/\S+|tg://\S+|www\.\S+", " ", caption)
+    cap = re.sub(r"(?:^|\s)@[\w_]+", " ", cap)
+
+    lines = []
+    video_ext_re = re.compile(r"(?i)\.(?:mkv|mp4|avi|ts|webm|m4v|mov|flv|wmv)(?:\.\d{2,4})?$")
+
+    for raw_line in cap.splitlines():
+        # Remove emojis and decorative unicode symbols
+        line = re.sub(r"[\U00010000-\U0010ffff\u2600-\u27bf\u2300-\u23ff\u2b50\u2b55\u200d\ufe0f]", " ", raw_line)
+        line = re.sub(r"^(?:📁|🎬|🎥|▶️|💾|🔹|🔸|▪️|▫️|•|[-*#])+\s*", "", line).strip()
+
+        if not line:
+            continue
+        # Divider lines (e.g. -------, =======, ━━━━━━━, ••••)
+        if re.match(r"^[\s\-_=*#~━─—–•·:|]+$", line):
+            continue
+        # Promotional / spam lines
+        if re.search(r"(?i)^\s*(?:join|subscribe|forwarded\s*from|channel|download\s*link|how\s*to\s*download|backup\s*channel|contact|admin|owner|direct\s*link|share\s*link|links?)\b", line):
+            continue
+        # Remove label prefixes (Title:, File Name:, Name:, etc.)
+        cleaned = re.sub(r"(?i)^(?:file(?:\s*name)?|name|title)\s*[:：\-]\s*", "", line).strip()
+        if not cleaned:
+            continue
+        # Must have at least 2 alphanumeric characters
+        if not re.search(r"[a-zA-Z0-9]{2,}", cleaned):
+            continue
+        lines.append(cleaned)
+
+    if not lines:
+        return ""
+
+    # Check if a single line is a complete media file name with video extension and media tags
+    for l in lines:
+        if video_ext_re.search(l) and re.search(r"(?i)(?:s\d+|season|ep|episode|\b(?:19|20)\d{2}\b)", l):
+            return l
+
+    # Otherwise join multi-line captions into a single line
+    joined = " ".join(lines)
+    return re.sub(r"\s+", " ", joined).strip()
 
 def parse_split_part(filename: str) -> Optional[Tuple[str, int]]:
     """
@@ -95,69 +164,31 @@ def parse_split_part(filename: str) -> Optional[Tuple[str, int]]:
 
 def extract_best_filename(filename: str, caption: str = "") -> str:
     """
-    Chooses the most complete and accurate filename between Telegram's document attribute
-    and the message caption.
-    Telegram upload bots often truncate document attribute filenames to 60-64 characters
-    (e.g., cutting off in the middle of release names or split parts), while the message caption
-    contains the complete, unclipped original filename.
+    Chooses the best filename between Telegram's document attribute filename and message caption.
+    Priority 1: Message caption (cleaned of emojis, links, spam), since users often fix/edit
+    captions when Telegram filenames are obfuscated/random, or bots write complete release names in captions.
+    Priority 2: Telegram document attribute filename (as fallback if caption is missing, just a link, or empty).
     """
     fn = (filename or "").strip()
     cap = (caption or "").strip()
-    if not cap:
-        return fn
-    if not fn:
-        return cap.splitlines()[0].strip()
 
-    candidate_lines = []
-    ext_pattern = re.compile(r"(?i)\.(mkv|mp4|avi|ts|webm|m4v|mov|rar|zip|7z)(?:\.\d{3})?$")
-    split_pattern = re.compile(r"(?i)\.\d{3}$")
+    cleaned_cap = clean_caption_text(cap)
 
-    for line in cap.splitlines():
-        cleaned = line.strip()
-        cleaned = re.sub(r"^(?:📁|🎬|🎥|▶️|💾|🔹|🔸|▪️|▫️|•|[-*#])+\s*", "", cleaned).strip()
-        cleaned = re.sub(r"(?i)^(?:file(?:\s*name)?|name|title)\s*[:：\-]\s*", "", cleaned).strip()
-        if not cleaned:
-            continue
-        if ext_pattern.search(cleaned) or split_pattern.search(cleaned):
-            candidate_lines.append(cleaned)
-        elif any(ext in cleaned.lower() for ext in (".mkv", ".mp4", ".avi", ".ts", ".webm")):
-            candidate_lines.append(cleaned)
-
-    if not candidate_lines and len(cap.splitlines()) > 0:
-        first_line = cap.splitlines()[0].strip()
-        cleaned_first = re.sub(r"^(?:📁|🎬|🎥|▶️|💾|🔹|🔸|▪️|▫️|•|[-*#])+\s*", "", first_line).strip()
-        cleaned_first = re.sub(r"(?i)^(?:file(?:\s*name)?|name|title)\s*[:：\-]\s*", "", cleaned_first).strip()
-        if len(cleaned_first) > len(fn) and any(tag in cleaned_first.lower() for tag in ("1080p", "720p", "2160p", "4k", "s0", "e0", "ep")):
-            m_ext = re.search(r"\.[a-zA-Z0-9]+(?:\.\d{3})?$", fn)
-            if m_ext and not cleaned_first.lower().endswith(m_ext.group(0).lower()):
-                candidate_lines.append(cleaned_first + m_ext.group(0))
-            else:
-                candidate_lines.append(cleaned_first)
-
-    if candidate_lines:
-        best_cand = max(candidate_lines, key=len)
-        best_cand = re.sub(r"[\s\-_]+$", "", best_cand).strip()
-
-        fn_clean = re.sub(r"(?i)\.(mkv|mp4|avi|ts|webm|rar|zip|7z|\d{3})+$", "", fn)
-        cand_clean = re.sub(r"(?i)\.(mkv|mp4|avi|ts|webm|rar|zip|7z|\d{3})+$", "", best_cand)
-
-        # 1. Generic filename in document attribute (e.g. video_123.mp4)
-        if fn.lower().startswith("video_") or fn.lower().startswith("document") or len(fn) < 15:
-            return best_cand
-
-        # 2. Candidate is longer than fn and shares prefix/identity
-        prefix = fn_clean[:min(20, len(fn_clean))].lower()
-        if len(best_cand) > len(fn) and (prefix in cand_clean.lower() or cand_clean.lower().startswith(prefix)):
-            return best_cand
-
-        # 3. fn has an unclosed bracket like "[Hindi JH.mkv" whereas candidate has closed brackets
-        if ("[" in fn and "]" not in fn) or ("(" in fn and ")" not in fn):
-            if ("[" in best_cand and "]" in best_cand) or ("(" in best_cand and ")" in best_cand) or len(best_cand) >= len(fn):
-                return best_cand
-
-        # 4. If candidate is longer and has video extension
-        if len(best_cand) > len(fn):
-            return best_cand
+    if cleaned_cap:
+        cap_is_media = is_media_like(cleaned_cap)
+        fn_is_media = is_media_like(fn)
+        # Caption is Priority 1 if media-like or if fn is generic/obfuscated/incomplete
+        if cap_is_media or not fn_is_media:
+            has_ext = bool(re.search(r"(?i)\.(mkv|mp4|avi|ts|webm|m4v|mov|rar|zip|7z)(?:\.\d{2,4})?$", cleaned_cap))
+            if not has_ext and fn:
+                m_ext = re.search(r"\.(mkv|mp4|avi|ts|webm|m4v|mov|rar|zip|7z)(?:\.\d{2,4})?$", fn, re.I)
+                if m_ext:
+                    cleaned_cap = cleaned_cap + m_ext.group(0)
+                else:
+                    cleaned_cap = cleaned_cap + ".mp4"
+            elif not has_ext:
+                cleaned_cap = cleaned_cap + ".mp4"
+            return cleaned_cap
 
     return fn
 
@@ -178,7 +209,7 @@ def parse_media_filename(filename: str, caption: str = "", is_anime: bool = Fals
     
     # Extract Year
     year = None
-    year_match = _YEAR_RE.search(base_no_ext)
+    year_match = _YEAR_RE.search(base_no_ext) or (caption and _YEAR_RE.search(caption))
     if year_match:
         year = year_match.group(1)
 
@@ -221,7 +252,16 @@ def parse_media_filename(filename: str, caption: str = "", is_anime: bool = Fals
     cleaned_work = _CRC_RE.sub("", base_no_ext)
     cleaned_work = _TAG_BRACKET_RE.sub("", cleaned_work)
     cleaned_work = _REL_RE.sub("", cleaned_work)
-    cleaned_work = re.sub(r"^\[[^\]]{1,12}\]\s*", "", cleaned_work)
+    
+    # Strip leading uploader/channel brackets if actual title follows (e.g. [Toonworld4all] Dexters Lab...)
+    leading_bracket = re.match(r"^(\[[^\]]+\]|\([^\)]+\)|【[^】]+】|\{[^\}]+\})\s*", cleaned_work)
+    if leading_bracket:
+        rest = cleaned_work[leading_bracket.end():]
+        if re.search(r"[a-zA-Z]{2,}", rest):
+            cleaned_work = rest
+
+    # Strip trailing release group brackets
+    cleaned_work = re.sub(r"\s*[\(\[][A-Za-z0-9_\-\.\s]{1,30}[\)\]]\s*$", "", cleaned_work)
 
     # Extract Season & Episode
     season = None
@@ -234,14 +274,18 @@ def parse_media_filename(filename: str, caption: str = "", is_anime: bool = Fals
         season = int(s_e_match.group(1))
         episode = int(s_e_match.group(2))
         media_type = "series"
-        clean_title = cleaned_work[:s_e_match.start()]
+        p = cleaned_work[:s_e_match.start()].strip(" ._-\t[]()")
+        s = cleaned_work[s_e_match.end():].strip(" ._-\t[]()")
+        clean_title = p if re.search(r"[a-zA-Z]{2,}", p) else s
     else:
         nxnn = _NXNN_RE.search(cleaned_work)
         if nxnn:
             season = int(nxnn.group(1))
             episode = int(nxnn.group(2))
             media_type = "series"
-            clean_title = cleaned_work[:nxnn.start()]
+            p = cleaned_work[:nxnn.start()].strip(" ._-\t[]()")
+            s = cleaned_work[nxnn.end():].strip(" ._-\t[]()")
+            clean_title = p if re.search(r"[a-zA-Z]{2,}", p) else s
         else:
             # Bracketed episode e.g. [12 - The Ramparts of Ice]
             b_ep = re.search(r"^\[\s*(\d{1,4})\s*[-–—]\s*([^\]]+)\]", cleaned_work)
@@ -273,12 +317,15 @@ def parse_media_filename(filename: str, caption: str = "", is_anime: bool = Fals
                             season = int(s_only.group(1))
                             episode = int(ep_only.group(1))
                             media_type = "series"
-                            clean_title = cleaned_work[:s_only.start()]
+                            first_pos = min(s_only.start(), ep_only.start())
+                            p = cleaned_work[:first_pos].strip(" ._-\t[]()")
+                            clean_title = p if re.search(r"[a-zA-Z]{2,}", p) else cleaned_work[max(s_only.end(), ep_only.end()):].strip(" ._-\t[]()")
                         elif ep_only:
                             episode = int(ep_only.group(1))
                             season = 1
                             media_type = "series"
-                            clean_title = cleaned_work[:ep_only.start()]
+                            p = cleaned_work[:ep_only.start()].strip(" ._-\t[]()")
+                            clean_title = p if re.search(r"[a-zA-Z]{2,}", p) else cleaned_work[ep_only.end():].strip(" ._-\t[]()")
                         elif is_anime:
                             bare_nums = re.findall(r"(?:^|[\s\-_])0*(\d{1,4})(?:[\s\-_]|$)", cleaned_work)
                             if bare_nums:
@@ -296,11 +343,15 @@ def parse_media_filename(filename: str, caption: str = "", is_anime: bool = Fals
         clean_title = clean_title[:y_in_title.start()]
 
     # Cut off at resolution / quality indicators or sources
-    clean_title = re.sub(r"(?i)\b(2160p|1080p|720p|480p|4k|uhd|hdr|hevc|x264|x265|aac|dts|bluray|web-?dl|web-?rip|proper|repack)\b.*$", "", clean_title)
+    clean_title = re.sub(r"(?i)\b(2160p|1080p|720p|480p|4k|uhd|hdr|hevc|x264|x265|aac|dts|bluray|web-?dl|web-?rip|proper|repack|hq)\b.*$", "", clean_title)
 
     # Clean delimiters
     clean_title = re.sub(r"[\._\(\)\[\]\-]+", " ", clean_title).strip()
     clean_title = re.sub(r"\s+", " ", clean_title)
+
+    # Ensure clean_title is never empty
+    if not clean_title:
+        clean_title = re.sub(r"[\._\(\)\[\]\-]+", " ", base_no_ext).strip()
     
     # Build quality badge string for Stremio stream items
     badge_parts = [quality]

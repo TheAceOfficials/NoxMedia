@@ -1406,6 +1406,7 @@ class MetadataEnricher {
     private fun normalizeForComparison(s: String): String {
         return s.lowercase()
             .replace(Regex("^(the|a|an)\\s+"), "")
+            .replace(Regex("['’‘`]"), "")
             .replace(Regex("[^a-z0-9\\s]"), " ")
             .replace(Regex("\\s+"), " ")
             .trim()
@@ -1414,7 +1415,7 @@ class MetadataEnricher {
     private fun sanitizeTitle(name: String): String {
         return name
             .replace(Regex("(?i)\\.(mkv|mp4|avi|mov|webm)$"), "")
-            .replace(Regex("(?i)(2160p|1080p|720p|480p|4k|uhd|hdr|hevc|x264|x265|aac|dts|bluray|web-?dl|web-?rip|proper|repack)"), "")
+            .replace(Regex("(?i)(2160p|1080p|720p|480p|4k|uhd|hdr|hevc|x264|x265|aac|dts|bluray|web-?dl|web-?rip|proper|repack|hq)"), "")
             .replace(Regex("[\\[\\]\\(\\)\\._-]"), " ")
             .replace(Regex("\\s+"), " ")
             .trim()
