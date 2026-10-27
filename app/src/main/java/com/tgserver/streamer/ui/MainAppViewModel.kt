@@ -517,12 +517,6 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         tgClient.removeUnmatchedItem(unmatchedId)
     }
 
-    fun removeUnmatchedItems(unmatchedIds: Collection<String>) {
-        if (unmatchedIds.isEmpty()) return
-        tgClient.removeUnmatchedItems(unmatchedIds)
-        Toast.makeText(getApplication(), "✓ Removed ${unmatchedIds.size} items", Toast.LENGTH_SHORT).show()
-    }
-
     fun clearAllUnmatched(channelId: Long? = null) {
         tgClient.clearUnmatched(channelId)
         Toast.makeText(getApplication(), "Cleared unmatched items", Toast.LENGTH_SHORT).show()
@@ -567,14 +561,31 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun matchUnmatchedItemsBatch(
+    fun addUnmatchedToLibraryAnyway(unmatchedId: String) {
+        val item = tgClient.addUnmatchedToLibraryAnyway(unmatchedId)
+        if (item != null) {
+            Toast.makeText(getApplication(), "✓ Added to library: ${item.title}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun removeMultipleUnmatched(unmatchedIds: List<String>) {
+        if (unmatchedIds.isEmpty()) return
+        tgClient.removeUnmatchedItems(unmatchedIds)
+        Toast.makeText(getApplication(), "✓ Removed ${unmatchedIds.size} items", Toast.LENGTH_SHORT).show()
+    }
+
+    fun removeUnmatchedItems(unmatchedIds: Collection<String>) {
+        removeMultipleUnmatched(unmatchedIds.toList())
+    }
+
+    fun matchMultipleUnmatchedItems(
         unmatchedIds: List<String>,
         matchedMeta: EnrichedMetadata,
         targetType: String? = null,
-        onDone: (Boolean) -> Unit = {}
+        onDone: (Int) -> Unit = {}
     ) {
         if (unmatchedIds.isEmpty()) {
-            onDone(false)
+            onDone(0)
             return
         }
         viewModelScope.launch {
@@ -595,19 +606,31 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             val matched = tgClient.matchUnmatchedItemsBatch(unmatchedIds, finalMeta, targetType, episodeMap)
             if (matched.isNotEmpty()) {
                 triggerAutoCloudBackupDebounced(4000L)
-                Toast.makeText(getApplication(), "✓ Matched ${matched.size} items to ${finalMeta.title}", Toast.LENGTH_SHORT).show()
-                onDone(true)
+                Toast.makeText(getApplication(), "✓ Matched ${matched.size} items with ${finalMeta.title}", Toast.LENGTH_SHORT).show()
+                onDone(matched.size)
             } else {
                 Toast.makeText(getApplication(), "Could not match selected items", Toast.LENGTH_SHORT).show()
-                onDone(false)
+                onDone(0)
             }
         }
     }
 
-    fun addUnmatchedToLibraryAnyway(unmatchedId: String) {
-        val item = tgClient.addUnmatchedToLibraryAnyway(unmatchedId)
-        if (item != null) {
-            Toast.makeText(getApplication(), "✓ Added to library: ${item.title}", Toast.LENGTH_SHORT).show()
+    fun matchUnmatchedItemsBatch(
+        unmatchedIds: List<String>,
+        matchedMeta: EnrichedMetadata,
+        targetType: String? = null,
+        onDone: (Boolean) -> Unit = {}
+    ) {
+        matchMultipleUnmatchedItems(unmatchedIds, matchedMeta, targetType) { count ->
+            onDone(count > 0)
+        }
+    }
+
+    fun addMultipleUnmatchedToLibraryAnyway(unmatchedIds: List<String>) {
+        if (unmatchedIds.isEmpty()) return
+        val added = tgClient.addUnmatchedToLibraryAnywayBatch(unmatchedIds)
+        if (added.isNotEmpty()) {
+            Toast.makeText(getApplication(), "✓ Added ${added.size} items to library", Toast.LENGTH_SHORT).show()
         }
     }
 

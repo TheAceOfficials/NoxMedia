@@ -24,6 +24,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Checklist
+import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -1082,11 +1085,12 @@ private fun UnmatchedContentBottomSheet(
     val haptic = LocalHapticFeedback.current
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf("ALL") } // "ALL", "NO_MATCH", "SKIPPED"
-    var isSelectionMode by remember { mutableStateOf(false) }
-    val selectedIds = remember { mutableStateListOf<String>() }
-    var batchMatchTargetItems by remember { mutableStateOf<List<UnmatchedItem>>(emptyList()) }
+    var matchTargetItems by remember { mutableStateOf<List<UnmatchedItem>>(emptyList()) }
     var showClearConfirm by remember { mutableStateOf(false) }
-    var showBatchDeleteConfirm by remember { mutableStateOf(false) }
+    var showDeleteSelectedConfirm by remember { mutableStateOf(false) }
+
+    var isSelectionMode by remember { mutableStateOf(false) }
+    val selectedItemIds = remember { mutableStateListOf<String>() }
 
     val filteredItems = remember(unmatchedItems, searchQuery, selectedFilter) {
         unmatchedItems.filter { item ->
@@ -1143,68 +1147,60 @@ private fun UnmatchedContentBottomSheet(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        IconButton(
+                            onClick = {
+                                isSelectionMode = false
+                                selectedItemIds.clear()
+                            },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Exit Selection",
+                                tint = Color(0xFF94A3B8),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        Text(
+                            text = "${selectedItemIds.size} SELECTED",
+                            color = Color.White,
+                            fontFamily = NdotFont,
+                            fontSize = 15.sp,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        val allFilteredSelected = filteredItems.isNotEmpty() && filteredItems.all { it.id in selectedItemIds }
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(Color(0xFF2E1547))
-                                .border(1.dp, Color(0xFFA855F7), RoundedCornerShape(6.dp))
-                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF1E212E))
+                                .border(1.dp, Color(0xFF33384B), RoundedCornerShape(8.dp))
+                                .clickable {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    if (allFilteredSelected) {
+                                        filteredItems.forEach { selectedItemIds.remove(it.id) }
+                                    } else {
+                                        filteredItems.forEach {
+                                            if (it.id !in selectedItemIds) selectedItemIds.add(it.id)
+                                        }
+                                    }
+                                }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
                         ) {
                             Text(
-                                text = "${selectedIds.size} SELECTED",
-                                color = Color(0xFFD8B4FE),
+                                text = if (allFilteredSelected) "DESELECT ALL" else "SELECT ALL",
+                                color = Color(0xFFC084FC),
                                 fontFamily = NdotFont,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
-
-                        val allSelected = filteredItems.isNotEmpty() && selectedIds.containsAll(filteredItems.map { it.id })
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(Color(0xFF1A1C25))
-                                .border(1.dp, Color(0xFF2C2F40), RoundedCornerShape(6.dp))
-                                .clickable {
-                                    if (allSelected) {
-                                        val filteredSet = filteredItems.map { it.id }.toSet()
-                                        selectedIds.removeAll { it in filteredSet }
-                                    } else {
-                                        filteredItems.forEach {
-                                            if (it.id !in selectedIds) selectedIds.add(it.id)
-                                        }
-                                    }
-                                }
-                                .padding(horizontal = 8.dp, vertical = 3.dp)
-                        ) {
-                            Text(
-                                text = if (allSelected) "DESELECT ALL" else "SELECT ALL (${filteredItems.size})",
-                                color = Color(0xFFC084FC),
-                                fontFamily = NdotFont,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFF1E202B))
-                            .border(1.dp, Color(0xFF333647), RoundedCornerShape(8.dp))
-                            .clickable {
-                                isSelectionMode = false
-                                selectedIds.clear()
-                            }
-                            .padding(horizontal = 10.dp, vertical = 5.dp)
-                    ) {
-                        Text(
-                            text = "DONE",
-                            color = Color.White,
-                            fontFamily = NdotFont,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold
-                        )
                     }
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -1245,18 +1241,18 @@ private fun UnmatchedContentBottomSheet(
                     }
 
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         if (unmatchedItems.isNotEmpty()) {
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(8.dp))
-                                    .background(Color(0xFF221735))
-                                    .border(1.dp, Color(0xFF7C3AED), RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF1E212E))
+                                    .border(1.dp, Color(0xFF33384B), RoundedCornerShape(8.dp))
                                     .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                         isSelectionMode = true
-                                        selectedIds.clear()
                                     }
                                     .padding(horizontal = 8.dp, vertical = 5.dp)
                             ) {
@@ -1272,9 +1268,9 @@ private fun UnmatchedContentBottomSheet(
                                     )
                                     Text(
                                         text = "SELECT",
-                                        color = Color(0xFFE9D5FF),
+                                        color = Color(0xFFC084FC),
                                         fontFamily = NdotFont,
-                                        fontSize = 9.5.sp,
+                                        fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
@@ -1400,187 +1396,217 @@ private fun UnmatchedContentBottomSheet(
                 }
             }
 
-            // List of Unmatched Items + Bottom Batch Bar
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-            ) {
-                if (filteredItems.isEmpty()) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
+            // List of Unmatched Items
+            if (filteredItems.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.DoneAll,
-                                contentDescription = null,
-                                tint = Color(0xFF10B981),
-                                modifier = Modifier.size(36.dp)
-                            )
-                            Text(
-                                text = if (searchQuery.isNotBlank()) "No files match '$searchQuery'" else "No unmatched items found!",
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        contentPadding = PaddingValues(bottom = if (isSelectionMode) 76.dp else 30.dp)
-                    ) {
-                        items(filteredItems, key = { it.id }) { item ->
-                            UnmatchedItemCard(
-                                item = item,
-                                port = port,
-                                isSelectionMode = isSelectionMode,
-                                isSelected = item.id in selectedIds,
-                                onToggleSelect = {
-                                    if (item.id in selectedIds) {
-                                        selectedIds.remove(item.id)
-                                    } else {
-                                        selectedIds.add(item.id)
-                                    }
-                                },
-                                onLongClick = {
-                                    if (!isSelectionMode) {
-                                        isSelectionMode = true
-                                        selectedIds.clear()
-                                        selectedIds.add(item.id)
-                                    }
-                                },
-                                onMatch = { batchMatchTargetItems = listOf(item) },
-                                onPlay = {
-                                    val safeFileName = try {
-                                        java.net.URLEncoder.encode(item.fileName, "UTF-8")
-                                    } catch (_: Exception) { "video.mp4" }
-                                    val streamUrl = "http://127.0.0.1:$port/stream/video/${item.channelId}/${item.messageId}/$safeFileName"
-                                    val playIntent = Intent(Intent.ACTION_VIEW).apply {
-                                        setDataAndType(Uri.parse(streamUrl), "video/*")
-                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    }
-                                    try {
-                                        context.startActivity(Intent.createChooser(playIntent, "Play video with"))
-                                    } catch (e: Exception) {
-                                        Toast.makeText(context, "No video player installed", Toast.LENGTH_SHORT).show()
-                                    }
-                                },
-                                onCopyLink = {
-                                    val safeFileName = try {
-                                        java.net.URLEncoder.encode(item.fileName, "UTF-8")
-                                    } catch (_: Exception) { "video.mp4" }
-                                    val streamUrl = "http://127.0.0.1:$port/stream/video/${item.channelId}/${item.messageId}/$safeFileName"
-                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    clipboard.setPrimaryClip(ClipData.newPlainText("Stream Link", streamUrl))
-                                    Toast.makeText(context, "✓ Stream URL copied", Toast.LENGTH_SHORT).show()
-                                },
-                                onAddAnyway = {
-                                    viewModel.addUnmatchedToLibraryAnyway(item.id)
-                                },
-                                onDismiss = {
-                                    viewModel.removeUnmatched(item.id)
-                                }
-                            )
-                        }
+                        Icon(
+                            imageVector = Icons.Default.DoneAll,
+                            contentDescription = null,
+                            tint = Color(0xFF10B981),
+                            modifier = Modifier.size(36.dp)
+                        )
+                        Text(
+                            text = if (searchQuery.isNotBlank()) "No files match '$searchQuery'" else "No unmatched items found!",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
+                        )
                     }
                 }
-
-                // Floating Bottom Action Bar in Selection Mode
-                AnimatedVisibility(
-                    visible = isSelectionMode,
-                    enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
-                    exit = fadeOut() + slideOutVertically(targetOffsetY = { it }),
-                    modifier = Modifier.align(Alignment.BottomCenter)
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(bottom = if (isSelectionMode) 8.dp else 30.dp)
                 ) {
-                    Surface(
+                    items(filteredItems, key = { it.id }) { item ->
+                        val isSelected = item.id in selectedItemIds
+                        UnmatchedItemCard(
+                            item = item,
+                            port = port,
+                            isSelectionMode = isSelectionMode,
+                            isSelected = isSelected,
+                            onToggleSelect = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                if (isSelected) {
+                                    selectedItemIds.remove(item.id)
+                                } else {
+                                    if (!isSelectionMode) isSelectionMode = true
+                                    selectedItemIds.add(item.id)
+                                }
+                            },
+                            onMatch = { matchTargetItems = listOf(item) },
+                            onPlay = {
+                                val safeFileName = try {
+                                    java.net.URLEncoder.encode(item.fileName, "UTF-8")
+                                } catch (_: Exception) { "video.mp4" }
+                                val streamUrl = "http://127.0.0.1:$port/stream/video/${item.channelId}/${item.messageId}/$safeFileName"
+                                val playIntent = Intent(Intent.ACTION_VIEW).apply {
+                                    setDataAndType(Uri.parse(streamUrl), "video/*")
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                try {
+                                    context.startActivity(Intent.createChooser(playIntent, "Play video with"))
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "No video player installed", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            onCopyLink = {
+                                val safeFileName = try {
+                                    java.net.URLEncoder.encode(item.fileName, "UTF-8")
+                                } catch (_: Exception) { "video.mp4" }
+                                val streamUrl = "http://127.0.0.1:$port/stream/video/${item.channelId}/${item.messageId}/$safeFileName"
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("Stream Link", streamUrl))
+                                Toast.makeText(context, "✓ Stream URL copied", Toast.LENGTH_SHORT).show()
+                            },
+                            onAddAnyway = {
+                                viewModel.addUnmatchedToLibraryAnyway(item.id)
+                            },
+                            onDismiss = {
+                                viewModel.removeUnmatched(item.id)
+                            }
+                        )
+                    }
+                }
+            }
+
+            // Multi-Select Floating Action Bar
+            AnimatedVisibility(
+                visible = isSelectionMode,
+                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color(0xFF181A24),
+                    border = BorderStroke(1.dp, Color(0xFF2E3244)),
+                    shadowElevation = 8.dp
+                ) {
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 10.dp),
-                        color = Color(0xFF141620),
-                        shape = RoundedCornerShape(14.dp),
-                        border = BorderStroke(1.dp, Color(0xFF2C2F40)),
-                        shadowElevation = 10.dp
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                        // 1. Match Metadata
+                        Button(
+                            onClick = {
+                                val selectedList = unmatchedItems.filter { it.id in selectedItemIds }
+                                if (selectedList.isNotEmpty()) {
+                                    matchTargetItems = selectedList
+                                }
+                            },
+                            enabled = selectedItemIds.isNotEmpty(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF7C3AED),
+                                disabledContainerColor = Color(0xFF28103F)
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                         ) {
-                            val count = selectedIds.size
-                            val enabled = count > 0
-
-                            // Match Metadata Button
-                            Button(
-                                onClick = {
-                                    val targets = unmatchedItems.filter { it.id in selectedIds }
-                                    if (targets.isNotEmpty()) {
-                                        batchMatchTargetItems = targets
-                                    }
-                                },
-                                enabled = enabled,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(38.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFF7C3AED),
-                                    disabledContainerColor = Color(0xFF26213A),
-                                    disabledContentColor = Color(0xFF64748B)
-                                ),
-                                shape = RoundedCornerShape(10.dp),
-                                contentPadding = PaddingValues(horizontal = 6.dp)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Search,
                                     contentDescription = null,
-                                    modifier = Modifier.size(14.dp),
-                                    tint = if (enabled) Color.White else Color(0xFF64748B)
+                                    tint = if (selectedItemIds.isNotEmpty()) Color.White else Color(0xFF8860B8),
+                                    modifier = Modifier.size(14.dp)
                                 )
-                                Spacer(modifier = Modifier.width(5.dp))
                                 Text(
-                                    text = if (count > 0) "MATCH ($count)" else "MATCH",
-                                    fontSize = 11.sp,
+                                    text = "MATCH (${selectedItemIds.size})",
                                     fontFamily = NdotFont,
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (enabled) Color.White else Color(0xFF64748B)
+                                    color = if (selectedItemIds.isNotEmpty()) Color.White else Color(0xFF8860B8)
                                 )
                             }
+                        }
 
-                            // Delete Selected Button
-                            OutlinedButton(
-                                onClick = { showBatchDeleteConfirm = true },
-                                enabled = enabled,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(38.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    contentColor = Color(0xFFEF4444),
-                                    disabledContentColor = Color(0xFF552A2A)
-                                ),
-                                border = BorderStroke(1.dp, if (enabled) Color(0xFF7F1D1D) else Color(0xFF3A1B1B)),
-                                shape = RoundedCornerShape(10.dp),
-                                contentPadding = PaddingValues(horizontal = 6.dp)
+                        // 2. Add Anyway to Library
+                        Button(
+                            onClick = {
+                                val ids = selectedItemIds.toList()
+                                viewModel.addMultipleUnmatchedToLibraryAnyway(ids)
+                                isSelectionMode = false
+                                selectedItemIds.clear()
+                            },
+                            enabled = selectedItemIds.isNotEmpty(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF0F291E),
+                                disabledContainerColor = Color(0xFF131A17)
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, if (selectedItemIds.isNotEmpty()) Color(0xFF059669) else Color(0xFF1A3326)),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.DeleteOutline,
+                                    imageVector = Icons.Default.Add,
                                     contentDescription = null,
-                                    modifier = Modifier.size(14.dp),
-                                    tint = if (enabled) Color(0xFFEF4444) else Color(0xFF552A2A)
+                                    tint = if (selectedItemIds.isNotEmpty()) Color(0xFF34D399) else Color(0xFF4B6E5B),
+                                    modifier = Modifier.size(14.dp)
                                 )
-                                Spacer(modifier = Modifier.width(5.dp))
                                 Text(
-                                    text = if (count > 0) "DELETE ($count)" else "DELETE",
-                                    fontSize = 11.sp,
+                                    text = "ADD (${selectedItemIds.size})",
                                     fontFamily = NdotFont,
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (enabled) Color(0xFFEF4444) else Color(0xFF552A2A)
+                                    color = if (selectedItemIds.isNotEmpty()) Color(0xFF34D399) else Color(0xFF4B6E5B)
+                                )
+                            }
+                        }
+
+                        // 3. Delete / Dismiss
+                        Button(
+                            onClick = {
+                                showDeleteSelectedConfirm = true
+                            },
+                            enabled = selectedItemIds.isNotEmpty(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF2E1515),
+                                disabledContainerColor = Color(0xFF1F1212)
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, if (selectedItemIds.isNotEmpty()) Color(0xFFDC2626) else Color(0xFF3B1F1F)),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Delete,
+                                    contentDescription = null,
+                                    tint = if (selectedItemIds.isNotEmpty()) Color(0xFFEF4444) else Color(0xFF7A3E3E),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = "DELETE (${selectedItemIds.size})",
+                                    fontFamily = NdotFont,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (selectedItemIds.isNotEmpty()) Color(0xFFEF4444) else Color(0xFF7A3E3E)
                                 )
                             }
                         }
@@ -1590,7 +1616,7 @@ private fun UnmatchedContentBottomSheet(
         }
     }
 
-    // Clear Confirmation Dialog
+    // Clear All Confirmation Dialog
     if (showClearConfirm) {
         AlertDialog(
             onDismissRequest = { showClearConfirm = false },
@@ -1629,13 +1655,13 @@ private fun UnmatchedContentBottomSheet(
         )
     }
 
-    // Batch Delete Confirmation Dialog
-    if (showBatchDeleteConfirm && selectedIds.isNotEmpty()) {
+    // Delete Selected Confirmation Dialog
+    if (showDeleteSelectedConfirm) {
         AlertDialog(
-            onDismissRequest = { showBatchDeleteConfirm = false },
+            onDismissRequest = { showDeleteSelectedConfirm = false },
             title = {
                 Text(
-                    text = "Delete ${selectedIds.size} Items?",
+                    text = "Delete ${selectedItemIds.size} Selected Items?",
                     color = Color.White,
                     fontFamily = FontFamily.Default,
                     fontWeight = FontWeight.Bold,
@@ -1644,7 +1670,7 @@ private fun UnmatchedContentBottomSheet(
             },
             text = {
                 Text(
-                    text = "This will remove the selected ${selectedIds.size} records from the unmatched list. It will not delete files from Telegram.",
+                    text = "This will remove ${selectedItemIds.size} items from the unmatched list. It will not delete anything from Telegram.",
                     color = Color(0xFF94A3B8),
                     fontSize = 13.sp
                 )
@@ -1652,17 +1678,18 @@ private fun UnmatchedContentBottomSheet(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        showBatchDeleteConfirm = false
-                        viewModel.removeUnmatchedItems(selectedIds.toList())
-                        selectedIds.clear()
+                        val ids = selectedItemIds.toList()
+                        showDeleteSelectedConfirm = false
                         isSelectionMode = false
+                        selectedItemIds.clear()
+                        viewModel.removeMultipleUnmatched(ids)
                     }
                 ) {
-                    Text("Delete (${selectedIds.size})", color = Color(0xFFEF4444), fontWeight = FontWeight.Bold)
+                    Text("Delete Selected", color = Color(0xFFEF4444), fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showBatchDeleteConfirm = false }) {
+                TextButton(onClick = { showDeleteSelectedConfirm = false }) {
                     Text("Cancel", color = Color(0xFF94A3B8))
                 }
             },
@@ -1670,16 +1697,17 @@ private fun UnmatchedContentBottomSheet(
         )
     }
 
-    // Manual Candidate Match Dialog (supports single item or multi-item batch)
-    if (batchMatchTargetItems.isNotEmpty()) {
+    // Manual Candidate Match Dialog (supports both single & multi-match)
+    if (matchTargetItems.isNotEmpty()) {
         ManualMatchCandidateDialog(
-            targetItems = batchMatchTargetItems,
+            unmatchedItems = matchTargetItems,
             viewModel = viewModel,
-            onDismiss = { batchMatchTargetItems = emptyList() },
-            onMatchSuccess = {
-                selectedIds.clear()
-                isSelectionMode = false
-                batchMatchTargetItems = emptyList()
+            onDismiss = {
+                matchTargetItems = emptyList()
+                if (isSelectionMode) {
+                    isSelectionMode = false
+                    selectedItemIds.clear()
+                }
             }
         )
     }
@@ -1687,6 +1715,7 @@ private fun UnmatchedContentBottomSheet(
 
 /**
  * Detailed Unmatched Card showing raw file name, scan timestamp, size, reason, and interactive actions.
+ * Supports multi-selection mode with visual checkmarks and long-press selection trigger.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -1696,23 +1725,28 @@ private fun UnmatchedItemCard(
     isSelectionMode: Boolean = false,
     isSelected: Boolean = false,
     onToggleSelect: () -> Unit = {},
-    onLongClick: () -> Unit = {},
     onMatch: () -> Unit,
     onPlay: () -> Unit,
     onCopyLink: () -> Unit,
     onAddAnyway: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    val cardBg = if (isSelected) Color(0xFF1E1530) else Color(0xFF151720)
-    val cardBorder = if (isSelected) Color(0xFFA855F7) else Color(0xFF262938)
-    val borderWidth = if (isSelected) 1.5.dp else 1.dp
+    val cardBorderColor = when {
+        isSelected -> Color(0xFFA855F7)
+        isSelectionMode -> Color(0xFF2E3244)
+        else -> Color(0xFF262938)
+    }
+    val cardBgColor = when {
+        isSelected -> Color(0xFF1C182B)
+        else -> Color(0xFF151720)
+    }
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
-            .background(cardBg)
-            .border(borderWidth, cardBorder, RoundedCornerShape(14.dp))
+            .background(cardBgColor)
+            .border(if (isSelected) 1.5.dp else 1.dp, cardBorderColor, RoundedCornerShape(14.dp))
             .combinedClickable(
                 onClick = {
                     if (isSelectionMode) {
@@ -1720,13 +1754,13 @@ private fun UnmatchedItemCard(
                     }
                 },
                 onLongClick = {
-                    onLongClick()
+                    onToggleSelect()
                 }
             )
             .padding(14.dp)
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            // Filename, Selection Checkbox, and Dismiss Button
+            // Filename and Dismiss / Selection Button
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1734,7 +1768,7 @@ private fun UnmatchedItemCard(
             ) {
                 Row(
                     modifier = Modifier.weight(1f),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.Top
                 ) {
                     if (isSelectionMode) {
@@ -1746,18 +1780,17 @@ private fun UnmatchedItemCard(
                                 .background(if (isSelected) Color(0xFFA855F7) else Color(0xFF1E212E))
                                 .border(
                                     1.5.dp,
-                                    if (isSelected) Color(0xFFA855F7) else Color(0xFF474E69),
+                                    if (isSelected) Color(0xFFC084FC) else Color(0xFF474C65),
                                     CircleShape
-                                )
-                                .clickable { onToggleSelect() },
+                                ),
                             contentAlignment = Alignment.Center
                         ) {
                             if (isSelected) {
                                 Icon(
                                     imageVector = Icons.Default.Check,
-                                    contentDescription = "Selected",
+                                    contentDescription = null,
                                     tint = Color.White,
-                                    modifier = Modifier.size(13.dp)
+                                    modifier = Modifier.size(12.dp)
                                 )
                             }
                         }
@@ -1894,128 +1927,151 @@ private fun UnmatchedItemCard(
 
             HorizontalDivider(color = Color(0xFF202330), thickness = 1.dp)
 
-            // Action Buttons Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (item.isVideo) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        // Search & Match Button
-                        Box(
-                            modifier = Modifier
-                                .height(26.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(Color(0xFF28103F))
-                                .border(1.dp, Color(0xFF7C3AED), RoundedCornerShape(6.dp))
-                                .clickable { onMatch() }
-                                .padding(horizontal = 8.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            // Action Buttons Row (shown in normal mode)
+            if (!isSelectionMode) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (item.isVideo) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            // Search & Match Button
+                            Box(
+                                modifier = Modifier
+                                    .height(26.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(0xFF28103F))
+                                    .border(1.dp, Color(0xFF7C3AED), RoundedCornerShape(6.dp))
+                                    .clickable { onMatch() }
+                                    .padding(horizontal = 8.dp),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Search,
-                                    contentDescription = null,
-                                    tint = Color(0xFFC084FC),
-                                    modifier = Modifier.size(11.dp)
-                                )
-                                Text(
-                                    text = "MATCH METADATA",
-                                    color = Color(0xFFC084FC),
-                                    fontFamily = NdotFont,
-                                    fontSize = 8.5.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Search,
+                                        contentDescription = null,
+                                        tint = Color(0xFFC084FC),
+                                        modifier = Modifier.size(11.dp)
+                                    )
+                                    Text(
+                                        text = "MATCH METADATA",
+                                        color = Color(0xFFC084FC),
+                                        fontFamily = NdotFont,
+                                        fontSize = 8.5.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+
+                            // Play Button
+                            Box(
+                                modifier = Modifier
+                                    .height(26.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(0xFF0F291E))
+                                    .border(1.dp, Color(0xFF059669), RoundedCornerShape(6.dp))
+                                    .clickable { onPlay() }
+                                    .padding(horizontal = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.PlayArrow,
+                                        contentDescription = null,
+                                        tint = Color(0xFF34D399),
+                                        modifier = Modifier.size(11.dp)
+                                    )
+                                    Text(
+                                        text = "PLAY",
+                                        color = Color(0xFF34D399),
+                                        fontFamily = NdotFont,
+                                        fontSize = 8.5.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+
+                            // Copy Stream Link
+                            Box(
+                                modifier = Modifier
+                                    .height(26.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(0xFF1E212E))
+                                    .border(1.dp, Color(0xFF33384B), RoundedCornerShape(6.dp))
+                                    .clickable { onCopyLink() }
+                                    .padding(horizontal = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ContentCopy,
+                                        contentDescription = null,
+                                        tint = Color(0xFF94A3B8),
+                                        modifier = Modifier.size(10.dp)
+                                    )
+                                    Text(
+                                        text = "LINK",
+                                        color = Color(0xFF94A3B8),
+                                        fontFamily = NdotFont,
+                                        fontSize = 8.5.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
 
-                        // Play Button
-                        Box(
-                            modifier = Modifier
-                                .height(26.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(Color(0xFF0F291E))
-                                .border(1.dp, Color(0xFF059669), RoundedCornerShape(6.dp))
-                                .clickable { onPlay() }
-                                .padding(horizontal = 8.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.PlayArrow,
-                                    contentDescription = null,
-                                    tint = Color(0xFF34D399),
-                                    modifier = Modifier.size(11.dp)
-                                )
-                                Text(
-                                    text = "PLAY",
-                                    color = Color(0xFF34D399),
-                                    fontFamily = NdotFont,
-                                    fontSize = 8.5.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
+                        // Add anyway
+                        Text(
+                            text = "+ Add to library",
+                            color = Color(0xFF94A3B8),
+                            fontSize = 10.5.sp,
+                            modifier = Modifier.clickable { onAddAnyway() }
+                        )
+                    } else {
+                        Text(
+                            text = "Non-video document file skipped",
+                            color = Color(0xFF64748B),
+                            fontSize = 11.sp
+                        )
 
-                        // Copy Stream Link
-                        Box(
-                            modifier = Modifier
-                                .height(26.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(Color(0xFF1E212E))
-                                .border(1.dp, Color(0xFF33384B), RoundedCornerShape(6.dp))
-                                .clickable { onCopyLink() }
-                                .padding(horizontal = 8.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.ContentCopy,
-                                    contentDescription = null,
-                                    tint = Color(0xFF94A3B8),
-                                    modifier = Modifier.size(10.dp)
-                                )
-                                Text(
-                                    text = "LINK",
-                                    color = Color(0xFF94A3B8),
-                                    fontFamily = NdotFont,
-                                    fontSize = 8.5.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
+                        Text(
+                            text = "Dismiss",
+                            color = Color(0xFFEF4444),
+                            fontSize = 11.sp,
+                            modifier = Modifier.clickable { onDismiss() }
+                        )
                     }
-
-                    // Add anyway
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
-                        text = "+ Add to library",
-                        color = Color(0xFF94A3B8),
-                        fontSize = 10.5.sp,
-                        modifier = Modifier.clickable { onAddAnyway() }
-                    )
-                } else {
-                    Text(
-                        text = "Non-video document file skipped",
-                        color = Color(0xFF64748B),
-                        fontSize = 11.sp
-                    )
-
-                    Text(
-                        text = "Dismiss",
-                        color = Color(0xFFEF4444),
+                        text = if (isSelected) "✓ Selected" else "Tap card to select",
+                        color = if (isSelected) Color(0xFFC084FC) else Color(0xFF64748B),
                         fontSize = 11.sp,
-                        modifier = Modifier.clickable { onDismiss() }
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
                     )
+
+                    if (item.isVideo && isSelected) {
+                        Text(
+                            text = "Ready to match/delete",
+                            color = Color(0xFF94A3B8),
+                            fontSize = 10.5.sp
+                        )
+                    }
                 }
             }
         }
@@ -2027,33 +2083,28 @@ private fun UnmatchedItemCard(
  */
 @Composable
 private fun ManualMatchCandidateDialog(
-    targetItems: List<UnmatchedItem>,
+    unmatchedItems: List<UnmatchedItem>,
     viewModel: MainAppViewModel,
-    onDismiss: () -> Unit,
-    onMatchSuccess: () -> Unit = {}
+    onDismiss: () -> Unit
 ) {
-    if (targetItems.isEmpty()) return
-
-    val firstItem = targetItems.first()
-    val isBatch = targetItems.size > 1
-
-    val initialTitle = remember(targetItems) {
-        val parsed = firstItem.parsedMediaItem?.title?.trim()
+    val firstUnmatched = unmatchedItems.firstOrNull() ?: return
+    val initialTitle = remember(unmatchedItems) {
+        val parsed = firstUnmatched.parsedMediaItem?.title?.trim()
         if (!parsed.isNullOrBlank() && !parsed.contains(".mkv", ignoreCase = true) && !parsed.contains(".mp4", ignoreCase = true)) {
             parsed
         } else {
-            firstItem.fileName.replace(Regex("(?i)\\.(mkv|mp4|avi|ts|webm)$"), "")
+            firstUnmatched.fileName.replace(Regex("(?i)\\.(mkv|mp4|avi|ts|webm)$"), "")
         }
     }
-    val initialType = remember(targetItems) {
-        val parsed = firstItem.parsedMediaItem
-        val ch = viewModel.channels.value.find { it.id == firstItem.channelId }
+    val initialType = remember(unmatchedItems) {
+        val parsed = firstUnmatched.parsedMediaItem
+        val ch = viewModel.channels.value.find { it.id == firstUnmatched.channelId }
         when {
             ch?.isAnime == true -> "anime"
             parsed?.kitsuId != null -> "anime"
             parsed?.type == "series" -> "series"
             parsed?.season != null || parsed?.episode != null -> "series"
-            isBatch -> "series"
+            unmatchedItems.size > 1 -> "series"
             else -> "movie"
         }
     }
@@ -2091,7 +2142,7 @@ private fun ManualMatchCandidateDialog(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = if (isBatch) "Match Metadata (${targetItems.size} Items)" else "Match Media Metadata",
+                    text = if (unmatchedItems.size > 1) "Match ${unmatchedItems.size} Items" else "Match Media Metadata",
                     color = Color.White,
                     fontFamily = NdotFont,
                     fontSize = 17.sp,
@@ -2117,8 +2168,8 @@ private fun ManualMatchCandidateDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
-                    text = if (isBatch) {
-                        "Matching ${targetItems.size} files simultaneously. Select the target show/anime; season & episode numbers will map automatically."
+                    text = if (unmatchedItems.size > 1) {
+                        "Search show or movie. The chosen metadata & episode guide will be applied to all ${unmatchedItems.size} selected items."
                     } else {
                         "Search by title, IMDb ID (e.g. tt14173636), TMDB ID (e.g. 109445), or Kitsu Anime ID to match metadata."
                     },
@@ -2146,7 +2197,6 @@ private fun ManualMatchCandidateDialog(
                             value = searchTitle,
                             onValueChange = { searchTitle = it },
                             singleLine = true,
-                            enabled = !isMatching,
                             textStyle = TextStyle(
                                 color = Color.White,
                                 fontSize = 13.sp,
@@ -2161,7 +2211,7 @@ private fun ManualMatchCandidateDialog(
                                 modifier = Modifier.size(16.dp),
                                 strokeWidth = 2.dp
                             )
-                        } else if (searchTitle.isNotBlank() && !isMatching) {
+                        } else if (searchTitle.isNotBlank()) {
                             Icon(
                                 imageVector = Icons.Default.Close,
                                 contentDescription = "Clear",
@@ -2199,7 +2249,7 @@ private fun ManualMatchCandidateDialog(
                                         if (isSel) Color(0xFFC084FC) else Color(0xFF2C2F3C),
                                         RoundedCornerShape(8.dp)
                                     )
-                                    .clickable(enabled = !isMatching) { searchType = typeKey }
+                                    .clickable { searchType = typeKey }
                                     .padding(horizontal = 10.dp, vertical = 5.dp)
                             ) {
                                 Text(
@@ -2256,29 +2306,16 @@ private fun ManualMatchCandidateDialog(
                                     .border(1.dp, Color(0xFF282A36), RoundedCornerShape(12.dp))
                                     .clickable(enabled = !isMatching) {
                                         isMatching = true
-                                        if (isBatch) {
-                                            viewModel.matchUnmatchedItemsBatch(
-                                                unmatchedIds = targetItems.map { it.id },
-                                                matchedMeta = cand,
-                                                targetType = searchType
-                                            ) { success ->
+                                        if (unmatchedItems.size == 1) {
+                                            viewModel.matchUnmatchedItem(firstUnmatched.id, cand, targetType = searchType) { success ->
                                                 isMatching = false
-                                                if (success) {
-                                                    onMatchSuccess()
-                                                    onDismiss()
-                                                }
+                                                if (success) onDismiss()
                                             }
                                         } else {
-                                            viewModel.matchUnmatchedItem(
-                                                unmatchedId = firstItem.id,
-                                                matchedMeta = cand,
-                                                targetType = searchType
-                                            ) { success ->
+                                            val ids = unmatchedItems.map { it.id }
+                                            viewModel.matchMultipleUnmatchedItems(ids, cand, targetType = searchType) { count ->
                                                 isMatching = false
-                                                if (success) {
-                                                    onMatchSuccess()
-                                                    onDismiss()
-                                                }
+                                                if (count > 0) onDismiss()
                                             }
                                         }
                                     }
@@ -2370,7 +2407,7 @@ private fun ManualMatchCandidateDialog(
                                             )
                                         } else {
                                             Text(
-                                                text = if (isBatch) "APPLY ALL" else "MATCH",
+                                                text = if (unmatchedItems.size > 1) "APPLY ALL" else "MATCH",
                                                 color = Color(0xFFD8B4FE),
                                                 fontFamily = NdotFont,
                                                 fontSize = 9.5.sp,
@@ -2395,4 +2432,3 @@ private fun ManualMatchCandidateDialog(
         }
     )
 }
-

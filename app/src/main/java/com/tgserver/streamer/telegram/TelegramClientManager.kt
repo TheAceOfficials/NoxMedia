@@ -1853,6 +1853,39 @@ class TelegramClientManager(private val context: Context) {
         return item
     }
 
+    fun addUnmatchedToLibraryAnywayBatch(unmatchedIds: Collection<String>): List<MediaItem> {
+        val addedList = mutableListOf<MediaItem>()
+        val touchedChannels = mutableSetOf<Long>()
+        for (unmatchedId in unmatchedIds) {
+            val unmatched = unmatchedIndex[unmatchedId] ?: continue
+            val item = unmatched.parsedMediaItem ?: MediaItem(
+                id = "tg_${unmatched.channelId}_${unmatched.messageId}",
+                channelId = unmatched.channelId,
+                messageId = unmatched.messageId,
+                title = unmatched.fileName,
+                type = "movie",
+                sizeBytes = unmatched.sizeBytes,
+                mimeType = unmatched.mimeType,
+                fileName = unmatched.fileName
+            )
+            mediaIndex[item.id] = item
+            unmatchedIndex.remove(unmatchedId)
+            touchedChannels.add(item.channelId)
+            addedList.add(item)
+        }
+        if (addedList.isNotEmpty()) {
+            saveMediaIndex()
+            saveUnmatchedIndex()
+            for (chId in touchedChannels) {
+                channels[chId]?.let { ch ->
+                    channels[chId] = ch.copy(videoCount = mediaIndex.values.count { it.channelId == chId })
+                }
+            }
+            saveChannels()
+        }
+        return addedList
+    }
+
     // --- Library & Stream Operations ---
 
     fun getAllMedia(): List<MediaItem> = mediaIndex.values.toList()
