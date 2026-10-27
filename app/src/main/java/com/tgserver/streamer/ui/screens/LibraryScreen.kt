@@ -87,6 +87,7 @@ import com.tgserver.streamer.theme.*
 import com.tgserver.streamer.ui.MainAppViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -596,9 +597,9 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
 
     LaunchedEffect(gridState, filteredGroups.size) {
         snapshotFlow {
-            val lastVisible = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            lastVisible to filteredGroups.size
-        }.collect { (lastVisible, totalSize) ->
+            gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+        }.collect { lastVisible ->
+            val totalSize = filteredGroups.size
             if (totalSize > 0 && lastVisible >= visibleItemCount - 8 && visibleItemCount < totalSize) {
                 visibleItemCount = (visibleItemCount + pageSize).coerceAtMost(totalSize)
             }

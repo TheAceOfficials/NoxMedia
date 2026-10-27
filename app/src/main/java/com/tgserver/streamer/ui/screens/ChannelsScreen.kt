@@ -1118,7 +1118,7 @@ private fun UnmatchedContentBottomSheet(
         containerColor = Color(0xFF101117),
         tonalElevation = 0.dp,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-        windowInsets = WindowInsets.navigationBars,
+        windowInsets = WindowInsets(0.dp, 0.dp, 0.dp, 0.dp),
         dragHandle = {
             Box(
                 modifier = Modifier
@@ -1134,6 +1134,7 @@ private fun UnmatchedContentBottomSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .fillMaxHeight(0.9f)
+                .navigationBarsPadding()
                 .padding(horizontal = 20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
