@@ -571,10 +571,10 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         unmatchedIds: List<String>,
         matchedMeta: EnrichedMetadata,
         targetType: String? = null,
-        onDone: (Int) -> Unit = {}
+        onDone: (Boolean) -> Unit = {}
     ) {
         if (unmatchedIds.isEmpty()) {
-            onDone(0)
+            onDone(false)
             return
         }
         viewModelScope.launch {
@@ -596,10 +596,10 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             if (matched.isNotEmpty()) {
                 triggerAutoCloudBackupDebounced(4000L)
                 Toast.makeText(getApplication(), "✓ Matched ${matched.size} items to ${finalMeta.title}", Toast.LENGTH_SHORT).show()
-                onDone(matched.size)
+                onDone(true)
             } else {
                 Toast.makeText(getApplication(), "Could not match selected items", Toast.LENGTH_SHORT).show()
-                onDone(0)
+                onDone(false)
             }
         }
     }
