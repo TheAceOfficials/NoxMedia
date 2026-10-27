@@ -1118,7 +1118,7 @@ private fun UnmatchedContentBottomSheet(
         containerColor = Color(0xFF101117),
         tonalElevation = 0.dp,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-        windowInsets = WindowInsets(0.dp, 0.dp, 0.dp, 0.dp),
+        windowInsets = WindowInsets(0, 0, 0, 0),
         dragHandle = {
             Box(
                 modifier = Modifier
