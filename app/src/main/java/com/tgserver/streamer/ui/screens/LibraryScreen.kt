@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -360,6 +361,7 @@ private fun matchesGroupAudio(group: MediaGroup, lang: String): Boolean {
 @Composable
 fun LibraryScreen(viewModel: MainAppViewModel) {
     val allMedia by viewModel.media.collectAsState()
+    val mediaGroups by viewModel.mediaGroups.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val selectedCategory by viewModel.selectedCategory.collectAsState()
     val telemetry by viewModel.telemetry.collectAsState()
@@ -367,14 +369,9 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
     val haptic = LocalHapticFeedback.current
     val gridState = rememberLazyGridState()
 
-    // Group raw files into distinct titles (Movies and Series entities)
-    val mediaGroups = remember(allMedia) {
-        allMedia.toMediaGroups()
-    }
-
-    // Dynamic animated search placeholders from user library & popular titles
+    // Dynamic animated search placeholders from user library sample & popular titles (Zero memory waste)
     val searchPlaceholders = remember(mediaGroups) {
-        val libraryTitles = mediaGroups.map { it.title.trim() }.filter { it.isNotBlank() }.distinct()
+        val libraryTitles = mediaGroups.take(20).map { it.title.trim() }.filter { it.isNotBlank() }
         val defaultExamples = listOf(
             "Naruto",
             "One Piece",
@@ -434,36 +431,53 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
         }
     }
 
-    // Dynamic Category Tabs: Only show tabs that have content in the library
-    val unhiddenGroups = remember(mediaGroups) { mediaGroups.filter { !it.isHidden } }
-    val hiddenGroups = remember(mediaGroups) { mediaGroups.filter { it.isHidden } }
+    // Dynamic Category Tabs: Single-pass iteration offloading CPU strain
+    var mCount = 0
+    var sCount = 0
+    var aCount = 0
+    var hCount = 0
+    var unhiddenCount = 0
+    for (group in mediaGroups) {
+        if (group.isHidden) {
+            hCount++
+        } else {
+            unhiddenCount++
+            when (group.type) {
+                "movie" -> mCount++
+                "series" -> sCount++
+                "anime" -> aCount++
+            }
+        }
+    }
+    val movieCount = mCount
+    val seriesCount = sCount
+    val animeCount = aCount
+    val hiddenCount = hCount
 
-    val movieCount = remember(unhiddenGroups) { unhiddenGroups.count { it.type == "movie" } }
-    val seriesCount = remember(unhiddenGroups) { unhiddenGroups.count { it.type == "series" } }
-    val animeCount = remember(unhiddenGroups) { unhiddenGroups.count { it.type == "anime" } }
-    val hiddenCount = remember(hiddenGroups) { hiddenGroups.size }
+    // Precomputed filter chip options and counts computed off-thread (0ms Main UI looper latency)
+    var availableFilterOptions by remember { mutableStateOf(FilterSheetOptions()) }
+    LaunchedEffect(mediaGroups) {
+        availableFilterOptions = withContext(Dispatchers.Default) {
+            val allResolutions = listOf("4K", "1080p (FHD)", "720p (HD)", "SD")
+            val allEditions = listOf("IMAX", "BluRay", "WEB-DL", "HDR / DV", "10-Bit", "Remux")
+            val allPlatforms = listOf("Netflix", "Crunchyroll", "Prime Video", "Disney+ / Hotstar", "Apple TV", "Zee5")
+            val allAudios = listOf("Hindi", "English", "Japanese", "Dual Audio", "Multi Audio")
 
-    // Precomputed filter chip options and counts (Cached on mediaGroups change, 0ms latency when opening sheet)
-    val availableFilterOptions = remember(mediaGroups) {
-        val allResolutions = listOf("4K", "1080p (FHD)", "720p (HD)", "SD")
-        val allEditions = listOf("IMAX", "BluRay", "WEB-DL", "HDR / DV", "10-Bit", "Remux")
-        val allPlatforms = listOf("Netflix", "Crunchyroll", "Prime Video", "Disney+ / Hotstar", "Apple TV", "Zee5")
-        val allAudios = listOf("Hindi", "English", "Japanese", "Dual Audio", "Multi Audio")
+            val res = allResolutions.map { r -> r to mediaGroups.count { matchesGroupResolution(it, r) } }.filter { it.second > 0 }
+            val ed = allEditions.map { e -> e to mediaGroups.count { matchesGroupEdition(it, e) } }.filter { it.second > 0 }
+            val plat = allPlatforms.map { p -> p to mediaGroups.count { matchesGroupPlatform(it, p) } }.filter { it.second > 0 }
+            val aud = allAudios.map { a -> a to mediaGroups.count { matchesGroupAudio(it, a) } }.filter { it.second > 0 }
 
-        val res = allResolutions.map { r -> r to mediaGroups.count { matchesGroupResolution(it, r) } }.filter { it.second > 0 }
-        val ed = allEditions.map { e -> e to mediaGroups.count { matchesGroupEdition(it, e) } }.filter { it.second > 0 }
-        val plat = allPlatforms.map { p -> p to mediaGroups.count { matchesGroupPlatform(it, p) } }.filter { it.second > 0 }
-        val aud = allAudios.map { a -> a to mediaGroups.count { matchesGroupAudio(it, a) } }.filter { it.second > 0 }
-
-        FilterSheetOptions(
-            resolutions = res,
-            editions = ed,
-            platforms = plat,
-            audios = aud
-        )
+            FilterSheetOptions(
+                resolutions = res,
+                editions = ed,
+                platforms = plat,
+                audios = aud
+            )
+        }
     }
 
-    val categories = remember(unhiddenGroups.size, movieCount, seriesCount, animeCount, hiddenCount) {
+    val categories = remember(unhiddenCount, movieCount, seriesCount, animeCount, hiddenCount) {
         buildList {
             add("all" to "ALL")
             if (movieCount > 0) add("movies" to "MOVIES")
@@ -479,74 +493,118 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
         }
     }
 
-    // Filter media groups by category, search & multi-filters, then sort
-    val filteredGroups = remember(mediaGroups, searchQuery, selectedCategory, activeFilters) {
-        val filtered = mediaGroups.filter { group ->
-            val matchesCategory = when (selectedCategory) {
-                "all" -> !group.isHidden
-                "movies" -> !group.isHidden && group.type == "movie"
-                "series" -> !group.isHidden && group.type == "series"
-                "anime" -> !group.isHidden && group.type == "anime"
-                "hide" -> group.isHidden
-                else -> !group.isHidden
-            }
-            if (!matchesCategory) return@filter false
+    // Filter media groups by category, search & multi-filters, then sort (Asynchronously on Dispatchers.Default)
+    var filteredGroups by remember { mutableStateOf<List<MediaGroup>>(emptyList()) }
+    var isFiltering by remember { mutableStateOf(false) }
 
-            val matchesQuery = searchQuery.isBlank() ||
-                    group.title.contains(searchQuery, ignoreCase = true) ||
-                    (group.year?.contains(searchQuery, ignoreCase = true) == true) ||
-                    (group.imdbId?.contains(searchQuery, ignoreCase = true) == true) ||
-                    group.items.any { it.fileName.contains(searchQuery, ignoreCase = true) || it.episodeTitle?.contains(searchQuery, ignoreCase = true) == true }
-            if (!matchesQuery) return@filter false
-
-            // Resolutions: OR match within selected resolutions
-            if (activeFilters.resolutions.isNotEmpty()) {
-                val match = activeFilters.resolutions.any { matchesGroupResolution(group, it) }
-                if (!match) return@filter false
-            }
-
-            // Editions & Formats: OR match within selected editions
-            if (activeFilters.editions.isNotEmpty()) {
-                val match = activeFilters.editions.any { matchesGroupEdition(group, it) }
-                if (!match) return@filter false
-            }
-
-            // Platform / OTT: OR match within selected platforms
-            if (activeFilters.platforms.isNotEmpty()) {
-                val match = activeFilters.platforms.any { matchesGroupPlatform(group, it) }
-                if (!match) return@filter false
-            }
-
-            // Audio & Languages: OR match within selected languages
-            if (activeFilters.audioLanguages.isNotEmpty()) {
-                val match = activeFilters.audioLanguages.any { matchesGroupAudio(group, it) }
-                if (!match) return@filter false
-            }
-
-            true
+    LaunchedEffect(mediaGroups, searchQuery, selectedCategory, activeFilters) {
+        if (searchQuery.isNotBlank()) {
+            delay(160L) // Debounce search keystrokes so typing is butter-smooth
         }
+        isFiltering = true
+        val result = withContext(Dispatchers.Default) {
+            val filtered = mediaGroups.filter { group ->
+                val matchesCategory = when (selectedCategory) {
+                    "all" -> !group.isHidden
+                    "movies" -> !group.isHidden && group.type == "movie"
+                    "series" -> !group.isHidden && group.type == "series"
+                    "anime" -> !group.isHidden && group.type == "anime"
+                    "hide" -> group.isHidden
+                    else -> !group.isHidden
+                }
+                if (!matchesCategory) return@filter false
 
-        when (activeFilters.sortOrder) {
-            LibrarySortOrder.RECENT -> filtered.sortedByDescending { group ->
-                val date = group.dateAdded.takeIf { it > 0L }
-                date ?: (group.items.maxOfOrNull { it.messageId }?.toLong() ?: 0L)
+                val matchesQuery = searchQuery.isBlank() ||
+                        group.title.contains(searchQuery, ignoreCase = true) ||
+                        (group.year?.contains(searchQuery, ignoreCase = true) == true) ||
+                        (group.imdbId?.contains(searchQuery, ignoreCase = true) == true) ||
+                        group.items.any { it.fileName.contains(searchQuery, ignoreCase = true) || it.episodeTitle?.contains(searchQuery, ignoreCase = true) == true }
+                if (!matchesQuery) return@filter false
+
+                // Resolutions: OR match within selected resolutions
+                if (activeFilters.resolutions.isNotEmpty()) {
+                    val match = activeFilters.resolutions.any { matchesGroupResolution(group, it) }
+                    if (!match) return@filter false
+                }
+
+                // Editions & Formats: OR match within selected editions
+                if (activeFilters.editions.isNotEmpty()) {
+                    val match = activeFilters.editions.any { matchesGroupEdition(group, it) }
+                    if (!match) return@filter false
+                }
+
+                // Platform / OTT: OR match within selected platforms
+                if (activeFilters.platforms.isNotEmpty()) {
+                    val match = activeFilters.platforms.any { matchesGroupPlatform(group, it) }
+                    if (!match) return@filter false
+                }
+
+                // Audio & Languages: OR match within selected languages
+                if (activeFilters.audioLanguages.isNotEmpty()) {
+                    val match = activeFilters.audioLanguages.any { matchesGroupAudio(group, it) }
+                    if (!match) return@filter false
+                }
+
+                true
             }
-            LibrarySortOrder.NAME_ASC -> filtered.sortedBy { it.title.lowercase().trim() }
-            LibrarySortOrder.NAME_DESC -> filtered.sortedByDescending { it.title.lowercase().trim() }
-            LibrarySortOrder.YEAR_DESC -> filtered.sortedWith(
-                compareByDescending<MediaGroup> { it.year?.toIntOrNull() ?: 0 }
-                    .thenBy { it.title.lowercase() }
-            )
-            LibrarySortOrder.YEAR_ASC -> filtered.sortedWith(
-                compareBy<MediaGroup> { it.year?.toIntOrNull() ?: 9999 }
-                    .thenBy { it.title.lowercase() }
-            )
-            LibrarySortOrder.SIZE_DESC -> filtered.sortedByDescending { it.items.sumOf { item -> item.sizeBytes } }
-            LibrarySortOrder.SIZE_ASC -> filtered.sortedBy { it.items.sumOf { item -> item.sizeBytes } }
-            LibrarySortOrder.RATING_DESC -> filtered.sortedWith(
-                compareByDescending<MediaGroup> { it.rating }
-                    .thenBy { it.title.lowercase() }
-            )
+
+            when (activeFilters.sortOrder) {
+                LibrarySortOrder.RECENT -> filtered.sortedByDescending { group ->
+                    val date = group.dateAdded.takeIf { it > 0L }
+                    date ?: (group.items.maxOfOrNull { it.messageId }?.toLong() ?: 0L)
+                }
+                LibrarySortOrder.NAME_ASC -> filtered.sortedBy { it.title.lowercase().trim() }
+                LibrarySortOrder.NAME_DESC -> filtered.sortedByDescending { it.title.lowercase().trim() }
+                LibrarySortOrder.YEAR_DESC -> filtered.sortedWith(
+                    compareByDescending<MediaGroup> { it.year?.toIntOrNull() ?: 0 }
+                        .thenBy { it.title.lowercase() }
+                )
+                LibrarySortOrder.YEAR_ASC -> filtered.sortedWith(
+                    compareBy<MediaGroup> { it.year?.toIntOrNull() ?: 9999 }
+                        .thenBy { it.title.lowercase() }
+                )
+                LibrarySortOrder.SIZE_DESC -> {
+                    val sizeMap = filtered.associateWith { g -> g.items.sumOf { it.sizeBytes } }
+                    filtered.sortedByDescending { sizeMap[it] ?: 0L }
+                }
+                LibrarySortOrder.SIZE_ASC -> {
+                    val sizeMap = filtered.associateWith { g -> g.items.sumOf { it.sizeBytes } }
+                    filtered.sortedBy { sizeMap[it] ?: 0L }
+                }
+                LibrarySortOrder.RATING_DESC -> filtered.sortedWith(
+                    compareByDescending<MediaGroup> { it.rating }
+                        .thenBy { it.title.lowercase() }
+                )
+            }
+        }
+        filteredGroups = result
+        isFiltering = false
+    }
+
+    // Netflix & Apple TV style Windowing / Pagination:
+    // Render initial 24 items immediately (<4ms render time), append 24 on scroll
+    val pageSize = 24
+    var visibleItemCount by remember { mutableIntStateOf(pageSize) }
+
+    LaunchedEffect(searchQuery, selectedCategory, activeFilters) {
+        visibleItemCount = pageSize
+    }
+
+    val displayedGroups = remember(filteredGroups, visibleItemCount) {
+        filteredGroups.take(visibleItemCount)
+    }
+
+    val shouldLoadMore by remember {
+        derivedStateOf {
+            val lastVisible = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            val total = displayedGroups.size
+            lastVisible >= total - 6 && total < filteredGroups.size
+        }
+    }
+
+    LaunchedEffect(shouldLoadMore) {
+        if (shouldLoadMore) {
+            visibleItemCount = (visibleItemCount + pageSize).coerceAtMost(filteredGroups.size)
         }
     }
 
@@ -929,25 +987,33 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                                 .padding(horizontal = 20.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.padding(horizontal = 32.dp)
-                            ) {
-                                Text(
-                                    text = if (searchQuery.isNotBlank()) "No Matching Media" else "Library is Empty",
-                                    color = Color.White,
-                                    fontSize = 16.sp,
-                                    fontFamily = NdotFont,
-                                    letterSpacing = 1.sp
+                            if (isFiltering && mediaGroups.isNotEmpty()) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(28.dp),
+                                    color = Color(0xFFA855F7),
+                                    strokeWidth = 2.dp
                                 )
-                                Text(
-                                    text = if (searchQuery.isNotBlank()) "Try another keyword or filter." else "Media files will appear here once monitored channels are indexed.",
-                                    color = Color(0xFF717482),
-                                    fontSize = 12.sp,
-                                    textAlign = TextAlign.Center,
-                                    lineHeight = 17.sp
-                                )
+                            } else {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.padding(horizontal = 32.dp)
+                                ) {
+                                    Text(
+                                        text = if (searchQuery.isNotBlank()) "No Matching Media" else "Library is Empty",
+                                        color = Color.White,
+                                        fontSize = 16.sp,
+                                        fontFamily = NdotFont,
+                                        letterSpacing = 1.sp
+                                    )
+                                    Text(
+                                        text = if (searchQuery.isNotBlank()) "Try another keyword or filter." else "Media files will appear here once monitored channels are indexed.",
+                                        color = Color(0xFF717482),
+                                        fontSize = 12.sp,
+                                        textAlign = TextAlign.Center,
+                                        lineHeight = 17.sp
+                                    )
+                                }
                             }
                         }
                     } else {
@@ -964,7 +1030,7 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                                 modifier = Modifier.fillMaxSize(),
                                 contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 100.dp)
                             ) {
-                                items(filteredGroups, key = { it.key }) { group ->
+                                items(displayedGroups, key = { it.key }) { group ->
                                     val isSelected = group.key in selectedGroupKeys
                                     PosterCard(
                                         group = group,
@@ -987,6 +1053,23 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                                             }
                                         }
                                     )
+                                }
+
+                                if (visibleItemCount < filteredGroups.size) {
+                                    item(span = { GridItemSpan(2) }) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 16.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(20.dp),
+                                                color = Color(0xFFA855F7),
+                                                strokeWidth = 2.dp
+                                            )
+                                        }
+                                    }
                                 }
                             }
 

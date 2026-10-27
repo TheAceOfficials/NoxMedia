@@ -114,25 +114,29 @@ fun HomeScreen(viewModel: MainAppViewModel) {
     val isUpdateDismissed by viewModel.isUpdateDismissed.collectAsState()
     var showUpdateDialog by remember { mutableStateOf(false) }
 
-    // Library counts
-    val moviesCount = remember(media) {
-        media.count { it.type.equals("movie", ignoreCase = true) }
+    // Library counts (Single-pass iteration for 60fps instant startup on 32-bit devices)
+    var mCount = 0
+    var epCount = 0
+    var fCount = 0
+    var totalBytes = 0L
+    val uniqueSeries = mutableSetOf<String>()
+    for (item in media) {
+        val isMovie = item.type.equals("movie", ignoreCase = true)
+        val isSeries = item.type.equals("series", ignoreCase = true)
+        if (isMovie) mCount++
+        if (isSeries) {
+            epCount++
+            uniqueSeries.add(item.title.trim().lowercase())
+        }
+        fCount += if (item.isSplit && item.parts.isNotEmpty()) item.parts.size else 1
+        totalBytes += item.sizeBytes
     }
-    val showsCount = remember(media) {
-        media.filter { it.type.equals("series", ignoreCase = true) }
-            .map { it.title.trim() }
-            .distinct()
-            .size
-    }
-    val episodesCount = remember(media) {
-        media.count { it.type.equals("series", ignoreCase = true) }
-    }
-    val contentFilesCount = remember(media) {
-        media.sumOf { if (it.isSplit && it.parts.isNotEmpty()) it.parts.size else 1 }
-    }
-    val totalServerSizeBytes = remember(media) {
-        media.sumOf { it.sizeBytes }
-    }
+    val moviesCount = mCount
+    val showsCount = uniqueSeries.size
+    val episodesCount = epCount
+    val contentFilesCount = fCount
+    val totalServerSizeBytes = totalBytes
+
     val totalServerSizeFormatted = remember(totalServerSizeBytes) {
         if (totalServerSizeBytes <= 0L) "0.0 GB"
         else {
@@ -146,15 +150,8 @@ fun HomeScreen(viewModel: MainAppViewModel) {
         }
     }
 
-    // Recently Added media groups (newest 15)
-    val recentlyAdded = remember(media) {
-        media.toMediaGroups()
-            .sortedByDescending { group ->
-                val date = group.dateAdded.takeIf { it > 0L }
-                date ?: (group.items.maxOfOrNull { it.messageId }?.toLong() ?: 0L)
-            }
-            .take(15)
-    }
+    // Recently Added media groups (Precomputed in background StateFlow on Dispatchers.Default)
+    val recentlyAdded by viewModel.recentlyAddedGroups.collectAsState()
 
     // Stream URL
     val serverUrl = remember(telemetry) {

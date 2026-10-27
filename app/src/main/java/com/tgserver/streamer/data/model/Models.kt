@@ -188,6 +188,11 @@ enum class LibrarySortOrder(val label: String) {
     RATING_DESC("Rating (Highest)")
 }
 
+// Precompiled regexes to eliminate regex compilation overhead in large media lists (10k-100k items)
+private val SPLIT_PART_CLEAN_REGEX = Regex("""[\s._-]*(?:part|pt)[\s._-]*\d+.*""", RegexOption.IGNORE_CASE)
+private val SPLIT_EXT_CLEAN_REGEX = Regex("""\.(mkv|mp4|avi|webm|ts|m4v)(\.\d{2,4})?$""", RegexOption.IGNORE_CASE)
+private val SPLIT_PART_DETECT_REGEX = Regex("""(?i)(?:part|pt|\.\d{2,4})""")
+
 fun List<MediaItem>.toMediaGroups(): List<MediaGroup> {
     val allMedia = this
     val splitItems = allMedia.filter { it.isSplit }
@@ -197,8 +202,8 @@ fun List<MediaItem>.toMediaGroups(): List<MediaGroup> {
         val splitPartMsgIds = splitItems.flatMap { it.parts.map { p -> p.messageId } }.toSet()
         val splitCleanBases = splitItems.map {
             it.fileName.lowercase()
-                .replace(Regex("""[\s._-]*(?:part|pt)[\s._-]*\d+.*""", RegexOption.IGNORE_CASE), "")
-                .replace(Regex("""\.(mkv|mp4|avi|webm|ts|m4v)(\.\d{2,4})?$""", RegexOption.IGNORE_CASE), "")
+                .replace(SPLIT_PART_CLEAN_REGEX, "")
+                .replace(SPLIT_EXT_CLEAN_REGEX, "")
                 .trim()
         }.toSet()
 
@@ -206,11 +211,11 @@ fun List<MediaItem>.toMediaGroups(): List<MediaGroup> {
             if (item.isSplit) return@filter true
             if (splitPartMsgIds.contains(item.messageId)) return@filter false
             val itemClean = item.fileName.lowercase()
-                .replace(Regex("""[\s._-]*(?:part|pt)[\s._-]*\d+.*""", RegexOption.IGNORE_CASE), "")
-                .replace(Regex("""\.(mkv|mp4|avi|webm|ts|m4v)(\.\d{2,4})?$""", RegexOption.IGNORE_CASE), "")
+                .replace(SPLIT_PART_CLEAN_REGEX, "")
+                .replace(SPLIT_EXT_CLEAN_REGEX, "")
                 .trim()
             if (splitCleanBases.contains(itemClean)) {
-                if (item.fileName.contains(Regex("""(?i)(?:part|pt|\.\d{2,4})"""))) {
+                if (item.fileName.contains(SPLIT_PART_DETECT_REGEX)) {
                     return@filter false
                 }
                 val splitMatch = splitItems.find {

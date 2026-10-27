@@ -23,11 +23,16 @@ import com.tgserver.streamer.metadata.MetadataEnricher
 import com.tgserver.streamer.server.LocalHttpServer
 import com.tgserver.streamer.service.StreamerForegroundService
 import com.tgserver.streamer.telegram.TelegramClientManager
+import com.tgserver.streamer.data.model.toMediaGroups
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -63,6 +68,13 @@ data class TelemetryUiState(
     val cpuPercent: Double = 0.0
 )
 
+data class CloudSyncProgress(
+    val isSyncing: Boolean = false,
+    val message: String = "",
+    val isSuccess: Boolean? = null,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
 class MainAppViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Tracks whether splash screen has completed during this app session (survives rotation) */
@@ -81,6 +93,44 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     val session: StateFlow<AuthSession> = tgClient.sessionState
     val channels: StateFlow<List<ChannelInfo>> = tgClient.channelsState
     val media: StateFlow<List<MediaItem>> = tgClient.mediaState
+
+    /**
+     * Enterprise / Netflix scale: Grouping raw media into distinct movie/series titles
+     * is precalculated completely on Dispatchers.Default (background thread pool).
+     * The Main UI looper / composition thread is NEVER blocked!
+     */
+    val mediaGroups: StateFlow<List<MediaGroup>> = media
+        .map { list ->
+            withContext(Dispatchers.Default) {
+                list.toMediaGroups()
+            }
+        }
+        .flowOn(Dispatchers.Default)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = emptyList()
+        )
+
+    /**
+     * Precomputed 15 newest titles for HomeScreen, eliminating heavy sorting on startup.
+     */
+    val recentlyAddedGroups: StateFlow<List<MediaGroup>> = mediaGroups
+        .map { groups ->
+            withContext(Dispatchers.Default) {
+                groups.sortedByDescending { group ->
+                    val date = group.dateAdded.takeIf { it > 0L }
+                    date ?: (group.items.maxOfOrNull { it.messageId }?.toLong() ?: 0L)
+                }.take(15)
+            }
+        }
+        .flowOn(Dispatchers.Default)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = emptyList()
+        )
+
     val unmatchedMedia: StateFlow<List<com.tgserver.streamer.data.model.UnmatchedItem>> = tgClient.unmatchedState
     val scanProgress: StateFlow<Map<Long, com.tgserver.streamer.data.model.ScanProgressState>> = tgClient.scanProgress
     val apiCredentials: StateFlow<Pair<Int, String>> = tgClient.apiCredentials
@@ -145,6 +195,31 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
 
     private val _isRestoringFromCloud = MutableStateFlow(false)
     val isRestoringFromCloud: StateFlow<Boolean> = _isRestoringFromCloud.asStateFlow()
+
+    /** Non-blocking floating status indicator for True Cloud Sync */
+    private val _cloudSyncProgress = MutableStateFlow<CloudSyncProgress?>(null)
+    val cloudSyncProgress: StateFlow<CloudSyncProgress?> = _cloudSyncProgress.asStateFlow()
+    private var syncDismissJob: Job? = null
+
+    fun dismissCloudSyncProgress() {
+        syncDismissJob?.cancel()
+        _cloudSyncProgress.value = null
+    }
+
+    private fun postSyncProgress(isSyncing: Boolean, message: String, isSuccess: Boolean? = null, autoDismissMs: Long? = null) {
+        _cloudSyncProgress.value = CloudSyncProgress(
+            isSyncing = isSyncing,
+            message = message,
+            isSuccess = isSuccess
+        )
+        syncDismissJob?.cancel()
+        if (autoDismissMs != null && autoDismissMs > 0) {
+            syncDismissJob = viewModelScope.launch {
+                delay(autoDismissMs)
+                _cloudSyncProgress.value = null
+            }
+        }
+    }
 
     val syncDeviceId: String by lazy {
         var id = prefs.getString("device_sync_id", null)
@@ -1565,6 +1640,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                 onDone?.invoke(false, "Telegram not connected")
                 return@launch
             }
+            postSyncProgress(isSyncing = true, message = "Checking True Cloud Sync...")
             if (!silent) {
                 withContext(Dispatchers.Main) { _isRestoringFromCloud.value = true }
             }
@@ -1578,8 +1654,10 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                 val json = res.getOrNull()
                 if (json.isNullOrBlank()) {
                     if (silent) {
+                        postSyncProgress(isSyncing = false, isSuccess = true, message = "Cloud library up to date", autoDismissMs = 2500L)
                         onDone?.invoke(true, "Already up to date")
                     } else {
+                        postSyncProgress(isSyncing = false, isSuccess = false, message = "No backup found in Telegram $target", autoDismissMs = 2500L)
                         withContext(Dispatchers.Main) {
                             Toast.makeText(getApplication(), "No new backup found in Telegram $target", Toast.LENGTH_SHORT).show()
                         }
@@ -1596,10 +1674,12 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
 
                     // If silent check and uploaded by this device or older than last sync, skip immediately
                     if (silent && (originDeviceId == syncDeviceId || (lastSyncTs > 0L && backupTs <= lastSyncTs))) {
+                        postSyncProgress(isSyncing = false, isSuccess = true, message = "Cloud library up to date", autoDismissMs = 2500L)
                         onDone?.invoke(true, "Already up to date")
                         return@launch
                     }
 
+                    postSyncProgress(isSyncing = true, message = "Syncing cloud media & channels...")
                     val (settingsRestored, channelsRestored, mediaRestored) = importBackupJsonDetailed(json)
                     if (settingsRestored || channelsRestored > 0 || mediaRestored > 0) {
                         if (backupTs > 0L) {
@@ -1612,6 +1692,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                         if (channelsRestored > 0) summary.add("$channelsRestored channels")
                         if (settingsRestored) summary.add("settings")
                         val msg = "✓ Synced from $origin: ${summary.joinToString(", ")}"
+                        postSyncProgress(isSyncing = false, isSuccess = true, message = msg, autoDismissMs = 3500L)
                         withContext(Dispatchers.Main) {
                             Toast.makeText(getApplication(), msg, Toast.LENGTH_LONG).show()
                         }
@@ -1620,6 +1701,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                         }
                         onDone?.invoke(true, null)
                     } else {
+                        postSyncProgress(isSyncing = false, isSuccess = true, message = "Cloud library up to date", autoDismissMs = 2500L)
                         if (!silent) {
                             withContext(Dispatchers.Main) {
                                 Toast.makeText(getApplication(), "Backup file did not contain new data", Toast.LENGTH_SHORT).show()
@@ -1629,6 +1711,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                     }
                 } catch (e: Exception) {
                     Log.e("MainAppViewModel", "Error parsing backup: ${e.message}", e)
+                    postSyncProgress(isSyncing = false, isSuccess = false, message = "Sync error: ${e.message}", autoDismissMs = 3000L)
                     if (!silent) {
                         withContext(Dispatchers.Main) {
                             Toast.makeText(getApplication(), "Error parsing backup: ${e.message}", Toast.LENGTH_LONG).show()
@@ -1638,6 +1721,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                 }
             } else {
                 val err = res.exceptionOrNull()?.message ?: "Fetch failed"
+                postSyncProgress(isSyncing = false, isSuccess = false, message = "Sync failed: $err", autoDismissMs = 3000L)
                 if (!silent) {
                     withContext(Dispatchers.Main) {
                         Toast.makeText(getApplication(), "Failed to fetch backup: $err", Toast.LENGTH_LONG).show()

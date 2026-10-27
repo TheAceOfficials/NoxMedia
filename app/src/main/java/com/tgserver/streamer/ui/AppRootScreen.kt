@@ -17,19 +17,25 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VideoLibrary
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.VideoLibrary
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -85,6 +91,7 @@ fun AppRootScreen(viewModel: MainAppViewModel) {
     val selectedTab by viewModel.selectedTab.collectAsState()
     val apiCreds by viewModel.apiCredentials.collectAsState()
     val session by viewModel.session.collectAsState()
+    val syncProgress by viewModel.cloudSyncProgress.collectAsState()
     val haptic = LocalHapticFeedback.current
 
     val hasCredentials = apiCreds.first > 0 && apiCreds.second.isNotBlank()
@@ -180,6 +187,105 @@ fun AppRootScreen(viewModel: MainAppViewModel) {
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
                     .padding(bottom = 16.dp)
+            )
+
+            // Enterprise Floating True Cloud Sync Notification Pill (Non-blocking, top-aligned)
+            AnimatedVisibility(
+                visible = syncProgress != null,
+                enter = slideInVertically(
+                    initialOffsetY = { -it },
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)
+                ) + fadeIn(animationSpec = tween(200)),
+                exit = slideOutVertically(
+                    targetOffsetY = { -it },
+                    animationSpec = tween(180, easing = FastOutSlowInEasing)
+                ) + fadeOut(animationSpec = tween(150)),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = 10.dp, start = 16.dp, end = 16.dp)
+            ) {
+                syncProgress?.let { progress ->
+                    FloatingCloudSyncPill(
+                        progress = progress,
+                        onDismiss = { viewModel.dismissCloudSyncProgress() }
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Sleek, modern floating pill indicating background True Cloud Sync progress.
+ * Non-blocking, glassmorphic dark surface with status-matched glowing borders.
+ */
+@Composable
+private fun FloatingCloudSyncPill(
+    progress: CloudSyncProgress,
+    onDismiss: () -> Unit
+) {
+    val haptic = LocalHapticFeedback.current
+    val borderColor = when (progress.isSuccess) {
+        true -> Color(0xFF2ECC71).copy(alpha = 0.55f)
+        false -> Color(0xFFE74C3C).copy(alpha = 0.55f)
+        null -> Color(0xFFA855F7).copy(alpha = 0.55f)
+    }
+
+    Box(
+        modifier = Modifier
+            .shadow(16.dp, RoundedCornerShape(24.dp), spotColor = Color.Black)
+            .clip(RoundedCornerShape(24.dp))
+            .background(Color(0xF0121217))
+            .border(BorderStroke(1.dp, borderColor), RoundedCornerShape(24.dp))
+            .clickable {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onDismiss()
+            }
+            .padding(horizontal = 14.dp, vertical = 9.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            if (progress.isSyncing) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(13.dp),
+                    color = Color(0xFFA855F7),
+                    strokeWidth = 2.dp
+                )
+            } else if (progress.isSuccess == true) {
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = null,
+                    tint = Color(0xFF2ECC71),
+                    modifier = Modifier.size(15.dp)
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = Color(0xFFE74C3C),
+                    modifier = Modifier.size(15.dp)
+                )
+            }
+
+            Text(
+                text = progress.message,
+                color = Color.White,
+                fontSize = 12.sp,
+                fontFamily = NdotFont,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = "Dismiss",
+                tint = Color(0xFF717482),
+                modifier = Modifier
+                    .size(13.dp)
+                    .clickable { onDismiss() }
             )
         }
     }
