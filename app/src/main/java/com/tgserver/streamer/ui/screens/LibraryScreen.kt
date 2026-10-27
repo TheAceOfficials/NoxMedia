@@ -87,7 +87,6 @@ import com.tgserver.streamer.theme.*
 import com.tgserver.streamer.ui.MainAppViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -582,29 +581,6 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
         isFiltering = false
     }
 
-    // Netflix & Apple TV style Windowing / Pagination:
-    // Render initial 36 items immediately (<4ms render time), append 36 on scroll
-    val pageSize = 36
-    var visibleItemCount by remember { mutableIntStateOf(pageSize) }
-
-    LaunchedEffect(searchQuery, selectedCategory, activeFilters, sortOrder) {
-        visibleItemCount = pageSize
-    }
-
-    val displayedGroups = remember(filteredGroups, visibleItemCount) {
-        filteredGroups.take(visibleItemCount)
-    }
-
-    LaunchedEffect(gridState, filteredGroups.size) {
-        snapshotFlow {
-            gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-        }.collect { lastVisible ->
-            val totalSize = filteredGroups.size
-            if (totalSize > 0 && lastVisible >= visibleItemCount - 8 && visibleItemCount < totalSize) {
-                visibleItemCount = (visibleItemCount + pageSize).coerceAtMost(totalSize)
-            }
-        }
-    }
 
     // Scroll to top only when user switches category or types a new search query
     LaunchedEffect(selectedCategory, searchQuery) {
@@ -1028,7 +1004,7 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                                 modifier = Modifier.fillMaxSize(),
                                 contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 100.dp)
                             ) {
-                                items(displayedGroups, key = { it.key }) { group ->
+                                items(filteredGroups, key = { it.key }) { group ->
                                     val isSelected = group.key in selectedGroupKeys
                                     PosterCard(
                                         group = group,
@@ -1051,23 +1027,6 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                                             }
                                         }
                                     )
-                                }
-
-                                if (visibleItemCount < filteredGroups.size) {
-                                    item(span = { GridItemSpan(maxLineSpan) }) {
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(vertical = 16.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            CircularProgressIndicator(
-                                                modifier = Modifier.size(20.dp),
-                                                color = Color(0xFFA855F7),
-                                                strokeWidth = 2.dp
-                                            )
-                                        }
-                                    }
                                 }
                             }
 
