@@ -1252,13 +1252,16 @@ class JellyfinBridge(
     }
 
     private fun resolveMediaStreams(item: MediaItem): Pair<Map<String, Any?>, Map<String, Any?>> {
-        val fn = (item.fileName + " " + item.quality + " " + item.qualityBadge).lowercase()
+        val cleanFn = item.fileName.lowercase()
+            .replace(Regex("""(?i)4khdhub(\.com|\.org|\.net|\.in)?"""), "")
+            .replace(Regex("""(?i)[\s._\-\(\[]*momstealer[\s._\-\)\]]*"""), "")
+        val fn = (cleanFn + " " + item.quality + " " + item.qualityBadge).lowercase()
 
         // 1. Resolution
-        val is4K = fn.contains("2160") || fn.contains("4k") || fn.contains("uhd")
-        val is1080 = fn.contains("1080") || fn.contains("fhd")
-        val is720 = fn.contains("720") || fn.contains("hd")
-        val is480 = fn.contains("480") || fn.contains("sd")
+        val is4K = fn.contains("2160") || Regex("""\b(4k|uhd)\b""").containsMatchIn(fn)
+        val is1080 = fn.contains("1080") || Regex("""\b(fhd)\b""").containsMatchIn(fn)
+        val is720 = fn.contains("720") || Regex("""\b(hd)\b""").containsMatchIn(fn)
+        val is480 = fn.contains("480") || Regex("""\b(sd)\b""").containsMatchIn(fn)
 
         val width = when {
             is4K -> 3840

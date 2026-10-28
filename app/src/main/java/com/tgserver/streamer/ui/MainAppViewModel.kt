@@ -279,7 +279,11 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         StreamerForegroundService.activeConfig = loaded
         tgClient.setBackupJsonProvider { exportBackupJson() }
         viewModelScope.launch(Dispatchers.IO) {
-            tgClient.cleanupSplitDuplicates()
+            if (loaded.skipExactDuplicates) {
+                tgClient.cleanupExactDuplicates()
+            } else {
+                tgClient.cleanupSplitDuplicates()
+            }
             if (session.value.isLoggedIn) {
                 tgClient.refreshUserProfile()
                 if (loaded.cloudSyncLibrary || loaded.autoBackupEnabled) {
@@ -1091,12 +1095,19 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         StreamerForegroundService.activeConfig = cfg
         tgClient.updateStreamCacheConfig(cfg.diskCacheMb, cfg.bufferPipelineMb)
         if (cfg.skipExactDuplicates) {
+            tgClient.cleanupExactDuplicates()
+        } else {
             tgClient.cleanupSplitDuplicates()
         }
     }
 
     fun cleanupDuplicates(): Int {
-        return tgClient.cleanupSplitDuplicates()
+        val cfg = _config.value
+        return if (cfg.skipExactDuplicates) {
+            tgClient.cleanupExactDuplicates()
+        } else {
+            tgClient.cleanupSplitDuplicates()
+        }
     }
 
     suspend fun verifyAndSaveMetadataKeys(tmdb: String, tvdb: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {

@@ -514,6 +514,56 @@ class TelegramClientManager(private val context: Context) {
         return removedCount
     }
 
+    fun cleanupExactDuplicates(): Int {
+        var removedCount = cleanupSplitDuplicates()
+
+        val grouped = mediaIndex.values.filter { !it.isSplit && it.sizeBytes > 0L }.groupBy { item ->
+            val isSeries = item.type == "series" || item.type == "anime" || (item.season != null && item.episode != null)
+            val s = item.season ?: 0
+            val e = item.episode ?: 0
+            val cleanTitle = item.title.trim().lowercase()
+            val mediaId = item.imdbId ?: item.tmdbId?.toString() ?: cleanTitle
+            if (isSeries) "${mediaId}_s${s}_e${e}_${item.sizeBytes}" else "${mediaId}_${item.sizeBytes}"
+        }
+
+        val toRemove = mutableListOf<MediaItem>()
+        for ((_, items) in grouped) {
+            if (items.size > 1) {
+                // Sort so cleanest/best file comes first
+                val sorted = items.sortedWith(
+                    compareBy<MediaItem> { item ->
+                        val fn = item.fileName.lowercase()
+                        if (fn.contains("momstealer") || fn.contains("vegamovies") || fn.contains("katmovie") || fn.contains("4khdhub")) 1 else 0
+                    }.thenByDescending {
+                        (if (!it.episodeThumbnailUrl.isNullOrBlank()) 100 else 0) +
+                        (if (!it.episodeTitle.isNullOrBlank()) 50 else 0) +
+                        (if (!it.overview.isNullOrBlank()) 20 else 0)
+                    }.thenBy {
+                        it.fileName.length
+                    }.thenBy {
+                        it.messageId
+                    }
+                )
+                // First is preserved, others are removed
+                val keep = sorted.first()
+                val dups = sorted.drop(1)
+                for (d in dups) {
+                    StreamLog.i(TAG, "Removing exact duplicate file: ${d.fileName} (${d.sizeBytes} bytes) in favor of ${keep.fileName}")
+                    toRemove.add(d)
+                }
+            }
+        }
+
+        if (toRemove.isNotEmpty()) {
+            toRemove.forEach { mediaIndex.remove(it.id) }
+            removedCount += toRemove.size
+            saveMediaIndex()
+            _mediaState.value = mediaIndex.values.toList()
+        }
+
+        return removedCount
+    }
+
     fun scanDuplicates(): Int {
         var count = 0
         // 1. Redundant raw part slices of existing split items
@@ -2212,6 +2262,31 @@ class TelegramClientManager(private val context: Context) {
                                 item.kitsuId != null
 
                         if (isMatched) {
+                            val shouldSkipExact = com.tgserver.streamer.service.StreamerForegroundService.activeConfig.skipExactDuplicates
+                            if (shouldSkipExact && item.sizeBytes > 0L) {
+                                val isSeries = item.type == "series" || item.type == "anime" || (item.season != null && item.episode != null)
+                                val s = item.season ?: 0
+                                val e = item.episode ?: 0
+                                val cleanTitle = item.title.trim().lowercase()
+                                val mediaId = item.imdbId ?: item.tmdbId?.toString() ?: cleanTitle
+                                val existingDup = mediaIndex.values.find { ex ->
+                                    ex.sizeBytes == item.sizeBytes && (
+                                        if (isSeries) {
+                                            val exSeries = ex.type == "series" || ex.type == "anime" || (ex.season != null && ex.episode != null)
+                                            val exMediaId = ex.imdbId ?: ex.tmdbId?.toString() ?: ex.title.trim().lowercase()
+                                            exSeries && (ex.season ?: 0) == s && (ex.episode ?: 0) == e &&
+                                            (exMediaId == mediaId || ex.title.equals(item.title, true) || ex.channelId == item.channelId)
+                                        } else {
+                                            val exMediaId = ex.imdbId ?: ex.tmdbId?.toString() ?: ex.title.trim().lowercase()
+                                            exMediaId == mediaId || ex.title.equals(item.title, true)
+                                        }
+                                    )
+                                }
+                                if (existingDup != null) {
+                                    StreamLog.i(TAG, "Skipping exact duplicate during scan: ${item.fileName} (${item.sizeBytes} bytes) matches ${existingDup.fileName}")
+                                    continue
+                                }
+                            }
                             mediaIndex[item.id] = item
                             unmatchedIndex.remove("unmatched_${item.channelId}_${item.messageId}")
                             newItemsAdded++

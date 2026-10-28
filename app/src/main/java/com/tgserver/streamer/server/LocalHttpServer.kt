@@ -314,7 +314,20 @@ class LocalHttpServer(
                 )
             }.sortedWith(compareBy({ it.season ?: 1 }, { it.episode ?: 1 }))
 
-            episodes.map { ep ->
+            // Deduplicate episodes so each (season, episode) appears EXACTLY ONCE in Stremio meta.videos
+            val distinctEpisodes = episodes.groupBy { (it.season ?: 1) to (it.episode ?: 1) }
+                .map { (_, epList) ->
+                    // Choose best representative episode item (with thumbnail, episodeTitle, or largest file)
+                    epList.maxByOrNull { ep ->
+                        (if (!ep.episodeThumbnailUrl.isNullOrBlank()) 1000 else 0) +
+                        (if (!ep.episodeTitle.isNullOrBlank()) 100 else 0) +
+                        (if (!ep.overview.isNullOrBlank()) 50 else 0) +
+                        (ep.sizeBytes / 1_000_000).coerceAtMost(50)
+                    } ?: epList.first()
+                }
+                .sortedWith(compareBy({ it.season ?: 1 }, { it.episode ?: 1 }))
+
+            distinctEpisodes.map { ep ->
                 val s = ep.season ?: 1
                 val e = ep.episode ?: 1
                 val epId = if (!ep.imdbId.isNullOrBlank()) "${ep.imdbId}:$s:$e" else "${cleanId}:$s:$e"
@@ -611,24 +624,37 @@ class LocalHttpServer(
         val shouldSkipDuplicates = config.skipExactDuplicates ||
                 com.tgserver.streamer.service.StreamerForegroundService.activeConfig.skipExactDuplicates
         if (shouldSkipDuplicates) {
-            val seen = mutableSetOf<String>()
+            val seenSizeKeys = mutableSetOf<String>()
+            val seenNameKeys = mutableSetOf<String>()
             val deduped = mutableListOf<MediaItem>()
-            // Sort so split items and larger sizes come first
-            val sorted = finalItems.sortedWith(compareByDescending<MediaItem> { it.isSplit }.thenByDescending { it.sizeBytes })
+            // Sort so split items, cleaner filenames (no promo tags), and richer items come first
+            val sorted = finalItems.sortedWith(
+                compareByDescending<MediaItem> { it.isSplit }
+                    .thenBy { item ->
+                        val fn = item.fileName.lowercase()
+                        if (fn.contains("momstealer") || fn.contains("vegamovies") || fn.contains("katmovie") || fn.contains("4khdhub")) 1 else 0
+                    }
+                    .thenByDescending { it.sizeBytes }
+            )
             for (item in sorted) {
+                val s = item.season ?: 0
+                val e = item.episode ?: 0
+
+                // Key 1: Exact size match for the same episode/movie
+                val sizeKey = if (item.sizeBytes > 0L) "${s}_${e}_${item.sizeBytes}" else null
+
+                // Key 2: Sanitized filename without promo tags / extensions
                 val cleanKey = item.fileName.lowercase()
-                    .replace(Regex("""\.(mkv|mp4|avi|webm)(\.\d{2,3})?$""", RegexOption.IGNORE_CASE), "")
+                    .replace(Regex("""\.(mkv|mp4|avi|webm|ts|m4v)(\.\d{2,3})?$""", RegexOption.IGNORE_CASE), "")
+                    .replace(Regex("""[\(\[][^\)\]]*(?:momstealer|anipulse|toonworld|vegamovies|katmovie|4khdhub)[^\)\]]*[\)\]]""", RegexOption.IGNORE_CASE), "")
                     .replace(Regex("""[\s._-]+"""), " ")
                     .trim()
-                val normQuality = when {
-                    item.quality.contains("4k", ignoreCase = true) || item.quality.contains("2160", ignoreCase = true) -> "4k"
-                    item.quality.contains("1080", ignoreCase = true) -> "1080p"
-                    item.quality.contains("720", ignoreCase = true) -> "720p"
-                    item.quality.contains("480", ignoreCase = true) -> "480p"
-                    else -> item.quality.lowercase().trim()
-                }
-                val groupKey = "${cleanKey}_${normQuality}_${item.season ?: 0}_${item.episode ?: 0}"
-                if (seen.add(groupKey)) {
+                val nameKey = "${s}_${e}_${cleanKey}"
+
+                val isDup = (sizeKey != null && seenSizeKeys.contains(sizeKey)) || seenNameKeys.contains(nameKey)
+                if (!isDup) {
+                    if (sizeKey != null) seenSizeKeys.add(sizeKey)
+                    seenNameKeys.add(nameKey)
                     deduped.add(item)
                 }
             }
@@ -692,18 +718,44 @@ class LocalHttpServer(
         val fnLower = fn.lowercase()
         val qLower = item.quality.lowercase()
 
+        // Sanitize filename for resolution check by stripping website domains & promotional tags (e.g. 4khdhub)
+        val fnResClean = fnLower
+            .replace(Regex("""(?i)4khdhub(\.com|\.org|\.net|\.in)?"""), "")
+            .replace(Regex("""(?i)[\s._\-\(\[]*momstealer[\s._\-\)\]]*"""), "")
+            .replace(Regex("""(?i)(katmoviehd|vegamovies|bollyflix|cinemaluxe|topmovies|luxmovies|hdhub4u|moviesmod)"""), "")
+
+        val is4k = fnResClean.contains("2160p") ||
+                   Regex("""(?i)\b(4k|uhd)\b""").containsMatchIn(fnResClean) ||
+                   qLower.contains("2160p") ||
+                   Regex("""(?i)\b(4k|uhd)\b""").containsMatchIn(qLower)
+
+        val is2k = fnResClean.contains("1440p") ||
+                   Regex("""(?i)\b(2k|qhd)\b""").containsMatchIn(fnResClean) ||
+                   qLower.contains("1440p") ||
+                   Regex("""(?i)\b(2k|qhd)\b""").containsMatchIn(qLower)
+
+        val is1080 = fnResClean.contains("1080p") ||
+                     Regex("""(?i)\b(fhd)\b""").containsMatchIn(fnResClean) ||
+                     qLower.contains("1080p") ||
+                     Regex("""(?i)\b(fhd)\b""").containsMatchIn(qLower)
+
+        val is720 = fnResClean.contains("720p") ||
+                    Regex("""(?i)\b(hd)\b(?!(\+|plus))""").containsMatchIn(fnResClean) ||
+                    qLower.contains("720p") ||
+                    Regex("""(?i)\b(hd)\b""").containsMatchIn(qLower)
+
+        val is480 = fnResClean.contains("480p") ||
+                    Regex("""(?i)\b(sd)\b""").containsMatchIn(fnResClean) ||
+                    qLower.contains("480p") ||
+                    Regex("""(?i)\b(sd)\b""").containsMatchIn(qLower)
+
         // 1. Resolution & Badge
         val (normRes, badge) = when {
-            fnLower.contains("2160p") || fnLower.contains("4k") || fnLower.contains("uhd") || qLower.contains("4k") || qLower.contains("2160p") -> 
-                "2160p" to "4K UltraHD"
-            fnLower.contains("1440p") || fnLower.contains("2k") || qLower.contains("1440p") || qLower.contains("2k") -> 
-                "1440p" to "2K"
-            fnLower.contains("1080p") || fnLower.contains("fhd") || qLower.contains("1080p") || qLower.contains("fhd") -> 
-                "1080p" to "FHD"
-            fnLower.contains("720p") || fnLower.contains("hd") || qLower.contains("720p") || qLower.contains("hd") -> 
-                "720p" to "HD+"
-            fnLower.contains("480p") || fnLower.contains("sd") || qLower.contains("480p") || qLower.contains("sd") -> 
-                "480p" to "SD"
+            is4k -> "2160p" to "4K UltraHD"
+            is2k -> "1440p" to "2K"
+            is1080 -> "1080p" to "FHD"
+            is720 -> "720p" to "HD+"
+            is480 -> "480p" to "SD"
             else -> 
                 (if (item.quality.isNotBlank()) item.quality else "Unknown") to (if (item.qualityBadge.isNotBlank()) item.qualityBadge else "Unknown")
         }

@@ -151,7 +151,12 @@ data class MediaGroup(
         get() = items.isNotEmpty() && items.all { it.isHidden }
 
     // Pre-computed filter tags so opening filters and applying filters is instant (0ms freeze)
-    val has4K: Boolean = items.any { it.quality.contains("4K", true) || it.quality.contains("2160", true) || it.fileName.contains("4K", true) || it.fileName.contains("2160p", true) }
+    val has4K: Boolean = items.any {
+        val q = it.quality.lowercase()
+        val fnClean = it.fileName.lowercase().replace(Regex("""(?i)4khdhub(\.com|\.org|\.net|\.in)?"""), "")
+        q.contains("2160") || Regex("""(?i)\b(4k|uhd)\b""").containsMatchIn(q) ||
+        fnClean.contains("2160p") || Regex("""(?i)\b(4k|uhd)\b""").containsMatchIn(fnClean)
+    }
     val has1080p: Boolean = items.any { it.quality.contains("1080", true) || it.quality.contains("FHD", true) || it.fileName.contains("1080p", true) }
     val has720p: Boolean = items.any { it.quality.contains("720", true) || it.quality.contains("HD", true) || it.fileName.contains("720p", true) }
     val hasSD: Boolean = items.any { it.quality.contains("480", true) || it.fileName.contains("480p", true) }
@@ -230,7 +235,48 @@ fun List<MediaItem>.toMediaGroups(): List<MediaGroup> {
         }
     }
 
-    return effectiveMedia.groupBy { item ->
+    val skipExact = com.tgserver.streamer.service.StreamerForegroundService.activeConfig.skipExactDuplicates
+    val finalMedia = if (skipExact) {
+        val seenSizeKeys = mutableSetOf<String>()
+        val seenNameKeys = mutableSetOf<String>()
+        val sorted = effectiveMedia.sortedWith(
+            compareByDescending<MediaItem> { it.isSplit }
+                .thenBy { item ->
+                    val fn = item.fileName.lowercase()
+                    if (fn.contains("momstealer") || fn.contains("vegamovies") || fn.contains("katmovie") || fn.contains("4khdhub")) 1 else 0
+                }
+                .thenByDescending { it.sizeBytes }
+        )
+        sorted.filter { item ->
+            val isSeries = item.type == "series" || item.type == "anime" || (item.season != null && item.episode != null)
+            val s = item.season ?: 0
+            val e = item.episode ?: 0
+            val cleanTitle = item.title.trim().lowercase()
+            val mediaId = item.imdbId ?: item.tmdbId?.toString() ?: cleanTitle
+
+            val sizeKey = if (item.sizeBytes > 0L) {
+                if (isSeries) "${mediaId}_s${s}_e${e}_${item.sizeBytes}" else "${mediaId}_${item.sizeBytes}"
+            } else null
+
+            val cleanFn = item.fileName.lowercase()
+                .replace(Regex("""\.(mkv|mp4|avi|webm|ts|m4v)(\.\d{2,4})?$""", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("""[\(\[][^\)\]]*(?:momstealer|anipulse|toonworld|vegamovies|katmovie|4khdhub)[^\)\]]*[\)\]]""", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("""[\s._-]+"""), " ")
+                .trim()
+            val nameKey = if (isSeries) "${mediaId}_s${s}_e${e}_$cleanFn" else "${mediaId}_$cleanFn"
+
+            val isDup = (sizeKey != null && seenSizeKeys.contains(sizeKey)) || seenNameKeys.contains(nameKey)
+            if (!isDup) {
+                if (sizeKey != null) seenSizeKeys.add(sizeKey)
+                seenNameKeys.add(nameKey)
+                true
+            } else {
+                false
+            }
+        }
+    } else effectiveMedia
+
+    return finalMedia.groupBy { item ->
         val cleanTitle = item.title.trim().lowercase()
         when {
             item.tmdbId != null && item.tmdbId!! > 0 -> "tmdb_${item.type}_${item.tmdbId}"
