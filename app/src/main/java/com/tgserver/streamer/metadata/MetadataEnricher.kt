@@ -606,7 +606,20 @@ class MetadataEnricher {
 
     private fun applyMetadata(item: MediaItem, meta: EnrichedMetadata) {
         if (!meta.title.isNullOrBlank()) {
-            item.title = meta.title
+            var cleanTitle = meta.title
+                .replace(Regex("(?i)\\[(?:franchise|collection|batch)\\]"), "")
+                .trim()
+            if (Regex("[a-zA-Z]{2,}").containsMatchIn(cleanTitle)) {
+                cleanTitle = cleanTitle.replace(Regex("[\\s._\\-]*[\\u3040-\\u30ff\\u3400-\\u4dbf\\u4e00-\\u9fff]+[\\s._\\-]*"), " ").replace(Regex("\\s+"), " ").trim()
+            }
+            cleanTitle = cleanTitle.replace(Regex("\\s*\\((?:19|20)\\d{2}\\)$"), "").trim()
+            cleanTitle = cleanTitle.replace(Regex("[:\\-_\\s]+$"), "").trim()
+
+            if (Regex("[a-zA-Z]{2,}").containsMatchIn(item.title) && !Regex("[a-zA-Z]{2,}").containsMatchIn(cleanTitle)) {
+                // Keep existing Latin/Romaji title (e.g. "KochiKame") when remote returns pure Japanese Kanji
+            } else {
+                item.title = cleanTitle.ifBlank { item.title.ifBlank { meta.title } }
+            }
         }
         if (!meta.type.isNullOrBlank()) {
             if (item.season == null && item.episode == null) {
@@ -1039,8 +1052,16 @@ class MetadataEnricher {
                         }
                     }
 
+                    var cleanCandName = name
+                        .replace(Regex("(?i)\\[(?:franchise|collection|batch)\\]"), "")
+                        .trim()
+                    if (Regex("[a-zA-Z]{2,}").containsMatchIn(cleanCandName)) {
+                        cleanCandName = cleanCandName.replace(Regex("[\\s._\\-]*[\\u3040-\\u30ff\\u3400-\\u4dbf\\u4e00-\\u9fff]+[\\s._\\-]*"), " ").replace(Regex("\\s+"), " ").trim()
+                    }
+                    cleanCandName = cleanCandName.replace(Regex("\\s*\\((?:19|20)\\d{2}\\)$"), "").trim()
+
                     bestCandidate = EnrichedMetadata(
-                        title = name,
+                        title = cleanCandName.ifBlank { name },
                         year = candYear,
                         overview = overview,
                         posterUrl = imageUrl,
@@ -1216,8 +1237,16 @@ class MetadataEnricher {
 
                     val candRating = try { cand.get("vote_average")?.asDouble } catch (_: Exception) { null }
 
+                    var cleanOfficialTitle = officialTitle
+                        .replace(Regex("(?i)\\[(?:franchise|collection|batch)\\]"), "")
+                        .trim()
+                    if (Regex("[a-zA-Z]{2,}").containsMatchIn(cleanOfficialTitle)) {
+                        cleanOfficialTitle = cleanOfficialTitle.replace(Regex("[\\s._\\-]*[\\u3040-\\u30ff\\u3400-\\u4dbf\\u4e00-\\u9fff]+[\\s._\\-]*"), " ").replace(Regex("\\s+"), " ").trim()
+                    }
+                    cleanOfficialTitle = cleanOfficialTitle.replace(Regex("\\s*\\((?:19|20)\\d{2}\\)$"), "").trim()
+
                     bestCandidate = EnrichedMetadata(
-                        title = officialTitle,
+                        title = cleanOfficialTitle.ifBlank { officialTitle },
                         year = candYear,
                         overview = overview,
                         posterUrl = posterUrl,
@@ -1331,8 +1360,16 @@ class MetadataEnricher {
                         val imdbId = obj.get("imdb_id")?.asString ?: obj.get("id")?.asString
                         val candRating = obj.get("imdbRating")?.asString?.toDoubleOrNull() ?: obj.get("rating")?.asString?.toDoubleOrNull()
 
+                        var cleanCandName = name
+                            .replace(Regex("(?i)\\[(?:franchise|collection|batch)\\]"), "")
+                            .trim()
+                        if (Regex("[a-zA-Z]{2,}").containsMatchIn(cleanCandName)) {
+                            cleanCandName = cleanCandName.replace(Regex("[\\s._\\-]*[\\u3040-\\u30ff\\u3400-\\u4dbf\\u4e00-\\u9fff]+[\\s._\\-]*"), " ").replace(Regex("\\s+"), " ").trim()
+                        }
+                        cleanCandName = cleanCandName.replace(Regex("\\s*\\((?:19|20)\\d{2}\\)$"), "").trim()
+
                         bestCandidate = EnrichedMetadata(
-                            title = name,
+                            title = cleanCandName.ifBlank { name },
                             year = candYear,
                             overview = desc,
                             posterUrl = poster,
@@ -1735,8 +1772,15 @@ class MetadataEnricher {
                     for (i in 0 until minOf(validItems.size(), 10)) {
                         val obj = validItems[i].asJsonObject
                         val tmdbId = obj.get("id").asInt
-                        val name = if (type == "movie") obj.get("title")?.asString else obj.get("name")?.asString
-                        if (name.isNullOrBlank()) continue
+                        val rawName = if (type == "movie") obj.get("title")?.asString else obj.get("name")?.asString
+                        if (rawName.isNullOrBlank()) continue
+                        var name = rawName
+                            .replace(Regex("(?i)\\[(?:franchise|collection|batch)\\]"), "")
+                            .trim()
+                        if (Regex("[a-zA-Z]{2,}").containsMatchIn(name)) {
+                            name = name.replace(Regex("[\\s._\\-]*[\\u3040-\\u30ff\\u3400-\\u4dbf\\u4e00-\\u9fff]+[\\s._\\-]*"), " ").replace(Regex("\\s+"), " ").trim()
+                        }
+                        name = name.replace(Regex("\\s*\\((?:19|20)\\d{2}\\)$"), "").trim()
                         val overview = obj.get("overview")?.asString
                         val posterPath = obj.get("poster_path")?.asString
                         val bgPath = obj.get("backdrop_path")?.asString
@@ -1937,9 +1981,14 @@ class MetadataEnricher {
     }
 
     private fun sanitizeTitle(name: String): String {
-        return name
+        var clean = name
             .replace(Regex("(?i)\\.(mkv|mp4|avi|mov|webm)$"), "")
             .replace(Regex("(?i)(2160p|1080p|720p|480p|4k|uhd|hdr|hevc|x264|x265|aac|dts|bluray|web-?dl|web-?rip|proper|repack|hq)"), "")
+            .replace(Regex("(?i)[\\[\\(]\\s*(?:franchise|collection|batch|ongoing|completed|complete|dubbed|subbed|dual\\s*audio|multi\\s*audio|multi|dual|anime|tv|ova|ona|special|movie|the\\s*movie|uncut|censored|uncensored)[\\]\\)]"), "")
+        if (Regex("[a-zA-Z]{2,}").containsMatchIn(clean)) {
+            clean = clean.replace(Regex("[\\s._\\-]*[\\u3040-\\u30ff\\u3400-\\u4dbf\\u4e00-\\u9fff]+[\\s._\\-]*"), " ")
+        }
+        return clean
             .replace(Regex("[\\[\\]\\(\\)\\._-]"), " ")
             .replace(Regex("\\s+"), " ")
             .trim()
