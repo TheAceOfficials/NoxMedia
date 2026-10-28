@@ -242,23 +242,21 @@ class LocalHttpServer(
             }
         }
 
-        // For series and movies, group by verified media ID or title+year so multiple files/episodes show under the proper card without collapsing different releases
+        // For series and movies, group by verified media ID or title so multiple files/episodes show under the proper card without collapsing different releases
         val distinctShows = if (isSeries || isAnime) {
             mediaList.distinctBy {
-                val cleanTitle = it.title.lowercase().trim()
-                val cleanYear = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(it.year ?: "")?.groupValues?.get(1)
+                val cleanTitle = it.title.lowercase().replace(Regex("[:\\-_.\\[\\]\\(\\)]"), " ").replace(Regex("\\s+"), " ").trim()
                 when {
                     !it.imdbId.isNullOrBlank() -> "imdb_${it.imdbId}"
                     it.tmdbId != null && it.tmdbId!! > 0 -> "tmdb_${it.tmdbId}"
                     it.tvdbId != null && it.tvdbId!! > 0 -> "tvdb_${it.tvdbId}"
                     it.kitsuId != null && it.kitsuId!! > 0 -> "kitsu_${it.kitsuId}"
-                    !cleanYear.isNullOrBlank() -> "${cleanTitle}_$cleanYear"
                     else -> cleanTitle
                 }
             }
         } else {
             mediaList.distinctBy {
-                val cleanTitle = it.title.lowercase().trim()
+                val cleanTitle = it.title.lowercase().replace(Regex("[:\\-_.\\[\\]\\(\\)]"), " ").replace(Regex("\\s+"), " ").trim()
                 val cleanYear = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(it.year ?: "")?.groupValues?.get(1)
                 when {
                     !it.imdbId.isNullOrBlank() -> "imdb_${it.imdbId}"

@@ -279,28 +279,44 @@ fun List<MediaItem>.toMediaGroups(): List<MediaGroup> {
         }
     } else effectiveMedia
 
+    // Propagate verified IDs within the same series title so all episodes group together
+    val seriesIdMap = mutableMapOf<String, Triple<Int?, String?, Int?>>()
+    for (item in finalMedia) {
+        if (item.type != "movie") {
+            val ct = item.title.lowercase().replace(Regex("[:\\-_.\\[\\]\\(\\)]"), " ").replace(Regex("\\s+"), " ").trim()
+            if (ct.isNotBlank()) {
+                val existing = seriesIdMap[ct]
+                val tmdb = existing?.first ?: item.tmdbId?.takeIf { it > 0 }
+                val imdb = existing?.second ?: item.imdbId?.takeIf { it.isNotBlank() }
+                val tvdb = existing?.third ?: item.tvdbId?.takeIf { it > 0 }
+                if (tmdb != null || imdb != null || tvdb != null) {
+                    seriesIdMap[ct] = Triple(tmdb, imdb, tvdb)
+                }
+            }
+        }
+    }
+
     return finalMedia.groupBy { item ->
-        val cleanTitle = item.title.trim().lowercase()
+        val cleanTitle = item.title.lowercase().replace(Regex("[:\\-_.\\[\\]\\(\\)]"), " ").replace(Regex("\\s+"), " ").trim()
         val cleanYear = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(item.year ?: "")?.groupValues?.get(1)
+        val inherited = if (item.type != "movie") seriesIdMap[cleanTitle] else null
+        val tmdb = item.tmdbId?.takeIf { it > 0 } ?: inherited?.first
+        val imdb = item.imdbId?.takeIf { it.isNotBlank() } ?: inherited?.second
+        val tvdb = item.tvdbId?.takeIf { it > 0 } ?: inherited?.third
+
         when {
-            item.tmdbId != null && item.tmdbId!! > 0 -> "tmdb_${item.type}_${item.tmdbId}"
-            !item.imdbId.isNullOrBlank() -> "imdb_${item.imdbId}"
-            item.tvdbId != null && item.tvdbId!! > 0 -> "tvdb_${item.type}_${item.tvdbId}"
+            tmdb != null && tmdb > 0 -> "tmdb_${item.type}_$tmdb"
+            !imdb.isNullOrBlank() -> "imdb_$imdb"
+            tvdb != null && tvdb > 0 -> "tvdb_${item.type}_$tvdb"
             item.kitsuId != null && item.kitsuId!! > 0 -> "kitsu_${item.type}_${item.kitsuId}"
-            !cleanYear.isNullOrBlank() -> "title_${item.type}_${cleanTitle}_$cleanYear"
+            item.type == "movie" && !cleanYear.isNullOrBlank() -> "title_movie_${cleanTitle}_$cleanYear"
             else -> "title_${item.type}_$cleanTitle"
         }
     }.map { (key, items) ->
         val primary = items.first()
-        val rawBestTitle = items.firstOrNull { it.isManuallyMatched && it.title.isNotBlank() }?.title
-            ?: items.firstOrNull { it.title.isNotBlank() && !Regex("[\\u3040-\\u30ff\\u3400-\\u4dbf\\u4e00-\\u9fff]").containsMatchIn(it.title) && !it.title.contains("[Franchise]", ignoreCase = true) }?.title
+        val bestTitle = items.firstOrNull { it.isManuallyMatched && it.title.isNotBlank() }?.title
+            ?: items.firstOrNull { !it.title.isNullOrBlank() }?.title
             ?: primary.title
-        val cleanGroupTitle = rawBestTitle
-            .replace(Regex("(?i)\\[(?:franchise|collection|batch)\\]"), "")
-            .replace(Regex("[\\s._\\-]*[\\u3040-\\u30ff\\u3400-\\u4dbf\\u4e00-\\u9fff]+[\\s._\\-]*"), " ")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-            .ifBlank { primary.title }
 
         val bestPoster = items.firstOrNull { !it.posterUrl.isNullOrBlank() }?.posterUrl ?: primary.posterUrl
         val bestBackdrop = items.firstOrNull { !it.backdropUrl.isNullOrBlank() }?.backdropUrl ?: primary.backdropUrl
@@ -323,7 +339,7 @@ fun List<MediaItem>.toMediaGroups(): List<MediaGroup> {
 
         MediaGroup(
             key = key,
-            title = cleanGroupTitle,
+            title = bestTitle,
             type = primary.type,
             year = bestYear,
             posterUrl = bestPoster,

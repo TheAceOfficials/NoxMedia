@@ -425,9 +425,9 @@ class MetadataEnricher {
             return
         }
 
-        // Fast path for series: If show metadata is already cached, reuse it!
-        val showKey = "${queryTitle.lowercase()}:${item.type}:$cleanYear"
-        if (item.type == "series") {
+        // Fast path for series and anime: If show metadata is already cached, reuse it!
+        val showKey = "${queryTitle.lowercase()}:${item.type}"
+        if (item.type == "series" || item.type == "anime") {
             showCache[showKey]?.let { cachedShow ->
                 var epTitle: String? = null
                 var epThumb: String? = null
@@ -483,18 +483,29 @@ class MetadataEnricher {
             if (tmdbKey.isNotBlank()) {
                 val tmdbRes = tryTmdb(queryTitle, item.type, item.season, item.episode, tmdbKey, year = item.year)
                 if (tmdbRes != null) {
+                    val parsedYear = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(item.year ?: "")?.groupValues?.get(1)
+                    val tmdbYearMatches = !parsedYear.isNullOrBlank() && tmdbRes.year == parsedYear
+                    val resultYearMismatches = result != null && !parsedYear.isNullOrBlank() && result.year != parsedYear
+
                     result = if (result != null) {
-                        result.copy(
-                            title = result.title ?: tmdbRes.title,
-                            posterUrl = result.posterUrl ?: tmdbRes.posterUrl,
-                            backdropUrl = result.backdropUrl ?: tmdbRes.backdropUrl,
-                            overview = result.overview ?: tmdbRes.overview,
-                            episodeTitle = result.episodeTitle ?: tmdbRes.episodeTitle,
-                            episodeThumbnailUrl = result.episodeThumbnailUrl ?: tmdbRes.episodeThumbnailUrl,
-                            tmdbId = tmdbRes.tmdbId,
-                            imdbId = tmdbRes.imdbId ?: result.imdbId,
-                            year = result.year ?: tmdbRes.year
-                        )
+                        if (tmdbYearMatches && resultYearMismatches) {
+                            tmdbRes.copy(
+                                tvdbId = result.tvdbId,
+                                kitsuId = result.kitsuId
+                            )
+                        } else {
+                            result.copy(
+                                title = if (tmdbYearMatches) tmdbRes.title else (result.title ?: tmdbRes.title),
+                                posterUrl = if (tmdbYearMatches) tmdbRes.posterUrl else (tmdbRes.posterUrl ?: result.posterUrl),
+                                backdropUrl = if (tmdbYearMatches) tmdbRes.backdropUrl else (tmdbRes.backdropUrl ?: result.backdropUrl),
+                                overview = result.overview ?: tmdbRes.overview,
+                                episodeTitle = result.episodeTitle ?: tmdbRes.episodeTitle,
+                                episodeThumbnailUrl = result.episodeThumbnailUrl ?: tmdbRes.episodeThumbnailUrl,
+                                tmdbId = tmdbRes.tmdbId,
+                                imdbId = tmdbRes.imdbId ?: result.imdbId,
+                                year = if (tmdbYearMatches) tmdbRes.year else (result.year ?: tmdbRes.year)
+                            )
+                        }
                     } else tmdbRes
                 }
             }
@@ -517,18 +528,29 @@ class MetadataEnricher {
             if (tmdbKey.isNotBlank()) {
                 val tmdbRes = tryTmdb(queryTitle, item.type, item.season, item.episode, tmdbKey, year = item.year)
                 if (tmdbRes != null) {
+                    val parsedYear = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(item.year ?: "")?.groupValues?.get(1)
+                    val tmdbYearMatches = !parsedYear.isNullOrBlank() && tmdbRes.year == parsedYear
+                    val resultYearMismatches = result != null && !parsedYear.isNullOrBlank() && result.year != parsedYear
+
                     result = if (result != null) {
-                        result.copy(
-                            title = result.title ?: tmdbRes.title,
-                            posterUrl = result.posterUrl ?: tmdbRes.posterUrl,
-                            backdropUrl = result.backdropUrl ?: tmdbRes.backdropUrl,
-                            overview = result.overview ?: tmdbRes.overview,
-                            episodeTitle = result.episodeTitle ?: tmdbRes.episodeTitle,
-                            episodeThumbnailUrl = result.episodeThumbnailUrl ?: tmdbRes.episodeThumbnailUrl,
-                            tmdbId = tmdbRes.tmdbId,
-                            imdbId = tmdbRes.imdbId ?: result.imdbId,
-                            year = tmdbRes.year ?: result.year
-                        )
+                        if (tmdbYearMatches && resultYearMismatches) {
+                            tmdbRes.copy(
+                                tvdbId = result.tvdbId,
+                                kitsuId = result.kitsuId
+                            )
+                        } else {
+                            result.copy(
+                                title = if (tmdbYearMatches) tmdbRes.title else (result.title ?: tmdbRes.title),
+                                posterUrl = if (tmdbYearMatches) tmdbRes.posterUrl else (tmdbRes.posterUrl ?: result.posterUrl),
+                                backdropUrl = if (tmdbYearMatches) tmdbRes.backdropUrl else (tmdbRes.backdropUrl ?: result.backdropUrl),
+                                overview = result.overview ?: tmdbRes.overview,
+                                episodeTitle = result.episodeTitle ?: tmdbRes.episodeTitle,
+                                episodeThumbnailUrl = result.episodeThumbnailUrl ?: tmdbRes.episodeThumbnailUrl,
+                                tmdbId = tmdbRes.tmdbId,
+                                imdbId = tmdbRes.imdbId ?: result.imdbId,
+                                year = if (tmdbYearMatches) tmdbRes.year else (result.year ?: tmdbRes.year)
+                            )
+                        }
                     } else tmdbRes
                 }
             }
@@ -559,7 +581,7 @@ class MetadataEnricher {
 
         if (result != null) {
             cache[cacheKey] = result
-            if (item.type == "series") {
+            if (item.type == "series" || item.type == "anime") {
                 showCache[showKey] = result
             }
             applyMetadata(item, result)
@@ -568,19 +590,13 @@ class MetadataEnricher {
 
     private fun applyMetadata(item: MediaItem, meta: EnrichedMetadata) {
         if (!meta.title.isNullOrBlank()) {
-            var cleanTitle = meta.title
-                .replace(Regex("(?i)\\[(?:franchise|collection|batch)\\]"), "")
-                .trim()
-            if (Regex("[a-zA-Z]{2,}").containsMatchIn(cleanTitle)) {
-                cleanTitle = cleanTitle.replace(Regex("[\\s._\\-]*[\\u3040-\\u30ff\\u3400-\\u4dbf\\u4e00-\\u9fff]+[\\s._\\-]*"), " ").replace(Regex("\\s+"), " ").trim()
-            }
-            item.title = cleanTitle.ifBlank { meta.title }
+            item.title = meta.title
         }
         if (!meta.type.isNullOrBlank()) {
             if (item.season == null && item.episode == null) {
                 item.type = meta.type
             } else {
-                item.type = "series"
+                item.type = if (item.type == "anime") "anime" else "series"
             }
         }
         if (!meta.year.isNullOrBlank()) item.year = meta.year
@@ -1007,15 +1023,8 @@ class MetadataEnricher {
                         }
                     }
 
-                    var cleanCandName = name
-                        .replace(Regex("(?i)\\[(?:franchise|collection|batch)\\]"), "")
-                        .trim()
-                    if (Regex("[a-zA-Z]{2,}").containsMatchIn(cleanCandName)) {
-                        cleanCandName = cleanCandName.replace(Regex("[\\s._\\-]*[\\u3040-\\u30ff\\u3400-\\u4dbf\\u4e00-\\u9fff]+[\\s._\\-]*"), " ").replace(Regex("\\s+"), " ").trim()
-                    }
-
                     bestCandidate = EnrichedMetadata(
-                        title = cleanCandName.ifBlank { name },
+                        title = name,
                         year = candYear,
                         overview = overview,
                         posterUrl = imageUrl,
@@ -1906,20 +1915,15 @@ class MetadataEnricher {
         return s.lowercase()
             .replace(Regex("^(the|a|an)\\s+"), "")
             .replace(Regex("['’‘`]"), "")
-            .replace(Regex("[^a-z0-9\\s]"), " ")
+            .replace(Regex("[^a-z0-9\\p{L}\\s]"), " ")
             .replace(Regex("\\s+"), " ")
             .trim()
     }
 
     private fun sanitizeTitle(name: String): String {
-        var clean = name
+        return name
             .replace(Regex("(?i)\\.(mkv|mp4|avi|mov|webm)$"), "")
             .replace(Regex("(?i)(2160p|1080p|720p|480p|4k|uhd|hdr|hevc|x264|x265|aac|dts|bluray|web-?dl|web-?rip|proper|repack|hq)"), "")
-            .replace(Regex("(?i)[\\[\\(]\\s*(?:franchise|collection|batch|ongoing|completed|complete|dubbed|subbed|dual\\s*audio|multi\\s*audio|multi|dual|anime|tv|ova|ona|special|movie|the\\s*movie|uncut|censored|uncensored)[\\]\\)]"), "")
-        if (Regex("[a-zA-Z]{2,}").containsMatchIn(clean)) {
-            clean = clean.replace(Regex("[\\s._\\-]*[\\u3040-\\u30ff\\u3400-\\u4dbf\\u4e00-\\u9fff]+[\\s._\\-]*"), " ")
-        }
-        return clean
             .replace(Regex("[\\[\\]\\(\\)\\._-]"), " ")
             .replace(Regex("\\s+"), " ")
             .trim()
