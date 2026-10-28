@@ -415,10 +415,21 @@ class MetadataEnricher {
         tvdbKey: String = "",
         animePreference: String = "seasonal"
     ) {
-        val queryTitle = sanitizeTitle(item.title)
-        if (queryTitle.isBlank()) return
+        val rawTitle = sanitizeTitle(item.title)
+        if (rawTitle.isBlank()) return
 
-        val cleanYear = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(item.year ?: "")?.groupValues?.get(1) ?: ""
+        val cleanYear = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(item.year ?: "")?.groupValues?.get(1)
+            ?: Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(item.title)?.groupValues?.get(1)
+            ?: ""
+
+        val queryTitle = if (cleanYear.isNotBlank()) {
+            rawTitle.replace(Regex("""\b${Regex.escape(cleanYear)}\b"""), "").trim().ifBlank { rawTitle }
+        } else {
+            rawTitle
+        }
+
+        val effectiveYear = cleanYear.takeIf { it.isNotBlank() } ?: item.year
+
         val cacheKey = "$queryTitle:${item.type}:$cleanYear:${item.season}:${item.episode}:${isAnimeChannel}:$animePreference"
         cache[cacheKey]?.let { cached ->
             applyMetadata(item, cached)
@@ -426,7 +437,7 @@ class MetadataEnricher {
         }
 
         // Fast path for series and anime: If show metadata is already cached, reuse it!
-        val showKey = "${queryTitle.lowercase()}:${item.type}"
+        val showKey = "${queryTitle.lowercase()}:$cleanYear:${item.type}"
         if (item.type == "series" || item.type == "anime") {
             showCache[showKey]?.let { cachedShow ->
                 var epTitle: String? = null
@@ -476,14 +487,14 @@ class MetadataEnricher {
         if (isAnimeChannel) {
             // 1. TVDB
             if (tvdbKey.isNotBlank()) {
-                val tvdbRes = tryTvdb(queryTitle, item.type, tvdbKey, item.season, item.episode, year = item.year)
+                val tvdbRes = tryTvdb(queryTitle, item.type, tvdbKey, item.season, item.episode, year = effectiveYear)
                 if (tvdbRes != null) result = tvdbRes
             }
             // 2. TMDB
             if (tmdbKey.isNotBlank()) {
-                val tmdbRes = tryTmdb(queryTitle, item.type, item.season, item.episode, tmdbKey, year = item.year)
+                val tmdbRes = tryTmdb(queryTitle, item.type, item.season, item.episode, tmdbKey, year = effectiveYear)
                 if (tmdbRes != null) {
-                    val parsedYear = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(item.year ?: "")?.groupValues?.get(1)
+                    val parsedYear = cleanYear.takeIf { it.isNotBlank() }
                     val tmdbYearMatches = !parsedYear.isNullOrBlank() && tmdbRes.year == parsedYear
                     val resultYearMismatches = result != null && !parsedYear.isNullOrBlank() && result.year != parsedYear
 
@@ -522,13 +533,13 @@ class MetadataEnricher {
         } else {
             // Standard Series/Movie Pipeline: TVDB -> TMDB -> Cinemeta
             if (tvdbKey.isNotBlank() && item.type == "series") {
-                val tvdbRes = tryTvdb(queryTitle, item.type, tvdbKey, item.season, item.episode, year = item.year)
+                val tvdbRes = tryTvdb(queryTitle, item.type, tvdbKey, item.season, item.episode, year = effectiveYear)
                 if (tvdbRes != null) result = tvdbRes
             }
             if (tmdbKey.isNotBlank()) {
-                val tmdbRes = tryTmdb(queryTitle, item.type, item.season, item.episode, tmdbKey, year = item.year)
+                val tmdbRes = tryTmdb(queryTitle, item.type, item.season, item.episode, tmdbKey, year = effectiveYear)
                 if (tmdbRes != null) {
-                    val parsedYear = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(item.year ?: "")?.groupValues?.get(1)
+                    val parsedYear = cleanYear.takeIf { it.isNotBlank() }
                     val tmdbYearMatches = !parsedYear.isNullOrBlank() && tmdbRes.year == parsedYear
                     val resultYearMismatches = result != null && !parsedYear.isNullOrBlank() && result.year != parsedYear
 
@@ -558,7 +569,7 @@ class MetadataEnricher {
 
         // Cinemeta Fallback & IMDb ID Resolver (Free, no key needed)
         if (result == null || result.imdbId.isNullOrBlank()) {
-            val cinemetaRes = tryCinemeta(queryTitle, item.type, year = item.year)
+            val cinemetaRes = tryCinemeta(queryTitle, item.type, year = effectiveYear)
             if (cinemetaRes != null) {
                 result = if (result != null) {
                     result.copy(
@@ -566,7 +577,7 @@ class MetadataEnricher {
                         posterUrl = result.posterUrl ?: cinemetaRes.posterUrl,
                         backdropUrl = result.backdropUrl ?: cinemetaRes.backdropUrl,
                         overview = if (result.overview.isNullOrBlank()) cinemetaRes.overview else result.overview,
-                        year = result.year ?: cinemetaRes.year
+                        year = result.year ?: cinemetaRes.year ?: effectiveYear
                     )
                 } else cinemetaRes
             }
@@ -580,11 +591,16 @@ class MetadataEnricher {
         }
 
         if (result != null) {
+            if (result.year.isNullOrBlank() && cleanYear.isNotBlank()) {
+                result = result.copy(year = cleanYear)
+            }
             cache[cacheKey] = result
             if (item.type == "series" || item.type == "anime") {
                 showCache[showKey] = result
             }
             applyMetadata(item, result)
+        } else if (cleanYear.isNotBlank() && item.year.isNullOrBlank()) {
+            item.year = cleanYear
         }
     }
 
