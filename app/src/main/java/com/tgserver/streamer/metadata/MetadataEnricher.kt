@@ -567,8 +567,22 @@ class MetadataEnricher {
     }
 
     private fun applyMetadata(item: MediaItem, meta: EnrichedMetadata) {
-        if (!meta.title.isNullOrBlank()) item.title = meta.title
-        if (!meta.type.isNullOrBlank()) item.type = meta.type
+        if (!meta.title.isNullOrBlank()) {
+            var cleanTitle = meta.title
+                .replace(Regex("(?i)\\[(?:franchise|collection|batch)\\]"), "")
+                .trim()
+            if (Regex("[a-zA-Z]{2,}").containsMatchIn(cleanTitle)) {
+                cleanTitle = cleanTitle.replace(Regex("[\\s._\\-]*[\\u3040-\\u30ff\\u3400-\\u4dbf\\u4e00-\\u9fff]+[\\s._\\-]*"), " ").replace(Regex("\\s+"), " ").trim()
+            }
+            item.title = cleanTitle.ifBlank { meta.title }
+        }
+        if (!meta.type.isNullOrBlank()) {
+            if (item.season == null && item.episode == null) {
+                item.type = meta.type
+            } else {
+                item.type = "series"
+            }
+        }
         if (!meta.year.isNullOrBlank()) item.year = meta.year
         if (!meta.overview.isNullOrBlank()) item.overview = meta.overview
         if (!meta.posterUrl.isNullOrBlank()) item.posterUrl = meta.posterUrl
@@ -577,6 +591,7 @@ class MetadataEnricher {
         if (!meta.episodeThumbnailUrl.isNullOrBlank()) item.episodeThumbnailUrl = meta.episodeThumbnailUrl
         if (!meta.imdbId.isNullOrBlank()) item.imdbId = meta.imdbId
         if (meta.tmdbId != null && meta.tmdbId > 0) item.tmdbId = meta.tmdbId
+        if (meta.tvdbId != null && meta.tvdbId > 0) item.tvdbId = meta.tvdbId
         if (meta.kitsuId != null && meta.kitsuId > 0) item.kitsuId = meta.kitsuId
         if (item.durationSeconds <= 0 && meta.runtimeMinutes != null && meta.runtimeMinutes > 0) {
             item.durationSeconds = meta.runtimeMinutes * 60
@@ -878,9 +893,10 @@ class MetadataEnricher {
         val token = getTvdbAuthToken(apiKey) ?: return null
         try {
             val enc = URLEncoder.encode(title, "UTF-8")
+            val targetType = if (type == "movie") "movie" else "series"
             val cleanYear = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(year ?: "")?.groupValues?.get(1)
             val yearParam = if (!cleanYear.isNullOrBlank()) "&year=$cleanYear" else ""
-            val url = "https://api4.thetvdb.com/v4/search?query=$enc$yearParam"
+            val url = "https://api4.thetvdb.com/v4/search?query=$enc&type=$targetType$yearParam"
             val req = Request.Builder()
                 .url(url)
                 .addHeader("Authorization", "Bearer $token")
@@ -900,7 +916,7 @@ class MetadataEnricher {
             // Fallback without year constraint if year query yielded no results
             if ((data == null || data!!.size() == 0) && yearParam.isNotEmpty()) {
                 val fallbackReq = Request.Builder()
-                    .url("https://api4.thetvdb.com/v4/search?query=$enc")
+                    .url("https://api4.thetvdb.com/v4/search?query=$enc&type=$targetType")
                     .addHeader("Authorization", "Bearer $token")
                     .build()
                 httpClient.newCall(fallbackReq).execute().use { resp ->
@@ -922,10 +938,26 @@ class MetadataEnricher {
 
             for (i in 0 until minOf(validData.size(), 8)) {
                 val cand = validData[i].asJsonObject
+                val candType = cand.get("type")?.asString ?: cand.get("primary_type")?.asString
+                if (!candType.isNullOrBlank() && !candType.equals(targetType, ignoreCase = true)) {
+                    continue
+                }
+
                 val name = cand.get("name")?.asString ?: continue
                 val candYear = cand.get("year")?.asString
 
                 var score = calculateSimilarity(title, name)
+                val aliases = cand.getAsJsonArray("aliases")
+                if (aliases != null) {
+                    for (aElem in aliases) {
+                        val aStr = try { aElem.asString } catch (_: Exception) { null }
+                        if (!aStr.isNullOrBlank()) {
+                            val aScore = calculateSimilarity(title, aStr)
+                            if (aScore > score) score = aScore
+                        }
+                    }
+                }
+
                 if (!cleanYear.isNullOrBlank() && !candYear.isNullOrBlank()) {
                     if (candYear == cleanYear) {
                         score += 0.35
@@ -938,6 +970,8 @@ class MetadataEnricher {
                             score -= 0.35
                         }
                     }
+                } else if (cleanYear.isNullOrBlank()) {
+                    score += (8 - i) * 0.005
                 }
 
                 if (score > bestScore) {
@@ -973,8 +1007,15 @@ class MetadataEnricher {
                         }
                     }
 
+                    var cleanCandName = name
+                        .replace(Regex("(?i)\\[(?:franchise|collection|batch)\\]"), "")
+                        .trim()
+                    if (Regex("[a-zA-Z]{2,}").containsMatchIn(cleanCandName)) {
+                        cleanCandName = cleanCandName.replace(Regex("[\\s._\\-]*[\\u3040-\\u30ff\\u3400-\\u4dbf\\u4e00-\\u9fff]+[\\s._\\-]*"), " ").replace(Regex("\\s+"), " ").trim()
+                    }
+
                     bestCandidate = EnrichedMetadata(
-                        title = name,
+                        title = cleanCandName.ifBlank { name },
                         year = candYear,
                         overview = overview,
                         posterUrl = imageUrl,
@@ -1009,23 +1050,26 @@ class MetadataEnricher {
         val direct = searchTmdbInternal(title, type, season, episode, apiKey, year)
         if (direct != null) return direct
 
-        // Cross-type fallback: if movie was requested, try series, and vice-versa
-        val altType = if (type == "movie") "series" else "movie"
-        val altRes = searchTmdbInternal(title, altType, season, episode, apiKey, year)
-        if (altRes != null) return altRes
+        // Cross-type fallback: Only movie can fall back to series; series with episodes must NEVER fall back to movie
+        val canFallbackToMovie = (type != "series" && season == null && episode == null)
+        val altType = if (type == "movie") "series" else if (canFallbackToMovie) "movie" else null
+        if (altType != null) {
+            val altRes = searchTmdbInternal(title, altType, season, episode, apiKey, year)
+            if (altRes != null) return altRes
+        }
 
         // Strip trailing year (e.g. "Bleach 2004" -> "Bleach")
         val noYear = title.replace(Regex("\\s+(19|20)\\d{2}$"), "").trim()
         if (noYear.isNotBlank() && noYear != title) {
             val noYearRes = searchTmdbInternal(noYear, type, season, episode, apiKey, year)
-                ?: searchTmdbInternal(noYear, altType, season, episode, apiKey, year)
+                ?: if (altType != null) searchTmdbInternal(noYear, altType, season, episode, apiKey, year) else null
             if (noYearRes != null) return noYearRes
         }
 
         // Relaxed fallback without year parameter if year was provided but yielded nothing
         if (!year.isNullOrBlank()) {
             val relaxed = searchTmdbInternal(title, type, season, episode, apiKey, null)
-                ?: searchTmdbInternal(title, altType, season, episode, apiKey, null)
+                ?: if (altType != null) searchTmdbInternal(title, altType, season, episode, apiKey, null) else null
             if (relaxed != null) return relaxed
         }
 
@@ -1102,6 +1146,10 @@ class MetadataEnricher {
                             score -= 0.35
                         }
                     }
+                } else if (cleanYear.isNullOrBlank()) {
+                    val pop = try { cand.get("popularity")?.asDouble ?: 0.0 } catch (_: Exception) { 0.0 }
+                    val votes = try { cand.get("vote_count")?.asInt ?: 0 } catch (_: Exception) { 0 }
+                    score += (minOf(pop, 100.0) / 1000.0) + (minOf(votes.toDouble(), 5000.0) / 50000.0)
                 }
 
                 if (score > bestScore) {
@@ -1183,10 +1231,13 @@ class MetadataEnricher {
             }
         }
 
-        // Cross-type fallback: if movie was requested, try series, and vice-versa
-        val altType = if (type == "movie") "series" else "movie"
-        val altRes = searchCinemetaInternal(title, altType, year)
-        if (altRes != null) return altRes
+        // Cross-type fallback: Only movie can fall back to series; series must NEVER fall back to movie
+        val canFallbackToMovie = (type != "series")
+        val altType = if (type == "movie") "series" else if (canFallbackToMovie) "movie" else null
+        if (altType != null) {
+            val altRes = searchCinemetaInternal(title, altType, year)
+            if (altRes != null) return altRes
+        }
 
         val words = title.split(" ").filter { it.isNotBlank() }
         if (words.size > 2) {
@@ -1198,7 +1249,7 @@ class MetadataEnricher {
         // Relaxed fallback without year constraint if nothing matched
         if (!year.isNullOrBlank()) {
             val relaxed = searchCinemetaInternal(title, type, null)
-                ?: searchCinemetaInternal(title, altType, null)
+                ?: if (altType != null) searchCinemetaInternal(title, altType, null) else null
             if (relaxed != null) return relaxed
         }
 
@@ -1230,20 +1281,22 @@ class MetadataEnricher {
                     val rawYear = obj.get("year")?.asString ?: obj.get("releaseInfo")?.asString
                     val candYear = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(rawYear ?: "")?.groupValues?.get(1) ?: rawYear
 
-                    var score = calculateSimilarity(title, name)
-                    if (!cleanYear.isNullOrBlank() && !candYear.isNullOrBlank()) {
-                        if (candYear == cleanYear) {
-                            score += 0.35
+                var score = calculateSimilarity(title, name)
+                if (!cleanYear.isNullOrBlank() && !candYear.isNullOrBlank()) {
+                    if (candYear == cleanYear) {
+                        score += 0.35
+                    } else {
+                        val cY = candYear.toIntOrNull()
+                        val eY = cleanYear.toIntOrNull()
+                        if (cY != null && eY != null && Math.abs(cY - eY) <= 1) {
+                            score += 0.15
                         } else {
-                            val cY = candYear.toIntOrNull()
-                            val eY = cleanYear.toIntOrNull()
-                            if (cY != null && eY != null && Math.abs(cY - eY) <= 1) {
-                                score += 0.15
-                            } else {
-                                score -= 0.35
-                            }
+                            score -= 0.35
                         }
                     }
+                } else if (cleanYear.isNullOrBlank()) {
+                    score += (8 - i) * 0.005
+                }
 
                     if (score > bestScore) {
                         bestScore = score
@@ -1797,6 +1850,20 @@ class MetadataEnricher {
                         substrFound = true
                         break
                     }
+                    // Portmanteau detection for Japanese anime names (e.g. "kochikame" -> "kochira" + "kameari")
+                    if (qw.length >= 6) {
+                        for (splitIdx in 3..(qw.length - 3)) {
+                            val p1 = qw.substring(0, splitIdx)
+                            val p2 = qw.substring(splitIdx)
+                            val m1 = cAlpha.any { cw -> cw.length >= p1.length && cw.startsWith(p1) }
+                            val m2 = cAlpha.any { cw -> cw.length >= p2.length && cw.startsWith(p2) }
+                            if (m1 && m2) {
+                                substrFound = true
+                                break
+                            }
+                        }
+                        if (substrFound) break
+                    }
                 }
                 if (!substrFound) return 0.0
             }
@@ -1809,9 +1876,27 @@ class MetadataEnricher {
         val intersection = qSet.intersect(cSet).size
         var dice = 2.0 * intersection / (qSet.size + cSet.size)
 
-        // Substring bonus
-        if (nq.contains(nc) || nc.contains(nq)) {
+        // Substring bonus: If query is 1 word, only bump if candidate doesn't have extra distinct words
+        if (nq.contains(nc)) {
             dice = maxOf(dice, 0.75)
+        } else if (nc.contains(nq) && (qWords.size >= 2 || cWords.size == 1)) {
+            dice = maxOf(dice, 0.75)
+        }
+
+        // Portmanteau bonus for anime acronyms
+        for (qw in qAlpha) {
+            if (qw.length >= 6) {
+                for (splitIdx in 3..(qw.length - 3)) {
+                    val p1 = qw.substring(0, splitIdx)
+                    val p2 = qw.substring(splitIdx)
+                    val m1 = cAlpha.any { cw -> cw.length >= p1.length && cw.startsWith(p1) }
+                    val m2 = cAlpha.any { cw -> cw.length >= p2.length && cw.startsWith(p2) }
+                    if (m1 && m2) {
+                        dice = maxOf(dice, 0.85)
+                        break
+                    }
+                }
+            }
         }
 
         return dice
@@ -1827,9 +1912,14 @@ class MetadataEnricher {
     }
 
     private fun sanitizeTitle(name: String): String {
-        return name
+        var clean = name
             .replace(Regex("(?i)\\.(mkv|mp4|avi|mov|webm)$"), "")
             .replace(Regex("(?i)(2160p|1080p|720p|480p|4k|uhd|hdr|hevc|x264|x265|aac|dts|bluray|web-?dl|web-?rip|proper|repack|hq)"), "")
+            .replace(Regex("(?i)[\\[\\(]\\s*(?:franchise|collection|batch|ongoing|completed|complete|dubbed|subbed|dual\\s*audio|multi\\s*audio|multi|dual|anime|tv|ova|ona|special|movie|the\\s*movie|uncut|censored|uncensored)[\\]\\)]"), "")
+        if (Regex("[a-zA-Z]{2,}").containsMatchIn(clean)) {
+            clean = clean.replace(Regex("[\\s._\\-]*[\\u3040-\\u30ff\\u3400-\\u4dbf\\u4e00-\\u9fff]+[\\s._\\-]*"), " ")
+        }
+        return clean
             .replace(Regex("[\\[\\]\\(\\)\\._-]"), " ")
             .replace(Regex("\\s+"), " ")
             .trim()

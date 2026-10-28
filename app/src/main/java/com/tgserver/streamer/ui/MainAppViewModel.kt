@@ -819,6 +819,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                     episodeThumbnailUrl = newEpThumb,
                     imdbId = enriched.imdbId ?: meta.imdbId,
                     tmdbId = enriched.tmdbId ?: meta.tmdbId,
+                    tvdbId = enriched.tvdbId ?: meta.tvdbId ?: item.tvdbId,
                     kitsuId = enriched.kitsuId ?: meta.kitsuId ?: item.kitsuId,
                     isManuallyMatched = true,
                     lastModified = System.currentTimeMillis()
@@ -854,6 +855,9 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             val bestYear = targetGroup.year ?: sourceGroup.year
             val bestImdbId = targetGroup.imdbId ?: sourceGroup.imdbId
             val bestTmdbId = if ((targetGroup.tmdbId ?: 0) > 0) targetGroup.tmdbId else sourceGroup.tmdbId
+            val bestTvdbId = targetGroup.tvdbId ?: sourceGroup.tvdbId
+                ?: targetGroup.items.firstOrNull { (it.tvdbId ?: 0) > 0 }?.tvdbId
+                ?: sourceGroup.items.firstOrNull { (it.tvdbId ?: 0) > 0 }?.tvdbId
             val bestKitsuId = targetGroup.items.firstOrNull { (it.kitsuId ?: 0) > 0 }?.kitsuId
                 ?: sourceGroup.items.firstOrNull { (it.kitsuId ?: 0) > 0 }?.kitsuId
             val bestPoster = targetGroup.posterUrl ?: sourceGroup.posterUrl
@@ -867,6 +871,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                     year = bestYear,
                     imdbId = bestImdbId,
                     tmdbId = bestTmdbId,
+                    tvdbId = bestTvdbId,
                     kitsuId = bestKitsuId,
                     posterUrl = bestPoster,
                     backdropUrl = bestBackdrop,
@@ -891,6 +896,8 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             val newKey = when {
                 bestTmdbId != null && bestTmdbId > 0 -> "tmdb_${bestType}_$bestTmdbId"
                 !bestImdbId.isNullOrBlank() -> "imdb_$bestImdbId"
+                bestTvdbId != null && bestTvdbId > 0 -> "tvdb_${bestType}_$bestTvdbId"
+                bestKitsuId != null && bestKitsuId > 0 -> "kitsu_${bestType}_$bestKitsuId"
                 else -> "title_${bestType}_${bestTitle.trim().lowercase()}"
             }
 

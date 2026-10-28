@@ -892,6 +892,8 @@ class TelegramClientManager(private val context: Context) {
                 if (!epThumb.isNullOrBlank()) item.episodeThumbnailUrl = epThumb
                 if (!enriched.imdbId.isNullOrBlank()) item.imdbId = enriched.imdbId
                 if (enriched.tmdbId != null && enriched.tmdbId > 0) item.tmdbId = enriched.tmdbId
+                if (enriched.tvdbId != null && enriched.tvdbId > 0) item.tvdbId = enriched.tvdbId
+                if (enriched.kitsuId != null && enriched.kitsuId > 0) item.kitsuId = enriched.kitsuId
 
                 mediaIndex[item.id] = item
             }
@@ -1790,6 +1792,7 @@ class TelegramClientManager(private val context: Context) {
         if (!matchedMeta.backdropUrl.isNullOrBlank()) baseItem.backdropUrl = matchedMeta.backdropUrl
         if (!matchedMeta.imdbId.isNullOrBlank()) baseItem.imdbId = matchedMeta.imdbId
         if (matchedMeta.tmdbId != null && matchedMeta.tmdbId > 0) baseItem.tmdbId = matchedMeta.tmdbId
+        if (matchedMeta.tvdbId != null && matchedMeta.tvdbId > 0) baseItem.tvdbId = matchedMeta.tvdbId
         if (matchedMeta.kitsuId != null && matchedMeta.kitsuId > 0) baseItem.kitsuId = matchedMeta.kitsuId
         if (!matchedMeta.episodeThumbnailUrl.isNullOrBlank()) baseItem.episodeThumbnailUrl = matchedMeta.episodeThumbnailUrl
 
@@ -1850,6 +1853,7 @@ class TelegramClientManager(private val context: Context) {
             if (!matchedMeta.backdropUrl.isNullOrBlank()) baseItem.backdropUrl = matchedMeta.backdropUrl
             if (!matchedMeta.imdbId.isNullOrBlank()) baseItem.imdbId = matchedMeta.imdbId
             if (matchedMeta.tmdbId != null && matchedMeta.tmdbId > 0) baseItem.tmdbId = matchedMeta.tmdbId
+            if (matchedMeta.tvdbId != null && matchedMeta.tvdbId > 0) baseItem.tvdbId = matchedMeta.tvdbId
             if (matchedMeta.kitsuId != null && matchedMeta.kitsuId > 0) baseItem.kitsuId = matchedMeta.kitsuId
 
             val s = baseItem.season ?: 1

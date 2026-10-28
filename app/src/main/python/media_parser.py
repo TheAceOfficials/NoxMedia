@@ -252,6 +252,11 @@ def parse_media_filename(filename: str, caption: str = "", is_anime: bool = Fals
     cleaned_work = _CRC_RE.sub("", base_no_ext)
     cleaned_work = _TAG_BRACKET_RE.sub("", cleaned_work)
     cleaned_work = _REL_RE.sub("", cleaned_work)
+    cleaned_work = re.sub(
+        r"(?i)[\(\[]\s*(?:franchise|collection|batch|ongoing|completed|complete|dubbed|subbed|dual\s*audio|multi\s*audio|multi|dual|anime|tv|ova|ona|special|movie|the\s*movie|uncut|censored|uncensored)[\s._\-]*[\)\]]",
+        "",
+        cleaned_work
+    )
     
     # Strip leading uploader/channel brackets if actual title follows (e.g. [Toonworld4all] Dexters Lab...)
     leading_bracket = re.match(r"^(\[[^\]]+\]|\([^\)]+\)|【[^】]+】|\{[^\}]+\})\s*", cleaned_work)
@@ -347,7 +352,12 @@ def parse_media_filename(filename: str, caption: str = "", is_anime: bool = Fals
 
     # Clean delimiters
     clean_title = re.sub(r"[\._\(\)\[\]\-]+", " ", clean_title).strip()
-    clean_title = re.sub(r"\s+", " ", clean_title)
+    
+    # Strip decorative Japanese/CJK furigana tags when Latin title words are present
+    if re.search(r"[a-zA-Z]{2,}", clean_title):
+        clean_title = re.sub(r"[\s._\-]*[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]+[\s._\-]*", " ", clean_title)
+
+    clean_title = re.sub(r"\s+", " ", clean_title).strip()
 
     # Ensure clean_title is never empty
     if not clean_title:

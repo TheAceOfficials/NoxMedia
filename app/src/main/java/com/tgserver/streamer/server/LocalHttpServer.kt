@@ -250,6 +250,8 @@ class LocalHttpServer(
                 when {
                     !it.imdbId.isNullOrBlank() -> "imdb_${it.imdbId}"
                     it.tmdbId != null && it.tmdbId!! > 0 -> "tmdb_${it.tmdbId}"
+                    it.tvdbId != null && it.tvdbId!! > 0 -> "tvdb_${it.tvdbId}"
+                    it.kitsuId != null && it.kitsuId!! > 0 -> "kitsu_${it.kitsuId}"
                     !cleanYear.isNullOrBlank() -> "${cleanTitle}_$cleanYear"
                     else -> cleanTitle
                 }
@@ -261,6 +263,8 @@ class LocalHttpServer(
                 when {
                     !it.imdbId.isNullOrBlank() -> "imdb_${it.imdbId}"
                     it.tmdbId != null && it.tmdbId!! > 0 -> "tmdb_${it.tmdbId}"
+                    it.tvdbId != null && it.tvdbId!! > 0 -> "tvdb_${it.tvdbId}"
+                    it.kitsuId != null && it.kitsuId!! > 0 -> "kitsu_${it.kitsuId}"
                     !cleanYear.isNullOrBlank() -> "${cleanTitle}_$cleanYear"
                     else -> it.id
                 }
