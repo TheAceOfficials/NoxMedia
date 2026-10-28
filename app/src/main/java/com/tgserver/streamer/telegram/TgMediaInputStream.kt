@@ -16,7 +16,7 @@ class TgMediaInputStream(
     private val bridge: PyObject,
     private val streamId: String,
     private val totalBytesToRead: Long,
-    private val chunkSize: Int = 1048576,
+    private val chunkSize: Int = 2097152, // 2MB chunk buffer (doubled to minimize JNI calls and smooth streaming)
     private val onClosed: ((String) -> Unit)? = null
 ) : InputStream() {
 

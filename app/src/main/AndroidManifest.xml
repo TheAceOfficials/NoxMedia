@@ -21,6 +21,7 @@
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
         android:windowSoftInputMode="adjustResize"
+        android:largeHeap="true"
         android:theme="@style/Theme.TGServer">
         <activity
             android:name=".MainActivity"

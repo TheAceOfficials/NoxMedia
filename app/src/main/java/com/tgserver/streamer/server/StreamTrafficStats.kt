@@ -68,7 +68,22 @@ object StreamTrafficStats {
         val elapsed = now - lastSpeedCalcTime
         if (elapsed >= 950) {
             val bytesInWindow = windowBytes.getAndSet(0L)
-            currentSpeedBps = if (elapsed > 0) (bytesInWindow * 1000L) / elapsed else 0L
+            val instantBps = if (elapsed > 0) (bytesInWindow * 1000L) / elapsed else 0L
+
+            currentSpeedBps = if (instantBps > 0) {
+                if (currentSpeedBps > 0) {
+                    ((currentSpeedBps * 0.35) + (instantBps * 0.65)).toLong()
+                } else {
+                    instantBps
+                }
+            } else {
+                // If stream was active recently (within 2.5s), decay smoothly instead of jumping instantly to 0 B/s
+                if (now - lastActivityTime < 2500L && currentSpeedBps > 0) {
+                    (currentSpeedBps * 0.5).toLong()
+                } else {
+                    0L
+                }
+            }
             lastSpeedCalcTime = now
 
             // Batch-flush lifetime traffic to SharedPreferences once per second (1000x less disk I/O)

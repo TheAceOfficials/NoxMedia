@@ -8,7 +8,7 @@ import uuid
 import traceback
 import re
 from datetime import datetime
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from typing import List, Dict, Any, Optional, Tuple
 from pyrogram import Client, errors, raw
 import pyrogram.errors.rpc_error
@@ -1336,9 +1336,11 @@ class VirtualStreamSession:
         self.end_byte = end_byte
         self.total_to_read = max(0, end_byte - start_byte + 1)
         self.bytes_read = 0
-        self.buffer = bytearray()
-        # Pipeline buffer: queue maxsize dynamically based on buffer_mb (default 20MB)
-        q_size = max(4, min(64, _buffer_pipeline_mb))
+        self.chunk_deque: deque = deque()
+        self.current_partial: Optional[bytes] = None
+        self.current_partial_offset: int = 0
+        # Pipeline buffer: queue maxsize dynamically based on buffer_mb (min 20MB for rock-solid stability)
+        q_size = max(8, min(64, max(20, _buffer_pipeline_mb)))
         self.queue: asyncio.Queue = asyncio.Queue(maxsize=q_size)
         self._closed = False
         self._eof = False
@@ -1441,7 +1443,7 @@ class VirtualStreamSession:
                 first_msg_id = self.tasks[0]["msg_id"]
                 await _resolve_file_id(self.client, self.chat_id, first_msg_id)
 
-            MAX_IN_FLIGHT = min(3, max(2, _buffer_pipeline_mb // 8))
+            MAX_IN_FLIGHT = min(6, max(4, _buffer_pipeline_mb // 4))
             task_idx = 0
             total_tasks = len(self.tasks)
 
@@ -1526,40 +1528,73 @@ class VirtualStreamSession:
             self._has_logged_first_read = True
             _log_stream(f"Stream[{self.stream_id[:8]}]: First read_bytes from player (max_bytes={max_bytes})")
 
-        # Drain all items already queued into buffer
+        # Drain all items already queued into chunk_deque
         while not self.queue.empty():
             item = self.queue.get_nowait()
             if item is None:
                 self._eof = True
                 break
-            self.buffer.extend(item)
+            if item:
+                self.chunk_deque.append(item)
 
         # If buffer is empty and stream is active, wait for the first incoming chunk
-        if not self.buffer and not self._closed and not self._eof:
+        if not self.chunk_deque and self.current_partial is None and not self._closed and not self._eof:
             try:
                 item = await asyncio.wait_for(self.queue.get(), timeout=30.0)
                 if item is None:
                     self._eof = True
-                else:
-                    self.buffer.extend(item)
+                elif item:
+                    self.chunk_deque.append(item)
                     # Drain any additional items that completed in the meantime
                     while not self.queue.empty():
                         extra = self.queue.get_nowait()
                         if extra is None:
                             self._eof = True
                             break
-                        self.buffer.extend(extra)
+                        if extra:
+                            self.chunk_deque.append(extra)
             except asyncio.TimeoutError:
                 _log_stream(f"Stream[{self.stream_id[:8]}]: Timeout waiting for stream queue from Telegram", level="W")
                 self._eof = True
 
-        if not self.buffer:
+        if not self.chunk_deque and self.current_partial is None:
             return b""
-        to_take = min(max_bytes, len(self.buffer))
-        result = bytes(self.buffer[:to_take])
-        del self.buffer[:to_take]
-        self.bytes_read += len(result)
-        return result
+
+        parts = []
+        collected = 0
+
+        # First consume leftover from previous partial chunk
+        if self.current_partial is not None:
+            rem = len(self.current_partial) - self.current_partial_offset
+            if rem <= (max_bytes - collected):
+                parts.append(self.current_partial[self.current_partial_offset:])
+                collected += rem
+                self.current_partial = None
+                self.current_partial_offset = 0
+            else:
+                take = max_bytes - collected
+                parts.append(self.current_partial[self.current_partial_offset:self.current_partial_offset + take])
+                self.current_partial_offset += take
+                collected += take
+                self.bytes_read += collected
+                return parts[0] if len(parts) == 1 else b"".join(parts)
+
+        # Pull whole or partial chunks from deque without memmove
+        while self.chunk_deque and collected < max_bytes:
+            head = self.chunk_deque[0]
+            needed = max_bytes - collected
+            if len(head) <= needed:
+                parts.append(self.chunk_deque.popleft())
+                collected += len(head)
+            else:
+                parts.append(head[:needed])
+                self.current_partial = self.chunk_deque.popleft()
+                self.current_partial_offset = needed
+                collected += needed
+                break
+
+        self.bytes_read += collected
+        return parts[0] if len(parts) == 1 else b"".join(parts)
 
     def close(self):
         if not self._closed:
@@ -1584,7 +1619,9 @@ class VirtualStreamSession:
                 if not t.done():
                     t.cancel()
             self.active_tasks.clear()
-            self.buffer.clear()
+            self.chunk_deque.clear()
+            self.current_partial = None
+            self.current_partial_offset = 0
             while not self.queue.empty():
                 try:
                     self.queue.get_nowait()
@@ -1643,7 +1680,7 @@ def create_stream(api_id: int, api_hash: str, session_str: str, chat_id: int, pa
             raise RuntimeError(f"AUTH_KEY_UNREGISTERED: Telegram session expired: {e}")
         return ""
 
-def read_stream_chunk(stream_id: str, max_bytes: int = 1048576) -> bytes:
+def read_stream_chunk(stream_id: str, max_bytes: int = 2097152) -> bytes:
     """
     Reads the next slice of bytes from pre-buffered queue for the given stream_id synchronously.
     Returns bytes or empty bytes(0) when finished. Matches 1MB MTProto chunking.
