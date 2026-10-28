@@ -823,13 +823,15 @@ class TelegramClientManager(private val context: Context) {
                 tmdbId = primaryItem.tmdbId
             )
             val tmdbKey = prefs.getString("tmdb_api_key", "") ?: ""
+            val tvdbKey = prefs.getString("tvdb_api_key", "") ?: ""
 
-            val (enriched, episodeMap) = MetadataEnricher.fetchFullMetadataDetails(baseMeta, tmdbKey)
+            val (enriched, episodeMap, episodeThumbMap) = MetadataEnricher.fetchFullMetadataDetails(baseMeta, tmdbKey, tvdbKey)
 
             for (item in currentGroupItems) {
                 val s = item.season
                 val e = item.episode
                 val epTitle = if (s != null && e != null) episodeMap[Pair(s, e)] ?: item.episodeTitle else item.episodeTitle
+                val epThumb = if (s != null && e != null) episodeThumbMap[Pair(s, e)] ?: item.episodeThumbnailUrl else item.episodeThumbnailUrl
 
                 item.title = enriched.title ?: baseMeta.title ?: item.title
                 item.year = enriched.year ?: baseMeta.year ?: item.year
@@ -837,6 +839,7 @@ class TelegramClientManager(private val context: Context) {
                 item.posterUrl = enriched.posterUrl ?: baseMeta.posterUrl ?: item.posterUrl
                 item.backdropUrl = enriched.backdropUrl ?: baseMeta.backdropUrl ?: item.backdropUrl
                 item.episodeTitle = epTitle
+                if (!epThumb.isNullOrBlank()) item.episodeThumbnailUrl = epThumb
                 if (!enriched.imdbId.isNullOrBlank()) item.imdbId = enriched.imdbId
                 if (enriched.tmdbId != null && enriched.tmdbId > 0) item.tmdbId = enriched.tmdbId
 
@@ -1738,6 +1741,7 @@ class TelegramClientManager(private val context: Context) {
         if (!matchedMeta.imdbId.isNullOrBlank()) baseItem.imdbId = matchedMeta.imdbId
         if (matchedMeta.tmdbId != null && matchedMeta.tmdbId > 0) baseItem.tmdbId = matchedMeta.tmdbId
         if (matchedMeta.kitsuId != null && matchedMeta.kitsuId > 0) baseItem.kitsuId = matchedMeta.kitsuId
+        if (!matchedMeta.episodeThumbnailUrl.isNullOrBlank()) baseItem.episodeThumbnailUrl = matchedMeta.episodeThumbnailUrl
 
         baseItem.isManuallyMatched = true
         baseItem.lastModified = System.currentTimeMillis()
@@ -1760,7 +1764,8 @@ class TelegramClientManager(private val context: Context) {
         unmatchedIds: Collection<String>,
         matchedMeta: com.tgserver.streamer.metadata.EnrichedMetadata,
         targetType: String? = null,
-        episodeMap: Map<Pair<Int, Int>, String> = emptyMap()
+        episodeMap: Map<Pair<Int, Int>, String> = emptyMap(),
+        episodeThumbMap: Map<Pair<Int, Int>, String> = emptyMap()
     ): List<MediaItem> = withContext(Dispatchers.IO) {
         val matchedList = mutableListOf<MediaItem>()
         val touchedChannels = mutableSetOf<Long>()
@@ -1801,6 +1806,11 @@ class TelegramClientManager(private val context: Context) {
             val e = baseItem.episode
             if (e != null && episodeMap.containsKey(Pair(s, e))) {
                 baseItem.episodeTitle = episodeMap[Pair(s, e)]
+            }
+            if (e != null && episodeThumbMap.containsKey(Pair(s, e))) {
+                baseItem.episodeThumbnailUrl = episodeThumbMap[Pair(s, e)]
+            } else if (!matchedMeta.episodeThumbnailUrl.isNullOrBlank()) {
+                baseItem.episodeThumbnailUrl = matchedMeta.episodeThumbnailUrl
             }
 
             baseItem.isManuallyMatched = true

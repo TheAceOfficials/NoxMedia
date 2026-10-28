@@ -2938,7 +2938,7 @@ private fun EpisodeGroupAccordionRow(
     val anyHidden = epItems.any { it.isHidden }
 
     // Resolve 16:9 Episode Thumbnail URL
-    val epThumbUrl: String? = remember(epNum, primary.season, groupImdbId, groupBackdropUrl, groupPosterUrl) {
+    val epThumbUrl: String? = remember(epNum, primary.season, primary.episodeThumbnailUrl, groupImdbId, groupBackdropUrl, groupPosterUrl) {
         val directThumb = primary.episodeThumbnailUrl
         if (!directThumb.isNullOrBlank()) {
             directThumb

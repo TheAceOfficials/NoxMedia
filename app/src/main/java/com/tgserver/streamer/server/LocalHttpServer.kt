@@ -318,13 +318,35 @@ class LocalHttpServer(
                 val s = ep.season ?: 1
                 val e = ep.episode ?: 1
                 val epId = if (!ep.imdbId.isNullOrBlank()) "${ep.imdbId}:$s:$e" else "${cleanId}:$s:$e"
-                mapOf(
+
+                // Resolve episode thumbnail: Direct thumb -> Metahub IMDb -> Ep Backdrop -> Item Backdrop -> Poster
+                val epThumb = when {
+                    !ep.episodeThumbnailUrl.isNullOrBlank() -> ep.episodeThumbnailUrl
+                    !ep.imdbId.isNullOrBlank() && ep.imdbId!!.startsWith("tt", ignoreCase = true) ->
+                        "https://episodes.metahub.space/${ep.imdbId}/$s/$e/w780.jpg"
+                    !cleanId.isNullOrBlank() && cleanId.startsWith("tt", ignoreCase = true) ->
+                        "https://episodes.metahub.space/$cleanId/$s/$e/w780.jpg"
+                    !item.imdbId.isNullOrBlank() && item.imdbId!!.startsWith("tt", ignoreCase = true) ->
+                        "https://episodes.metahub.space/${item.imdbId}/$s/$e/w780.jpg"
+                    !ep.backdropUrl.isNullOrBlank() -> ep.backdropUrl
+                    !item.backdropUrl.isNullOrBlank() -> item.backdropUrl
+                    else -> poster
+                }
+
+                val epMap = mutableMapOf<String, Any?>(
                     "id" to epId,
                     "title" to (ep.episodeTitle ?: "Episode $e"),
                     "season" to s,
                     "episode" to e,
                     "released" to "${ep.year ?: "2024"}-01-01T00:00:00.000Z"
                 )
+                if (!epThumb.isNullOrBlank()) {
+                    epMap["thumbnail"] = epThumb
+                }
+                if (!ep.overview.isNullOrBlank()) {
+                    epMap["overview"] = ep.overview
+                }
+                epMap
             }
         } else null
 

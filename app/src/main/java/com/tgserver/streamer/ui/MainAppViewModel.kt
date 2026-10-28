@@ -599,8 +599,9 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     ) {
         viewModelScope.launch {
             val tmdbKey = prefs.getString("tmdb_api_key", "") ?: ""
-            val (enriched, episodeMap) = withContext(Dispatchers.IO) {
-                MetadataEnricher.fetchFullMetadataDetails(matchedMeta, tmdbKey)
+            val tvdbKey = prefs.getString("tvdb_api_key", "") ?: ""
+            val (enriched, episodeMap, episodeThumbMap) = withContext(Dispatchers.IO) {
+                MetadataEnricher.fetchFullMetadataDetails(matchedMeta, tmdbKey, tvdbKey)
             }
             val finalMeta = matchedMeta.copy(
                 title = enriched.title ?: matchedMeta.title,
@@ -610,7 +611,8 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                 backdropUrl = enriched.backdropUrl ?: matchedMeta.backdropUrl,
                 imdbId = enriched.imdbId ?: matchedMeta.imdbId,
                 tmdbId = enriched.tmdbId ?: matchedMeta.tmdbId,
-                kitsuId = enriched.kitsuId ?: matchedMeta.kitsuId
+                kitsuId = enriched.kitsuId ?: matchedMeta.kitsuId,
+                episodeThumbnailUrl = enriched.episodeThumbnailUrl ?: matchedMeta.episodeThumbnailUrl
             )
             val item = tgClient.matchUnmatchedItem(unmatchedId, finalMeta, targetType)
             if (item != null) {
@@ -618,8 +620,11 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                 val e = item.episode
                 if (e != null && episodeMap.containsKey(Pair(s, e))) {
                     item.episodeTitle = episodeMap[Pair(s, e)]
-                    tgClient.saveMediaIndex()
                 }
+                if (e != null && episodeThumbMap.containsKey(Pair(s, e))) {
+                    item.episodeThumbnailUrl = episodeThumbMap[Pair(s, e)]
+                }
+                tgClient.saveMediaIndex()
                 triggerAutoCloudBackupDebounced(4000L)
                 Toast.makeText(getApplication(), "✓ Matched: ${item.title}", Toast.LENGTH_SHORT).show()
                 onDone(true)
@@ -659,8 +664,9 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         }
         viewModelScope.launch {
             val tmdbKey = prefs.getString("tmdb_api_key", "") ?: ""
-            val (enriched, episodeMap) = withContext(Dispatchers.IO) {
-                MetadataEnricher.fetchFullMetadataDetails(matchedMeta, tmdbKey)
+            val tvdbKey = prefs.getString("tvdb_api_key", "") ?: ""
+            val (enriched, episodeMap, episodeThumbMap) = withContext(Dispatchers.IO) {
+                MetadataEnricher.fetchFullMetadataDetails(matchedMeta, tmdbKey, tvdbKey)
             }
             val finalMeta = matchedMeta.copy(
                 title = enriched.title ?: matchedMeta.title,
@@ -670,9 +676,10 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                 backdropUrl = enriched.backdropUrl ?: matchedMeta.backdropUrl,
                 imdbId = enriched.imdbId ?: matchedMeta.imdbId,
                 tmdbId = enriched.tmdbId ?: matchedMeta.tmdbId,
-                kitsuId = enriched.kitsuId ?: matchedMeta.kitsuId
+                kitsuId = enriched.kitsuId ?: matchedMeta.kitsuId,
+                episodeThumbnailUrl = enriched.episodeThumbnailUrl ?: matchedMeta.episodeThumbnailUrl
             )
-            val matched = tgClient.matchUnmatchedItemsBatch(unmatchedIds, finalMeta, targetType, episodeMap)
+            val matched = tgClient.matchUnmatchedItemsBatch(unmatchedIds, finalMeta, targetType, episodeMap, episodeThumbMap)
             if (matched.isNotEmpty()) {
                 triggerAutoCloudBackupDebounced(4000L)
                 Toast.makeText(getApplication(), "✓ Matched ${matched.size} items with ${finalMeta.title}", Toast.LENGTH_SHORT).show()
@@ -773,7 +780,8 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     fun applyManualMetadata(groupItems: List<MediaItem>, meta: EnrichedMetadata, targetType: String? = null) {
         viewModelScope.launch(Dispatchers.IO) {
             val tmdbKey = prefs.getString("tmdb_api_key", "") ?: ""
-            val (enriched, episodeMap) = MetadataEnricher.fetchFullMetadataDetails(meta, tmdbKey)
+            val tvdbKey = prefs.getString("tvdb_api_key", "") ?: ""
+            val (enriched, episodeMap, episodeThumbMap) = MetadataEnricher.fetchFullMetadataDetails(meta, tmdbKey, tvdbKey)
             val effectiveType = if (targetType == "anime" || meta.kitsuId != null) "series" else (targetType ?: meta.type ?: groupItems.firstOrNull()?.type ?: "movie")
 
             val updated = groupItems.mapIndexed { index, item ->
@@ -785,6 +793,10 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                     episodeMap[Pair(s, e)] ?: item.episodeTitle ?: "Episode $e"
                 } else null
 
+                val newEpThumb = if (s != null && e != null) {
+                    episodeThumbMap[Pair(s, e)] ?: item.episodeThumbnailUrl
+                } else item.episodeThumbnailUrl
+
                 item.copy(
                     title = enriched.title ?: meta.title ?: item.title,
                     type = effectiveType,
@@ -795,6 +807,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                     posterUrl = enriched.posterUrl ?: meta.posterUrl ?: item.posterUrl,
                     backdropUrl = enriched.backdropUrl ?: meta.backdropUrl ?: item.backdropUrl,
                     episodeTitle = newEpTitle,
+                    episodeThumbnailUrl = newEpThumb,
                     imdbId = enriched.imdbId ?: meta.imdbId,
                     tmdbId = enriched.tmdbId ?: meta.tmdbId,
                     kitsuId = enriched.kitsuId ?: meta.kitsuId ?: item.kitsuId,
