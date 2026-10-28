@@ -242,11 +242,29 @@ class LocalHttpServer(
             }
         }
 
-        // For series, group by title so multiple episodes show as a single series card
+        // For series and movies, group by verified media ID or title+year so multiple files/episodes show under the proper card without collapsing different releases
         val distinctShows = if (isSeries || isAnime) {
-            mediaList.distinctBy { it.title.lowercase().trim() }
+            mediaList.distinctBy {
+                val cleanTitle = it.title.lowercase().trim()
+                val cleanYear = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(it.year ?: "")?.groupValues?.get(1)
+                when {
+                    !it.imdbId.isNullOrBlank() -> "imdb_${it.imdbId}"
+                    it.tmdbId != null && it.tmdbId!! > 0 -> "tmdb_${it.tmdbId}"
+                    !cleanYear.isNullOrBlank() -> "${cleanTitle}_$cleanYear"
+                    else -> cleanTitle
+                }
+            }
         } else {
-            mediaList
+            mediaList.distinctBy {
+                val cleanTitle = it.title.lowercase().trim()
+                val cleanYear = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(it.year ?: "")?.groupValues?.get(1)
+                when {
+                    !it.imdbId.isNullOrBlank() -> "imdb_${it.imdbId}"
+                    it.tmdbId != null && it.tmdbId!! > 0 -> "tmdb_${it.tmdbId}"
+                    !cleanYear.isNullOrBlank() -> "${cleanTitle}_$cleanYear"
+                    else -> it.id
+                }
+            }
         }
 
         val metasArray = distinctShows.map { item ->

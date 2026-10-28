@@ -1998,10 +1998,18 @@ class TelegramClientManager(private val context: Context) {
                 mediaIndex[item.id] = item
                 updatedCount++
             } else {
+                // Never let older cloud items overwrite local items that were manually matched or modified more recently
+                if (existing.isManuallyMatched && !item.isManuallyMatched) {
+                    return@forEach
+                }
+                if (existing.lastModified > item.lastModified && existing.lastModified > 0L) {
+                    return@forEach
+                }
+
                 val shouldOverwrite = (item.isManuallyMatched && !existing.isManuallyMatched) ||
-                        (item.isManuallyMatched == existing.isManuallyMatched && (item.lastModified > existing.lastModified || item.dateAdded >= existing.dateAdded)) ||
+                        (item.lastModified > existing.lastModified) ||
                         (!item.imdbId.isNullOrBlank() && existing.imdbId.isNullOrBlank()) ||
-                        (item.lastModified > existing.lastModified && item.isHidden != existing.isHidden)
+                        (item.dateAdded > existing.dateAdded)
                 if (shouldOverwrite) {
                     mediaIndex[item.id] = item
                     updatedCount++

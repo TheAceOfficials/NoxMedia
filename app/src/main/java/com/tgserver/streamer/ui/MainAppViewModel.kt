@@ -233,15 +233,15 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
 
     private var autoBackupJob: Job? = null
 
-    fun triggerAutoCloudBackupDebounced(delayMs: Long = 4000L) {
+    fun triggerAutoCloudBackupDebounced(delayMs: Long = 0L) {
         val cfg = _config.value
-        if (!cfg.autoBackupEnabled && !cfg.cloudSyncLibrary) {
-            return
-        }
         if (!session.value.isLoggedIn) return
         autoBackupJob?.cancel()
-        autoBackupJob = viewModelScope.launch(Dispatchers.IO) {
-            delay(delayMs)
+        // Execute on persistent tgClient background job so cloud backup completes even if app/activity is closed
+        autoBackupJob = tgClient.launchBackgroundJob {
+            if (delayMs > 0L) {
+                delay(delayMs)
+            }
             try {
                 val dest = cfg.backupDestination.ifBlank { "me" }
                 val backupJson = exportBackupJson()
@@ -515,9 +515,10 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                 val newCount = res.getOrDefault(0)
                 val totalCount = channels.value.find { it.id == channelId }?.videoCount ?: newCount
                 if (newCount > 0) {
-                    triggerAutoCloudBackupDebounced(4000L)
+                    triggerAutoCloudBackupDebounced(0L)
                     Toast.makeText(getApplication(), "✓ Synced: $newCount new video(s) added (${ch?.title ?: "channel"})", Toast.LENGTH_SHORT).show()
                 } else {
+                    triggerAutoCloudBackupDebounced(0L)
                     Toast.makeText(getApplication(), "✓ ${ch?.title ?: "Channel"} is up to date ($totalCount videos)", Toast.LENGTH_SHORT).show()
                 }
             } else {
@@ -551,8 +552,8 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                 }
             }
             _isScanningAll.value = false
+            triggerAutoCloudBackupDebounced(0L)
             if (totalNew > 0) {
-                triggerAutoCloudBackupDebounced(4000L)
                 Toast.makeText(getApplication(), "✓ Sync complete: $totalNew new video(s) added across active channels", Toast.LENGTH_SHORT).show()
             } else {
                 Toast.makeText(getApplication(), "✓ All channels are up to date", Toast.LENGTH_SHORT).show()
@@ -568,9 +569,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             _scanningChannelIds.value = _scanningChannelIds.value - channelId
             if (res.isSuccess) {
                 val count = res.getOrDefault(0)
-                if (count > 0) {
-                    triggerAutoCloudBackupDebounced(4000L)
-                }
+                triggerAutoCloudBackupDebounced(0L)
                 Toast.makeText(getApplication(), "✓ Clean rescan: $count videos found for ${ch?.title ?: "channel"}", Toast.LENGTH_SHORT).show()
             } else {
                 Toast.makeText(getApplication(), "Rescan failed: ${res.exceptionOrNull()?.message}", Toast.LENGTH_SHORT).show()
@@ -629,7 +628,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                     item.episodeThumbnailUrl = episodeThumbMap[Pair(s, e)]
                 }
                 tgClient.saveMediaIndex()
-                triggerAutoCloudBackupDebounced(4000L)
+                triggerAutoCloudBackupDebounced(0L)
                 Toast.makeText(getApplication(), "✓ Matched: ${item.title}", Toast.LENGTH_SHORT).show()
                 onDone(true)
             } else {
@@ -642,6 +641,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     fun addUnmatchedToLibraryAnyway(unmatchedId: String) {
         val item = tgClient.addUnmatchedToLibraryAnyway(unmatchedId)
         if (item != null) {
+            triggerAutoCloudBackupDebounced(0L)
             Toast.makeText(getApplication(), "✓ Added to library: ${item.title}", Toast.LENGTH_SHORT).show()
         }
     }
@@ -685,7 +685,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             )
             val matched = tgClient.matchUnmatchedItemsBatch(unmatchedIds, finalMeta, targetType, episodeMap, episodeThumbMap)
             if (matched.isNotEmpty()) {
-                triggerAutoCloudBackupDebounced(4000L)
+                triggerAutoCloudBackupDebounced(0L)
                 Toast.makeText(getApplication(), "✓ Matched ${matched.size} items with ${finalMeta.title}", Toast.LENGTH_SHORT).show()
                 onDone(matched.size)
             } else {
@@ -710,6 +710,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         if (unmatchedIds.isEmpty()) return
         val added = tgClient.addUnmatchedToLibraryAnywayBatch(unmatchedIds)
         if (added.isNotEmpty()) {
+            triggerAutoCloudBackupDebounced(0L)
             Toast.makeText(getApplication(), "✓ Added ${added.size} items to library", Toast.LENGTH_SHORT).show()
         }
     }
@@ -735,6 +736,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             val enriched = tgClient.enrichExistingMedia(item.id)
             if (enriched != null) {
+                triggerAutoCloudBackupDebounced(0L)
                 Toast.makeText(getApplication(), "✓ Metadata enriched: ${enriched.title}", Toast.LENGTH_SHORT).show()
             }
         }
@@ -748,6 +750,9 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                 val enriched = tgClient.enrichExistingMedia(item.id)
                 if (enriched != null) count++
             }
+            if (count > 0) {
+                triggerAutoCloudBackupDebounced(0L)
+            }
             Toast.makeText(getApplication(), "✓ Enriched metadata for $count items", Toast.LENGTH_SHORT).show()
         }
     }
@@ -756,7 +761,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         val newState = tgClient.toggleHideMediaItem(itemId)
         val msg = if (newState) "Item hidden from Stremio" else "Item unhidden"
         Toast.makeText(getApplication(), msg, Toast.LENGTH_SHORT).show()
-        triggerAutoCloudBackupDebounced()
+        triggerAutoCloudBackupDebounced(0L)
         return newState
     }
 
@@ -765,7 +770,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         tgClient.setMediaItemsHidden(ids, hide)
         val action = if (hide) "hidden & blacklisted" else "unhidden"
         Toast.makeText(getApplication(), "✓ \"${group.title}\" $action", Toast.LENGTH_SHORT).show()
-        triggerAutoCloudBackupDebounced()
+        triggerAutoCloudBackupDebounced(0L)
     }
 
     fun setMultipleGroupsHidden(groups: List<MediaGroup>, hide: Boolean) {
@@ -773,7 +778,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         tgClient.setMediaItemsHidden(ids, hide)
         val action = if (hide) "hidden & blacklisted" else "unhidden"
         Toast.makeText(getApplication(), "✓ ${groups.size} titles $action", Toast.LENGTH_SHORT).show()
-        triggerAutoCloudBackupDebounced()
+        triggerAutoCloudBackupDebounced(0L)
     }
 
     suspend fun searchMetadataCandidates(query: String, type: String): List<EnrichedMetadata> = withContext(Dispatchers.IO) {
@@ -831,7 +836,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             StreamerForegroundService.activeServer?.clearTitleCache()
 
             tgClient.updateMediaItems(updated)
-            triggerAutoCloudBackupDebounced(4000L)
+            triggerAutoCloudBackupDebounced(0L)
             withContext(Dispatchers.Main) {
                 Toast.makeText(
                     getApplication(),
@@ -881,7 +886,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             StreamerForegroundService.activeServer?.clearTitleCache()
 
             tgClient.updateMediaItems(allItemsToUpdate)
-            triggerAutoCloudBackupDebounced(4000L)
+            triggerAutoCloudBackupDebounced(0L)
 
             val newKey = when {
                 bestTmdbId != null && bestTmdbId > 0 -> "tmdb_${bestType}_$bestTmdbId"
@@ -1406,6 +1411,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     fun refreshContentGroup(groupItems: List<MediaItem>, onFinished: ((Triple<Int, Int, Int>) -> Unit)? = null) {
         viewModelScope.launch(Dispatchers.IO) {
             val result = tgClient.refreshContentGroup(groupItems)
+            triggerAutoCloudBackupDebounced(0L)
             withContext(Dispatchers.Main) {
                 val (aliveCount, deadPurged, newAdded) = result
                 val msg = buildString {
@@ -1499,7 +1505,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             put("settings", settingsObj)
             put("channels", channelsJsonArray)
             put("mediaCount", mediaList.size)
-            if (cfg.cloudSyncLibrary && mediaList.isNotEmpty()) {
+            if (mediaList.isNotEmpty()) {
                 put("mediaItems", JSONArray(Gson().toJson(mediaList)))
             }
         }

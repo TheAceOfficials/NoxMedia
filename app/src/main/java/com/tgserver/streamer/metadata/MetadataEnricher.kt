@@ -129,7 +129,7 @@ class MetadataEnricher {
             try {
                 var tvdbId = meta.tvdbId
                 if (tvdbId == null && !meta.title.isNullOrBlank()) {
-                    val tvdbRes = tryTvdb(meta.title, meta.type ?: "series", tvdbKey)
+                    val tvdbRes = tryTvdb(meta.title, meta.type ?: "series", tvdbKey, year = meta.year)
                     if (tvdbRes != null && tvdbRes.tvdbId != null) {
                         tvdbId = tvdbRes.tvdbId
                         resultMeta = resultMeta.copy(
@@ -418,14 +418,15 @@ class MetadataEnricher {
         val queryTitle = sanitizeTitle(item.title)
         if (queryTitle.isBlank()) return
 
-        val cacheKey = "$queryTitle:${item.type}:${item.season}:${item.episode}:${isAnimeChannel}:$animePreference"
+        val cleanYear = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(item.year ?: "")?.groupValues?.get(1) ?: ""
+        val cacheKey = "$queryTitle:${item.type}:$cleanYear:${item.season}:${item.episode}:${isAnimeChannel}:$animePreference"
         cache[cacheKey]?.let { cached ->
             applyMetadata(item, cached)
             return
         }
 
         // Fast path for series: If show metadata is already cached, reuse it!
-        val showKey = "${queryTitle.lowercase()}:${item.type}"
+        val showKey = "${queryTitle.lowercase()}:${item.type}:$cleanYear"
         if (item.type == "series") {
             showCache[showKey]?.let { cachedShow ->
                 var epTitle: String? = null
@@ -475,12 +476,12 @@ class MetadataEnricher {
         if (isAnimeChannel) {
             // 1. TVDB
             if (tvdbKey.isNotBlank()) {
-                val tvdbRes = tryTvdb(queryTitle, item.type, tvdbKey, item.season, item.episode)
+                val tvdbRes = tryTvdb(queryTitle, item.type, tvdbKey, item.season, item.episode, year = item.year)
                 if (tvdbRes != null) result = tvdbRes
             }
             // 2. TMDB
             if (tmdbKey.isNotBlank()) {
-                val tmdbRes = tryTmdb(queryTitle, item.type, item.season, item.episode, tmdbKey)
+                val tmdbRes = tryTmdb(queryTitle, item.type, item.season, item.episode, tmdbKey, year = item.year)
                 if (tmdbRes != null) {
                     result = if (result != null) {
                         result.copy(
@@ -510,11 +511,11 @@ class MetadataEnricher {
         } else {
             // Standard Series/Movie Pipeline: TVDB -> TMDB -> Cinemeta
             if (tvdbKey.isNotBlank() && item.type == "series") {
-                val tvdbRes = tryTvdb(queryTitle, item.type, tvdbKey, item.season, item.episode)
+                val tvdbRes = tryTvdb(queryTitle, item.type, tvdbKey, item.season, item.episode, year = item.year)
                 if (tvdbRes != null) result = tvdbRes
             }
             if (tmdbKey.isNotBlank()) {
-                val tmdbRes = tryTmdb(queryTitle, item.type, item.season, item.episode, tmdbKey)
+                val tmdbRes = tryTmdb(queryTitle, item.type, item.season, item.episode, tmdbKey, year = item.year)
                 if (tmdbRes != null) {
                     result = if (result != null) {
                         result.copy(
@@ -535,7 +536,7 @@ class MetadataEnricher {
 
         // Cinemeta Fallback & IMDb ID Resolver (Free, no key needed)
         if (result == null || result.imdbId.isNullOrBlank()) {
-            val cinemetaRes = tryCinemeta(queryTitle, item.type)
+            val cinemetaRes = tryCinemeta(queryTitle, item.type, year = item.year)
             if (cinemetaRes != null) {
                 result = if (result != null) {
                     result.copy(
@@ -871,84 +872,125 @@ class MetadataEnricher {
         type: String,
         apiKey: String,
         season: Int? = null,
-        episode: Int? = null
+        episode: Int? = null,
+        year: String? = null
     ): EnrichedMetadata? {
         val token = getTvdbAuthToken(apiKey) ?: return null
         try {
             val enc = URLEncoder.encode(title, "UTF-8")
-            val url = "https://api4.thetvdb.com/v4/search?query=$enc"
+            val cleanYear = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(year ?: "")?.groupValues?.get(1)
+            val yearParam = if (!cleanYear.isNullOrBlank()) "&year=$cleanYear" else ""
+            val url = "https://api4.thetvdb.com/v4/search?query=$enc$yearParam"
             val req = Request.Builder()
                 .url(url)
                 .addHeader("Authorization", "Bearer $token")
                 .build()
 
+            var data: com.google.gson.JsonArray? = null
             httpClient.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return null
-                val body = resp.body?.string() ?: return null
-                val root = JsonParser.parseString(body).asJsonObject
-                val data = root.getAsJsonArray("data") ?: return null
-                if (data.size() == 0) return null
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string()
+                    if (!body.isNullOrBlank()) {
+                        val root = JsonParser.parseString(body).asJsonObject
+                        data = root.getAsJsonArray("data")
+                    }
+                }
+            }
 
-                var bestCandidate: EnrichedMetadata? = null
-                var bestScore = 0.0
-
-                for (i in 0 until minOf(data.size(), 8)) {
-                    val cand = data[i].asJsonObject
-                    val name = cand.get("name")?.asString ?: continue
-                    val score = calculateSimilarity(title, name)
-                    if (score > bestScore) {
-                        bestScore = score
-                        val year = cand.get("year")?.asString
-                        val overview = cand.get("overview")?.asString
-                        val rawImg = cand.get("image_url")?.asString ?: cand.get("thumbnail")?.asString
-                        val imageUrl = if (!rawImg.isNullOrBlank()) {
-                            var fixed = if (!rawImg.startsWith("http://") && !rawImg.startsWith("https://")) {
-                                "https://artworks.thetvdb.com/" + rawImg.removePrefix("/")
-                            } else {
-                                rawImg
-                            }
-                            if (fixed.endsWith("_t.jpg")) {
-                                fixed = fixed.replace(Regex("_t\\.jpg$"), ".jpg")
-                            } else if (fixed.contains("/_cache/")) {
-                                fixed = fixed.replace("/_cache/", "/")
-                            }
-                            fixed
-                        } else null
-
-                        val tvdbId = cand.get("tvdb_id")?.asString?.toIntOrNull()
-                            ?: cand.get("id")?.asString?.removePrefix("series-")?.toIntOrNull()
-
-                        var epTitle: String? = null
-                        var epThumb: String? = null
-                        var epRuntime: Int? = null
-                        if (type == "series" && season != null && episode != null && tvdbId != null) {
-                            val epInfo = fetchTvdbEpisodeInfo(tvdbId, season, episode, apiKey)
-                            if (epInfo != null) {
-                                epTitle = epInfo.title
-                                epThumb = epInfo.thumbnailUrl
-                                epRuntime = epInfo.runtimeMinutes
-                            }
+            // Fallback without year constraint if year query yielded no results
+            if ((data == null || data!!.size() == 0) && yearParam.isNotEmpty()) {
+                val fallbackReq = Request.Builder()
+                    .url("https://api4.thetvdb.com/v4/search?query=$enc")
+                    .addHeader("Authorization", "Bearer $token")
+                    .build()
+                httpClient.newCall(fallbackReq).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string()
+                        if (!body.isNullOrBlank()) {
+                            val root = JsonParser.parseString(body).asJsonObject
+                            data = root.getAsJsonArray("data")
                         }
+                    }
+                }
+            }
 
-                        bestCandidate = EnrichedMetadata(
-                            title = name,
-                            year = year,
-                            overview = overview,
-                            posterUrl = imageUrl,
-                            backdropUrl = null,
-                            episodeTitle = epTitle,
-                            episodeThumbnailUrl = epThumb,
-                            tvdbId = tvdbId,
-                            runtimeMinutes = epRuntime
-                        )
+            val validData = data ?: return null
+            if (validData.size() == 0) return null
+
+            var bestCandidate: EnrichedMetadata? = null
+            var bestScore = 0.0
+
+            for (i in 0 until minOf(validData.size(), 8)) {
+                val cand = validData[i].asJsonObject
+                val name = cand.get("name")?.asString ?: continue
+                val candYear = cand.get("year")?.asString
+
+                var score = calculateSimilarity(title, name)
+                if (!cleanYear.isNullOrBlank() && !candYear.isNullOrBlank()) {
+                    if (candYear == cleanYear) {
+                        score += 0.35
+                    } else {
+                        val cY = candYear.toIntOrNull()
+                        val eY = cleanYear.toIntOrNull()
+                        if (cY != null && eY != null && Math.abs(cY - eY) <= 1) {
+                            score += 0.15
+                        } else {
+                            score -= 0.35
+                        }
                     }
                 }
 
-                if (bestScore >= 0.60) {
-                    return bestCandidate
+                if (score > bestScore) {
+                    bestScore = score
+                    val overview = cand.get("overview")?.asString
+                    val rawImg = cand.get("image_url")?.asString ?: cand.get("thumbnail")?.asString
+                    val imageUrl = if (!rawImg.isNullOrBlank()) {
+                        var fixed = if (!rawImg.startsWith("http://") && !rawImg.startsWith("https://")) {
+                            "https://artworks.thetvdb.com/" + rawImg.removePrefix("/")
+                        } else {
+                            rawImg
+                        }
+                        if (fixed.endsWith("_t.jpg")) {
+                            fixed = fixed.replace(Regex("_t\\.jpg$"), ".jpg")
+                        } else if (fixed.contains("/_cache/")) {
+                            fixed = fixed.replace("/_cache/", "/")
+                        }
+                        fixed
+                    } else null
+
+                    val tvdbId = cand.get("tvdb_id")?.asString?.toIntOrNull()
+                        ?: cand.get("id")?.asString?.removePrefix("series-")?.toIntOrNull()
+
+                    var epTitle: String? = null
+                    var epThumb: String? = null
+                    var epRuntime: Int? = null
+                    if (type == "series" && season != null && episode != null && tvdbId != null) {
+                        val epInfo = fetchTvdbEpisodeInfo(tvdbId, season, episode, apiKey)
+                        if (epInfo != null) {
+                            epTitle = epInfo.title
+                            epThumb = epInfo.thumbnailUrl
+                            epRuntime = epInfo.runtimeMinutes
+                        }
+                    }
+
+                    bestCandidate = EnrichedMetadata(
+                        title = name,
+                        year = candYear,
+                        overview = overview,
+                        posterUrl = imageUrl,
+                        backdropUrl = null,
+                        episodeTitle = epTitle,
+                        episodeThumbnailUrl = epThumb,
+                        tvdbId = tvdbId,
+                        runtimeMinutes = epRuntime
+                    )
                 }
-                return null
             }
+
+            if (bestScore >= 0.60) {
+                return bestCandidate
+            }
+            return null
         } catch (e: Exception) {
             Log.d(TAG, "TVDB lookup skipped: ${e.message}")
             return null
@@ -961,22 +1003,30 @@ class MetadataEnricher {
         type: String,
         season: Int?,
         episode: Int?,
-        apiKey: String
+        apiKey: String,
+        year: String? = null
     ): EnrichedMetadata? {
-        val direct = searchTmdbInternal(title, type, season, episode, apiKey)
+        val direct = searchTmdbInternal(title, type, season, episode, apiKey, year)
         if (direct != null) return direct
 
         // Cross-type fallback: if movie was requested, try series, and vice-versa
         val altType = if (type == "movie") "series" else "movie"
-        val altRes = searchTmdbInternal(title, altType, season, episode, apiKey)
+        val altRes = searchTmdbInternal(title, altType, season, episode, apiKey, year)
         if (altRes != null) return altRes
 
         // Strip trailing year (e.g. "Bleach 2004" -> "Bleach")
         val noYear = title.replace(Regex("\\s+(19|20)\\d{2}$"), "").trim()
         if (noYear.isNotBlank() && noYear != title) {
-            val noYearRes = searchTmdbInternal(noYear, type, season, episode, apiKey)
-                ?: searchTmdbInternal(noYear, altType, season, episode, apiKey)
+            val noYearRes = searchTmdbInternal(noYear, type, season, episode, apiKey, year)
+                ?: searchTmdbInternal(noYear, altType, season, episode, apiKey, year)
             if (noYearRes != null) return noYearRes
+        }
+
+        // Relaxed fallback without year parameter if year was provided but yielded nothing
+        if (!year.isNullOrBlank()) {
+            val relaxed = searchTmdbInternal(title, type, season, episode, apiKey, null)
+                ?: searchTmdbInternal(title, altType, season, episode, apiKey, null)
+            if (relaxed != null) return relaxed
         }
 
         return null
@@ -987,92 +1037,132 @@ class MetadataEnricher {
         type: String,
         season: Int?,
         episode: Int?,
-        apiKey: String
+        apiKey: String,
+        year: String? = null
     ): EnrichedMetadata? {
         try {
             val enc = URLEncoder.encode(title, "UTF-8")
             val endpoint = if (type == "movie") "search/movie" else "search/tv"
-            val url = "https://api.themoviedb.org/3/$endpoint?api_key=$apiKey&query=$enc"
+            val cleanYear = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(year ?: "")?.groupValues?.get(1)
+            val yearParam = if (!cleanYear.isNullOrBlank()) {
+                if (type == "movie") "&primary_release_year=$cleanYear" else "&first_air_date_year=$cleanYear"
+            } else ""
+            val url = "https://api.themoviedb.org/3/$endpoint?api_key=$apiKey&query=$enc$yearParam"
             val req = Request.Builder().url(url).build()
 
+            var results: com.google.gson.JsonArray? = null
             httpClient.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return null
-                val body = resp.body?.string() ?: return null
-                val root = JsonParser.parseString(body).asJsonObject
-                val results = root.getAsJsonArray("results") ?: return null
-                if (results.size() == 0) return null
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string()
+                    if (!body.isNullOrBlank()) {
+                        val root = JsonParser.parseString(body).asJsonObject
+                        results = root.getAsJsonArray("results")
+                    }
+                }
+            }
 
-                var bestCandidate: EnrichedMetadata? = null
-                var bestScore = 0.0
-
-                for (i in 0 until minOf(results.size(), 8)) {
-                    val cand = results[i].asJsonObject
-                    val officialTitle = if (type == "movie") cand.get("title")?.asString else cand.get("name")?.asString
-                    if (officialTitle.isNullOrBlank()) continue
-
-                    val score = calculateSimilarity(title, officialTitle)
-                    if (score > bestScore) {
-                        bestScore = score
-                        val tmdbId = cand.get("id").asInt
-                        val overview = cand.get("overview")?.asString
-                        val posterPath = cand.get("poster_path")?.asString
-                        val backdropPath = cand.get("backdrop_path")?.asString
-                        val releaseDate = if (type == "movie") cand.get("release_date")?.asString else cand.get("first_air_date")?.asString
-                        val year = releaseDate?.split("-")?.firstOrNull()
-
-                        val posterUrl = if (!posterPath.isNullOrBlank()) "https://image.tmdb.org/t/p/w780$posterPath" else null
-                        val backdropUrl = if (!backdropPath.isNullOrBlank()) "https://image.tmdb.org/t/p/original$backdropPath" else null
-
-                        var epTitle: String? = null
-                        var epThumb: String? = null
-                        var epRuntime: Int? = null
-                        if (type == "series" && season != null && episode != null) {
-                            val epInfo = fetchTmdbEpisodeInfo(tmdbId, season, episode, apiKey)
-                            epTitle = epInfo.title
-                            epThumb = epInfo.thumbnailUrl
-                            epRuntime = epInfo.runtimeMinutes
+            // Fallback without yearParam if year query yielded zero results
+            if ((results == null || results!!.size() == 0) && yearParam.isNotEmpty()) {
+                val fallbackReq = Request.Builder().url("https://api.themoviedb.org/3/$endpoint?api_key=$apiKey&query=$enc").build()
+                httpClient.newCall(fallbackReq).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string()
+                        if (!body.isNullOrBlank()) {
+                            val root = JsonParser.parseString(body).asJsonObject
+                            results = root.getAsJsonArray("results")
                         }
+                    }
+                }
+            }
 
-                        // Resolve IMDb ID from TMDB external_ids
-                        var tmdbImdbId: String? = null
-                        try {
-                            val extEndpoint = if (type == "movie") "movie" else "tv"
-                            val extUrl = "https://api.themoviedb.org/3/$extEndpoint/$tmdbId/external_ids?api_key=$apiKey"
-                            val extReq = Request.Builder().url(extUrl).build()
-                            httpClient.newCall(extReq).execute().use { extResp ->
-                                if (extResp.isSuccessful) {
-                                    val extBody = extResp.body?.string()
-                                    if (!extBody.isNullOrBlank()) {
-                                        val extObj = JsonParser.parseString(extBody).asJsonObject
-                                        tmdbImdbId = extObj.get("imdb_id")?.asString
-                                    }
-                                }
-                            }
-                        } catch (_: Exception) {}
+            val validResults = results ?: return null
+            if (validResults.size() == 0) return null
 
-                        val candRating = try { cand.get("vote_average")?.asDouble } catch (_: Exception) { null }
+            var bestCandidate: EnrichedMetadata? = null
+            var bestScore = 0.0
 
-                        bestCandidate = EnrichedMetadata(
-                            title = officialTitle,
-                            year = year,
-                            overview = overview,
-                            posterUrl = posterUrl,
-                            backdropUrl = backdropUrl,
-                            episodeTitle = epTitle,
-                            episodeThumbnailUrl = epThumb,
-                            tmdbId = tmdbId,
-                            imdbId = tmdbImdbId,
-                            runtimeMinutes = epRuntime,
-                            rating = candRating
-                        )
+            for (i in 0 until minOf(validResults.size(), 8)) {
+                val cand = validResults[i].asJsonObject
+                val officialTitle = if (type == "movie") cand.get("title")?.asString else cand.get("name")?.asString
+                if (officialTitle.isNullOrBlank()) continue
+
+                val releaseDate = if (type == "movie") cand.get("release_date")?.asString else cand.get("first_air_date")?.asString
+                val candYear = releaseDate?.split("-")?.firstOrNull()
+
+                var score = calculateSimilarity(title, officialTitle)
+                if (!cleanYear.isNullOrBlank() && !candYear.isNullOrBlank()) {
+                    if (candYear == cleanYear) {
+                        score += 0.35
+                    } else {
+                        val cY = candYear.toIntOrNull()
+                        val eY = cleanYear.toIntOrNull()
+                        if (cY != null && eY != null && Math.abs(cY - eY) <= 1) {
+                            score += 0.15
+                        } else {
+                            score -= 0.35
+                        }
                     }
                 }
 
-                if (bestScore >= 0.60) {
-                    return bestCandidate
+                if (score > bestScore) {
+                    bestScore = score
+                    val tmdbId = cand.get("id").asInt
+                    val overview = cand.get("overview")?.asString
+                    val posterPath = cand.get("poster_path")?.asString
+                    val backdropPath = cand.get("backdrop_path")?.asString
+
+                    val posterUrl = if (!posterPath.isNullOrBlank()) "https://image.tmdb.org/t/p/w780$posterPath" else null
+                    val backdropUrl = if (!backdropPath.isNullOrBlank()) "https://image.tmdb.org/t/p/original$backdropPath" else null
+
+                    var epTitle: String? = null
+                    var epThumb: String? = null
+                    var epRuntime: Int? = null
+                    if (type == "series" && season != null && episode != null) {
+                        val epInfo = fetchTmdbEpisodeInfo(tmdbId, season, episode, apiKey)
+                        epTitle = epInfo.title
+                        epThumb = epInfo.thumbnailUrl
+                        epRuntime = epInfo.runtimeMinutes
+                    }
+
+                    // Resolve IMDb ID from TMDB external_ids
+                    var tmdbImdbId: String? = null
+                    try {
+                        val extEndpoint = if (type == "movie") "movie" else "tv"
+                        val extUrl = "https://api.themoviedb.org/3/$extEndpoint/$tmdbId/external_ids?api_key=$apiKey"
+                        val extReq = Request.Builder().url(extUrl).build()
+                        httpClient.newCall(extReq).execute().use { extResp ->
+                            if (extResp.isSuccessful) {
+                                val extBody = extResp.body?.string()
+                                if (!extBody.isNullOrBlank()) {
+                                    val extObj = JsonParser.parseString(extBody).asJsonObject
+                                    tmdbImdbId = extObj.get("imdb_id")?.asString
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {}
+
+                    val candRating = try { cand.get("vote_average")?.asDouble } catch (_: Exception) { null }
+
+                    bestCandidate = EnrichedMetadata(
+                        title = officialTitle,
+                        year = candYear,
+                        overview = overview,
+                        posterUrl = posterUrl,
+                        backdropUrl = backdropUrl,
+                        episodeTitle = epTitle,
+                        episodeThumbnailUrl = epThumb,
+                        tmdbId = tmdbId,
+                        imdbId = tmdbImdbId,
+                        runtimeMinutes = epRuntime,
+                        rating = candRating
+                    )
                 }
-                return null
             }
+
+            if (bestScore >= 0.60) {
+                return bestCandidate
+            }
+            return null
         } catch (e: Exception) {
             Log.d(TAG, "TMDB lookup skipped: ${e.message}")
             return null
@@ -1080,37 +1170,46 @@ class MetadataEnricher {
     }
 
     // --- Cinemeta Free API (Stremio Official) ---
-    private fun tryCinemeta(title: String, type: String): EnrichedMetadata? {
-        val direct = searchCinemetaInternal(title, type)
+    private fun tryCinemeta(title: String, type: String, year: String? = null): EnrichedMetadata? {
+        val direct = searchCinemetaInternal(title, type, year)
         if (direct != null) return direct
 
         // For series, fallback without year (e.g. "Bleach 2004" -> "Bleach")
         if (type == "series") {
             val noYear = title.replace(Regex("\\s+(19|20)\\d{2}$"), "").trim()
             if (noYear.isNotBlank() && noYear != title) {
-                val noYearRes = searchCinemetaInternal(noYear, type)
+                val noYearRes = searchCinemetaInternal(noYear, type, year)
                 if (noYearRes != null) return noYearRes
             }
         }
 
         // Cross-type fallback: if movie was requested, try series, and vice-versa
         val altType = if (type == "movie") "series" else "movie"
-        val altRes = searchCinemetaInternal(title, altType)
+        val altRes = searchCinemetaInternal(title, altType, year)
         if (altRes != null) return altRes
 
         val words = title.split(" ").filter { it.isNotBlank() }
         if (words.size > 2) {
             val shortened = words.take(3).joinToString(" ")
-            val shortRes = searchCinemetaInternal(shortened, type)
+            val shortRes = searchCinemetaInternal(shortened, type, year)
             if (shortRes != null) return shortRes
         }
+
+        // Relaxed fallback without year constraint if nothing matched
+        if (!year.isNullOrBlank()) {
+            val relaxed = searchCinemetaInternal(title, type, null)
+                ?: searchCinemetaInternal(title, altType, null)
+            if (relaxed != null) return relaxed
+        }
+
         return null
     }
 
-    private fun searchCinemetaInternal(title: String, type: String): EnrichedMetadata? {
+    private fun searchCinemetaInternal(title: String, type: String, year: String? = null): EnrichedMetadata? {
         try {
             val enc = URLEncoder.encode(title, "UTF-8")
             val cType = if (type == "movie") "movie" else "series"
+            val cleanYear = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(year ?: "")?.groupValues?.get(1)
             val url = "https://v3-cinemeta.strem.io/catalog/$cType/top/search=$enc.json"
             val req = Request.Builder().url(url).header("User-Agent", "NoxMedia/1.0").build()
 
@@ -1128,11 +1227,26 @@ class MetadataEnricher {
                 for (i in 0 until checkCount) {
                     val obj = metas[i].asJsonObject
                     val name = obj.get("name")?.asString ?: continue
-                    val score = calculateSimilarity(title, name)
+                    val rawYear = obj.get("year")?.asString ?: obj.get("releaseInfo")?.asString
+                    val candYear = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(rawYear ?: "")?.groupValues?.get(1) ?: rawYear
+
+                    var score = calculateSimilarity(title, name)
+                    if (!cleanYear.isNullOrBlank() && !candYear.isNullOrBlank()) {
+                        if (candYear == cleanYear) {
+                            score += 0.35
+                        } else {
+                            val cY = candYear.toIntOrNull()
+                            val eY = cleanYear.toIntOrNull()
+                            if (cY != null && eY != null && Math.abs(cY - eY) <= 1) {
+                                score += 0.15
+                            } else {
+                                score -= 0.35
+                            }
+                        }
+                    }
+
                     if (score > bestScore) {
                         bestScore = score
-                        val rawYear = obj.get("year")?.asString ?: obj.get("releaseInfo")?.asString
-                        val year = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(rawYear ?: "")?.groupValues?.get(1) ?: rawYear
                         val poster = obj.get("poster")?.asString
                         val background = obj.get("background")?.asString
                         val desc = obj.get("description")?.asString
@@ -1141,7 +1255,7 @@ class MetadataEnricher {
 
                         bestCandidate = EnrichedMetadata(
                             title = name,
-                            year = year,
+                            year = candYear,
                             overview = desc,
                             posterUrl = poster,
                             backdropUrl = background,
@@ -1495,51 +1609,79 @@ class MetadataEnricher {
             } catch (_: Exception) {}
         }
 
+        val queryYear = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(cleanQuery)?.groupValues?.get(1)
+        val queryTitleClean = if (!queryYear.isNullOrBlank()) {
+            cleanQuery.replace(Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)"), " ").trim()
+        } else cleanQuery
+        val searchTitle = queryTitleClean.ifBlank { cleanQuery }
+
         // 3. High-speed TMDB search (Priority for Movie/Series, Fallback for Anime)
         if (tmdbKey.isNotBlank() && (!isAnime || results.size < 3)) {
             try {
-                val enc = URLEncoder.encode(cleanQuery, "UTF-8")
+                val enc = URLEncoder.encode(searchTitle, "UTF-8")
                 val endpoint = if (type == "movie") "search/movie" else "search/tv"
-                val url = "https://api.themoviedb.org/3/$endpoint?api_key=$tmdbKey&query=$enc"
+                val yearParam = if (!queryYear.isNullOrBlank()) {
+                    if (type == "movie") "&primary_release_year=$queryYear" else "&first_air_date_year=$queryYear"
+                } else ""
+                val url = "https://api.themoviedb.org/3/$endpoint?api_key=$tmdbKey&query=$enc$yearParam"
                 val req = Request.Builder().url(url).build()
+
+                var items: com.google.gson.JsonArray? = null
                 httpClient.newCall(req).execute().use { resp ->
                     if (resp.isSuccessful) {
                         val body = resp.body?.string()
                         if (!body.isNullOrBlank()) {
                             val root = JsonParser.parseString(body).asJsonObject
-                            val items = root.getAsJsonArray("results")
-                            if (items != null) {
-                                for (i in 0 until minOf(items.size(), 10)) {
-                                    val obj = items[i].asJsonObject
-                                    val tmdbId = obj.get("id").asInt
-                                    val name = if (type == "movie") obj.get("title")?.asString else obj.get("name")?.asString
-                                    if (name.isNullOrBlank()) continue
-                                    val overview = obj.get("overview")?.asString
-                                    val posterPath = obj.get("poster_path")?.asString
-                                    val bgPath = obj.get("backdrop_path")?.asString
-                                    val relDate = if (type == "movie") obj.get("release_date")?.asString else obj.get("first_air_date")?.asString
-                                    val year = relDate?.split("-")?.firstOrNull()
+                            items = root.getAsJsonArray("results")
+                        }
+                    }
+                }
 
-                                    val posterUrl = if (!posterPath.isNullOrBlank()) "https://image.tmdb.org/t/p/w780$posterPath" else null
-                                    val bgUrl = if (!bgPath.isNullOrBlank()) "https://image.tmdb.org/t/p/original$bgPath" else null
-
-                                    seenTmdb.add(tmdbId)
-                                    seenTitleYear.add("${name.lowercase().trim()}:${year ?: ""}")
-
-                                    results.add(
-                                        EnrichedMetadata(
-                                            title = name,
-                                            type = type,
-                                            year = year,
-                                            overview = overview,
-                                            posterUrl = posterUrl,
-                                            backdropUrl = bgUrl,
-                                            tmdbId = tmdbId
-                                        )
-                                    )
-                                }
+                // Fallback without yearParam if year query yielded zero items
+                if ((items == null || items!!.size() == 0) && yearParam.isNotEmpty()) {
+                    val rawEnc = URLEncoder.encode(cleanQuery, "UTF-8")
+                    val fallbackReq = Request.Builder().url("https://api.themoviedb.org/3/$endpoint?api_key=$tmdbKey&query=$rawEnc").build()
+                    httpClient.newCall(fallbackReq).execute().use { resp ->
+                        if (resp.isSuccessful) {
+                            val body = resp.body?.string()
+                            if (!body.isNullOrBlank()) {
+                                val root = JsonParser.parseString(body).asJsonObject
+                                items = root.getAsJsonArray("results")
                             }
                         }
+                    }
+                }
+
+                val validItems = items
+                if (validItems != null) {
+                    for (i in 0 until minOf(validItems.size(), 10)) {
+                        val obj = validItems[i].asJsonObject
+                        val tmdbId = obj.get("id").asInt
+                        val name = if (type == "movie") obj.get("title")?.asString else obj.get("name")?.asString
+                        if (name.isNullOrBlank()) continue
+                        val overview = obj.get("overview")?.asString
+                        val posterPath = obj.get("poster_path")?.asString
+                        val bgPath = obj.get("backdrop_path")?.asString
+                        val relDate = if (type == "movie") obj.get("release_date")?.asString else obj.get("first_air_date")?.asString
+                        val year = relDate?.split("-")?.firstOrNull()
+
+                        val posterUrl = if (!posterPath.isNullOrBlank()) "https://image.tmdb.org/t/p/w780$posterPath" else null
+                        val bgUrl = if (!bgPath.isNullOrBlank()) "https://image.tmdb.org/t/p/original$bgPath" else null
+
+                        seenTmdb.add(tmdbId)
+                        seenTitleYear.add("${name.lowercase().trim()}:${year ?: ""}")
+
+                        results.add(
+                            EnrichedMetadata(
+                                title = name,
+                                type = type,
+                                year = year,
+                                overview = overview,
+                                posterUrl = posterUrl,
+                                backdropUrl = bgUrl,
+                                tmdbId = tmdbId
+                            )
+                        )
                     }
                 }
             } catch (_: Exception) {}
@@ -1607,7 +1749,24 @@ class MetadataEnricher {
         }
 
         if (imdbMatch == null && tmdbMatch == null && kitsuMatch == null) {
-            results.sortByDescending { calculateSimilarity(cleanQuery, it.title ?: "") }
+            results.sortByDescending { cand ->
+                var s = calculateSimilarity(searchTitle, cand.title ?: "")
+                if (!queryYear.isNullOrBlank() && !cand.year.isNullOrBlank()) {
+                    val candY = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(cand.year ?: "")?.groupValues?.get(1)
+                    if (candY == queryYear) {
+                        s += 0.45
+                    } else {
+                        val cyInt = candY?.toIntOrNull()
+                        val qyInt = queryYear.toIntOrNull()
+                        if (cyInt != null && qyInt != null && Math.abs(cyInt - qyInt) <= 1) {
+                            s += 0.15
+                        } else {
+                            s -= 0.35
+                        }
+                    }
+                }
+                s
+            }
         }
         return results
     }

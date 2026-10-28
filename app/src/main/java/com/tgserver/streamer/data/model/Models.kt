@@ -278,9 +278,11 @@ fun List<MediaItem>.toMediaGroups(): List<MediaGroup> {
 
     return finalMedia.groupBy { item ->
         val cleanTitle = item.title.trim().lowercase()
+        val cleanYear = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(item.year ?: "")?.groupValues?.get(1)
         when {
             item.tmdbId != null && item.tmdbId!! > 0 -> "tmdb_${item.type}_${item.tmdbId}"
             !item.imdbId.isNullOrBlank() -> "imdb_${item.imdbId}"
+            !cleanYear.isNullOrBlank() -> "title_${item.type}_${cleanTitle}_$cleanYear"
             else -> "title_${item.type}_$cleanTitle"
         }
     }.map { (key, items) ->
