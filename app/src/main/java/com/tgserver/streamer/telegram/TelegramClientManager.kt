@@ -393,7 +393,10 @@ class TelegramClientManager(private val context: Context) {
         if (!json.isNullOrBlank()) {
             val type = object : TypeToken<List<MediaItem>>() {}.type
             val list: List<MediaItem> = gson.fromJson(json, type) ?: emptyList()
-            list.forEach { mediaIndex[it.id] = it }
+            list.forEach {
+                it.title = MetadataEnricher.cleanCandidateTitle(it.title)
+                mediaIndex[it.id] = it
+            }
         }
         cleanupSplitDuplicates()
         _mediaState.value = mediaIndex.values.toList()
@@ -1047,7 +1050,9 @@ class TelegramClientManager(private val context: Context) {
 
     fun autoEnrichMissingMetadata(forceRecheckNoPoster: Boolean = false) {
         val itemsToEnrich = mediaIndex.values.filter {
-            (it.imdbId.isNullOrBlank() && it.kitsuId == null) || (forceRecheckNoPoster && it.posterUrl.isNullOrBlank())
+            (it.imdbId.isNullOrBlank() && it.kitsuId == null) ||
+            (forceRecheckNoPoster && it.posterUrl.isNullOrBlank()) ||
+            (!it.overview.isNullOrBlank() && MetadataEnricher.isCjkText(it.overview))
         }
         if (itemsToEnrich.isEmpty()) return
 
@@ -1068,7 +1073,7 @@ class TelegramClientManager(private val context: Context) {
                             tvdbKey = tvdbKey,
                             animePreference = animePref
                         )
-                        if (!item.posterUrl.isNullOrBlank()) {
+                        if (!item.posterUrl.isNullOrBlank() || (!item.overview.isNullOrBlank() && !MetadataEnricher.isCjkText(item.overview))) {
                             changed = true
                         }
                     }
@@ -1998,10 +2003,18 @@ class TelegramClientManager(private val context: Context) {
                 mediaIndex[item.id] = item
                 updatedCount++
             } else {
+                // Never let older cloud items overwrite local items that were manually matched or modified more recently
+                if (existing.isManuallyMatched && !item.isManuallyMatched) {
+                    return@forEach
+                }
+                if (existing.lastModified > item.lastModified && existing.lastModified > 0L) {
+                    return@forEach
+                }
+
                 val shouldOverwrite = (item.isManuallyMatched && !existing.isManuallyMatched) ||
-                        (item.isManuallyMatched == existing.isManuallyMatched && (item.lastModified > existing.lastModified || item.dateAdded >= existing.dateAdded)) ||
+                        (item.lastModified > existing.lastModified) ||
                         (!item.imdbId.isNullOrBlank() && existing.imdbId.isNullOrBlank()) ||
-                        (item.lastModified > existing.lastModified && item.isHidden != existing.isHidden)
+                        (item.dateAdded > existing.dateAdded)
                 if (shouldOverwrite) {
                     mediaIndex[item.id] = item
                     updatedCount++

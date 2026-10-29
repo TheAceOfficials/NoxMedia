@@ -55,7 +55,7 @@ _LANGUAGES_MAP = {
 
 # Season & Episode patterns
 _SXXEXX_RE = re.compile(r"(?i)(?<![a-zA-Z0-9])(?:s|season\s*)(\d{1,2})[\s._-]*(?:e|ep|episode\s*)(\d{1,4})(?:v\d+)?(?![a-zA-Z0-9])")
-_NXNN_RE = re.compile(r"(?i)(?<![a-zA-Z0-9])(\d{1,2})x(\d{2,4})(?:v\d+)?(?![a-zA-Z0-9])")
+_NXNN_RE = re.compile(r"(?i)(?<![a-zA-Z0-9])(\d{1,2})x(\d{1,4})(?:v\d+)?(?![a-zA-Z0-9])")
 _SEASON_ONLY_RE = re.compile(r"(?i)(?<![a-zA-Z0-9])(?:s|season\s*)(\d{1,2})(?![a-zA-Z0-9])")
 _EPISODE_ONLY_RE = re.compile(r"(?i)(?<![a-zA-Z0-9])(?:e|ep|episode\s*|#\s*)(\d{1,4})(?:v\d+)?(?![a-zA-Z0-9])")
 
@@ -72,7 +72,7 @@ _MEDIA_TAGS_RE = re.compile(
     r"(?i)\b(2160p|1080p|720p|480p|4k|uhd|hdr|hevc|x265|x264|h\.?265|h\.?264|bluray|blu-ray|bdrip|web-?dl|webrip|dvdrip|remux|dual|multi|hindi|english|flac|aac|dts|atmos|ddp|dd\+|truehd|hq)\b|"
     r"(?<![a-zA-Z0-9])(?:s|season\s*)\d{1,2}|"
     r"(?<![a-zA-Z0-9])(?:e|ep|episode\s*|#\s*)\d{1,4}|"
-    r"(?<![a-zA-Z0-9])\d{1,2}x\d{2,4}|"
+    r"(?<![a-zA-Z0-9])\d{1,2}x\d{1,4}|"
     r"(?:^|[\s._\-\(\[])(?:19|20)\d{2}(?:[\s._\-\)\]]|$)|"
     r"(?:MomStealer|Anipulse|Judas|SubsPlease|Erai|YTS|YIFY|PSA|TGx|Pahe|GalaxyRG|GalaxyTV|Toonworld4all|QxR|Vyndros|EMBER|Tigole|SAMPA|KaKa|Vegamovies|KatmovieHD)"
 )
@@ -337,7 +337,11 @@ def parse_media_filename(filename: str, caption: str = "", is_anime: bool = Fals
                                 except ValueError:
                                     pass
 
-    # Strip year from clean_title if present
+    # Strip decorative Japanese/CJK furigana tags when Latin title words are present
+    if re.search(r"[a-zA-Z]{2,}", clean_title):
+        clean_title = re.sub(r"[\s._\-\u2010-\\u2015\u2212\u30fc\uff0d\uff5e~·•【】（）「」『』［］()\[\]]*[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]+[\s._\-\u2010-\\u2015\u2212\u30fc\uff0d\uff5e~·•【】（）「」『』［］()\[\]]*", " ", clean_title)
+
+    # Strip year from clean_title if present (e.g. "Doraemon (2005)" -> "Doraemon")
     y_in_title = _YEAR_RE.search(clean_title)
     if y_in_title:
         clean_title = clean_title[:y_in_title.start()]
@@ -345,13 +349,22 @@ def parse_media_filename(filename: str, caption: str = "", is_anime: bool = Fals
     # Cut off at resolution / quality indicators or sources
     clean_title = re.sub(r"(?i)\b(2160p|1080p|720p|480p|4k|uhd|hdr|hevc|x264|x265|aac|dts|bluray|web-?dl|web-?rip|proper|repack|hq)\b.*$", "", clean_title)
 
+    # Collapse multiple/isolated consecutive or spaced dashes e.g. '--', '— —', '- -', '——'
+    clean_title = re.sub(r"[\-\u2010-\u2015\u2212\uff0d](\s*[\-\u2010-\u2015\u2212\uff0d])+", " ", clean_title)
+
     # Clean delimiters
     clean_title = re.sub(r"[\._\(\)\[\]\-]+", " ", clean_title).strip()
-    clean_title = re.sub(r"\s+", " ", clean_title)
+    clean_title = re.sub(r"^[:\s._\-\u2010-\u2015\u2212\u30fc\uff0d\uff5e~·•]+", "", clean_title)
+    clean_title = re.sub(r"[:\s._\-\u2010-\u2015\u2212\u30fc\uff0d\uff5e~·•]+$", "", clean_title)
+    clean_title = re.sub(r"\s+", " ", clean_title).strip()
 
     # Ensure clean_title is never empty
     if not clean_title:
         clean_title = re.sub(r"[\._\(\)\[\]\-]+", " ", base_no_ext).strip()
+
+    # If episode or season was identified, strictly enforce series type
+    if season is not None or episode is not None:
+        media_type = "series"
     
     # Build quality badge string for Stremio stream items
     badge_parts = [quality]

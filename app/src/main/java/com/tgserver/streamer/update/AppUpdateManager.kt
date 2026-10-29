@@ -304,6 +304,24 @@ class AppUpdateManager(private val context: Context) {
         }
     }
 
+    private fun compareReleaseVersions(tagA: String, tagB: String): Int {
+        val cleanA = tagA.removePrefix("v").removePrefix("V").trim()
+        val cleanB = tagB.removePrefix("v").removePrefix("V").trim()
+        val coreA = cleanA.substringBefore("-").split(".").mapNotNull { it.toIntOrNull() }
+        val coreB = cleanB.substringBefore("-").split(".").mapNotNull { it.toIntOrNull() }
+        val maxLen = maxOf(coreA.size, coreB.size)
+        for (i in 0 until maxLen) {
+            val aVal = coreA.getOrElse(i) { 0 }
+            val bVal = coreB.getOrElse(i) { 0 }
+            if (aVal != bVal) return aVal.compareTo(bVal)
+        }
+        val aBeta = cleanA.contains("beta", ignoreCase = true)
+        val bBeta = cleanB.contains("beta", ignoreCase = true)
+        if (!aBeta && bBeta) return 1
+        if (aBeta && !bBeta) return -1
+        return 0
+    }
+
     private fun fetchLatestBetaOrStableRelease(url: String): GitHubReleaseResponse? {
         val request = Request.Builder()
             .url(url)
@@ -317,8 +335,9 @@ class AppUpdateManager(private val context: Context) {
                 if (response.isSuccessful) {
                     val body = response.body?.string() ?: return null
                     val list = gson.fromJson(body, Array<GitHubReleaseResponse>::class.java)
-                    // Return the first valid release (could be pre-release or stable)
-                    list.firstOrNull { it.assets.isNotEmpty() }
+                    // Return the release with highest version tag that has assets
+                    list.filter { it.assets.isNotEmpty() }
+                        .maxWithOrNull { a, b -> compareReleaseVersions(a.tagName, b.tagName) }
                 } else null
             }
         } catch (e: Exception) {
@@ -340,9 +359,11 @@ class AppUpdateManager(private val context: Context) {
                     val body = response.body?.string() ?: return null
                     val list = gson.fromJson(body, Array<GitHubReleaseResponse>::class.java)
                     if (allowBeta) {
-                        list.firstOrNull { it.assets.isNotEmpty() }
+                        list.filter { it.assets.isNotEmpty() }
+                            .maxWithOrNull { a, b -> compareReleaseVersions(a.tagName, b.tagName) }
                     } else {
-                        list.firstOrNull { !it.prerelease && it.assets.isNotEmpty() }
+                        list.filter { !it.prerelease && !it.tagName.contains("beta", ignoreCase = true) && it.assets.isNotEmpty() }
+                            .maxWithOrNull { a, b -> compareReleaseVersions(a.tagName, b.tagName) }
                     }
                 } else null
             }

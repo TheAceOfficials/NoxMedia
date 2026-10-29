@@ -57,6 +57,7 @@ data class MediaItem(
     var overview: String? = null,
     var imdbId: String? = null,
     var tmdbId: Int? = null,
+    var tvdbId: Int? = null,
     var kitsuId: Int? = null,
     var episodeThumbnailUrl: String? = null,
     val isSplit: Boolean = false,
@@ -125,7 +126,9 @@ data class MediaGroup(
     val qualityBadge: String,
     val items: List<MediaItem>,
     val dateAdded: Long = 0L,
-    val rating: Double = 0.0
+    val rating: Double = 0.0,
+    val tvdbId: Int? = null,
+    val kitsuId: Int? = null
 ) {
     val distinctEpisodeCount: Int
         get() = items.map { Pair(it.season ?: 1, it.episode ?: 1) }.distinct().size
@@ -278,17 +281,32 @@ fun List<MediaItem>.toMediaGroups(): List<MediaGroup> {
 
     return finalMedia.groupBy { item ->
         val cleanTitle = item.title.trim().lowercase()
+        val cleanYear = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(item.year ?: "")?.groupValues?.get(1)
         when {
             item.tmdbId != null && item.tmdbId!! > 0 -> "tmdb_${item.type}_${item.tmdbId}"
             !item.imdbId.isNullOrBlank() -> "imdb_${item.imdbId}"
+            item.tvdbId != null && item.tvdbId!! > 0 -> "tvdb_${item.type}_${item.tvdbId}"
+            item.kitsuId != null && item.kitsuId!! > 0 -> "kitsu_${item.type}_${item.kitsuId}"
+            item.type == "movie" && !cleanYear.isNullOrBlank() -> "title_movie_${cleanTitle}_$cleanYear"
             else -> "title_${item.type}_$cleanTitle"
         }
     }.map { (key, items) ->
         val primary = items.first()
+        val rawBestTitle = items.firstOrNull { it.isManuallyMatched && it.title.isNotBlank() }?.title
+            ?: items.firstOrNull { !it.title.isNullOrBlank() }?.title
+            ?: primary.title
+        val bestTitle = com.tgserver.streamer.metadata.MetadataEnricher.cleanCandidateTitle(rawBestTitle)
+
         val bestPoster = items.firstOrNull { !it.posterUrl.isNullOrBlank() }?.posterUrl ?: primary.posterUrl
         val bestBackdrop = items.firstOrNull { !it.backdropUrl.isNullOrBlank() }?.backdropUrl ?: primary.backdropUrl
-        val bestOverview = items.firstOrNull { !it.overview.isNullOrBlank() }?.overview ?: primary.overview
+        val bestOverview = items.firstOrNull { !it.overview.isNullOrBlank() && !com.tgserver.streamer.metadata.MetadataEnricher.isCjkText(it.overview) }?.overview
+            ?: items.firstOrNull { !it.overview.isNullOrBlank() }?.overview
+            ?: primary.overview
         val bestYear = items.firstOrNull { !it.year.isNullOrBlank() }?.year ?: primary.year
+        val bestImdb = items.firstOrNull { !it.imdbId.isNullOrBlank() }?.imdbId ?: primary.imdbId
+        val bestTmdb = items.firstOrNull { it.tmdbId != null && it.tmdbId!! > 0 }?.tmdbId ?: primary.tmdbId
+        val bestTvdb = items.firstOrNull { it.tvdbId != null && it.tvdbId!! > 0 }?.tvdbId ?: primary.tvdbId
+        val bestKitsu = items.firstOrNull { it.kitsuId != null && it.kitsuId!! > 0 }?.kitsuId ?: primary.kitsuId
         val bestQuality = items.maxByOrNull {
             when {
                 it.quality.contains("4K", ignoreCase = true) || it.quality.contains("2160", ignoreCase = true) -> 4
@@ -302,14 +320,16 @@ fun List<MediaItem>.toMediaGroups(): List<MediaGroup> {
 
         MediaGroup(
             key = key,
-            title = primary.title,
+            title = bestTitle,
             type = primary.type,
             year = bestYear,
             posterUrl = bestPoster,
             backdropUrl = bestBackdrop,
             overview = bestOverview,
-            imdbId = primary.imdbId,
-            tmdbId = primary.tmdbId,
+            imdbId = bestImdb,
+            tmdbId = bestTmdb,
+            tvdbId = bestTvdb,
+            kitsuId = bestKitsu,
             qualityBadge = formatShortBadge(bestQuality),
             items = items.sortedWith(compareBy({ it.season ?: 1 }, { it.episode ?: 1 })),
             dateAdded = maxDateAdded,
