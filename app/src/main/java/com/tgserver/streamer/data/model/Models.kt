@@ -278,13 +278,18 @@ fun List<MediaItem>.toMediaGroups(): List<MediaGroup> {
 
     return finalMedia.groupBy { item ->
         val cleanTitle = item.title.trim().lowercase()
+        val cleanYear = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(item.year ?: "")?.groupValues?.get(1)
         when {
             item.tmdbId != null && item.tmdbId!! > 0 -> "tmdb_${item.type}_${item.tmdbId}"
             !item.imdbId.isNullOrBlank() -> "imdb_${item.imdbId}"
+            item.type == "movie" && !cleanYear.isNullOrBlank() -> "title_movie_${cleanTitle}_$cleanYear"
             else -> "title_${item.type}_$cleanTitle"
         }
     }.map { (key, items) ->
         val primary = items.first()
+        val bestTitle = items.firstOrNull { it.isManuallyMatched && it.title.isNotBlank() }?.title
+            ?: items.firstOrNull { !it.title.isNullOrBlank() }?.title
+            ?: primary.title
         val bestPoster = items.firstOrNull { !it.posterUrl.isNullOrBlank() }?.posterUrl ?: primary.posterUrl
         val bestBackdrop = items.firstOrNull { !it.backdropUrl.isNullOrBlank() }?.backdropUrl ?: primary.backdropUrl
         val bestOverview = items.firstOrNull { !it.overview.isNullOrBlank() }?.overview ?: primary.overview
@@ -302,7 +307,7 @@ fun List<MediaItem>.toMediaGroups(): List<MediaGroup> {
 
         MediaGroup(
             key = key,
-            title = primary.title,
+            title = bestTitle,
             type = primary.type,
             year = bestYear,
             posterUrl = bestPoster,
