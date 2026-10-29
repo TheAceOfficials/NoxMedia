@@ -672,7 +672,9 @@ class TelegramClientManager(private val context: Context) {
         return localDeadCount
     }
 
-    suspend fun scanDeadFilesRemote(): Int = withContext(Dispatchers.IO) {
+    suspend fun scanDeadFilesRemote(
+        onProgress: ((checked: Int, total: Int) -> Unit)? = null
+    ): Int = withContext(Dispatchers.IO) {
         detectedDeadIds.clear()
 
         // 1. Check local corrupt items
@@ -692,6 +694,8 @@ class TelegramClientManager(private val context: Context) {
 
             if (bridge != null && sessionStr.isNotBlank() && apiId > 0) {
                 val byChannel = allItems.filter { it.channelId != 0L }.groupBy { it.channelId }
+                var totalMessages = 0
+                val channelMessageMap = mutableMapOf<Long, Map<Int, List<String>>>()
                 for ((channelId, items) in byChannel) {
                     val msgIdToItemIds = mutableMapOf<Int, MutableList<String>>()
                     for (item in items) {
@@ -705,7 +709,14 @@ class TelegramClientManager(private val context: Context) {
                             msgIdToItemIds.getOrPut(item.messageId) { mutableListOf() }.add(item.id)
                         }
                     }
+                    totalMessages += msgIdToItemIds.size
+                    channelMessageMap[channelId] = msgIdToItemIds
+                }
 
+                var checkedMessages = 0
+                onProgress?.invoke(0, maxOf(totalMessages, 1))
+
+                for ((channelId, msgIdToItemIds) in channelMessageMap) {
                     val msgIds = msgIdToItemIds.keys.toList()
                     if (msgIds.isEmpty()) continue
 
@@ -736,6 +747,8 @@ class TelegramClientManager(private val context: Context) {
                         } catch (e: Exception) {
                             Log.e(TAG, "Error checking dead messages for channel $channelId: ${e.message}")
                         }
+                        checkedMessages += chunk.size
+                        onProgress?.invoke(minOf(checkedMessages, totalMessages), totalMessages)
                     }
                 }
             }

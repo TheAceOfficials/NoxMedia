@@ -100,6 +100,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
     val duplicateScanCount by viewModel.duplicateScanCount.collectAsState()
     val isScanningDeadFiles by viewModel.isScanningDeadFiles.collectAsState()
     val deadFilesScanCount by viewModel.deadFilesScanCount.collectAsState()
+    val deadFilesProgress by viewModel.deadFilesProgress.collectAsState()
     var cacheSizeBytes by remember { mutableStateOf(viewModel.getAppCacheSizeBytes()) }
 
     // Card Expansion states (clean minimal collapsed by default)
@@ -1579,48 +1580,75 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     title = "Dead Entries",
                     description = "Scans library for broken or deleted messages in Telegram channels, and clears inaccessible files.",
                     badge = {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp),
-                            modifier = Modifier.padding(top = 1.dp)
-                        ) {
-                            val dotColor = when {
-                                isScanningDeadFiles -> AccentYellow
-                                deadFilesScanCount == null -> TextTertiary
-                                deadFilesScanCount == 0 -> Color(0xFF00E676)
-                                else -> StatusRed
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                modifier = Modifier.padding(top = 1.dp)
+                            ) {
+                                val dotColor = when {
+                                    isScanningDeadFiles -> AccentYellow
+                                    deadFilesScanCount == null -> TextTertiary
+                                    deadFilesScanCount == 0 -> Color(0xFF00E676)
+                                    else -> StatusRed
+                                }
+                                val statusText = when {
+                                    isScanningDeadFiles -> {
+                                        val p = deadFilesProgress
+                                        if (p != null && p.second > 0) {
+                                            val pct = (p.first * 100) / p.second
+                                            "Scanning: ${p.first}/${p.second} ($pct%)"
+                                        } else {
+                                            "Scanning channels..."
+                                        }
+                                    }
+                                    deadFilesScanCount == null -> "Not scanned"
+                                    deadFilesScanCount == 0 -> "Clean (0 dead entries)"
+                                    deadFilesScanCount == 1 -> "1 dead entry found"
+                                    else -> "$deadFilesScanCount dead entries found"
+                                }
+                                val textColor = when {
+                                    isScanningDeadFiles -> AccentYellow
+                                    deadFilesScanCount == null -> TextTertiary
+                                    deadFilesScanCount == 0 -> Color(0xFF00E676)
+                                    else -> StatusRed
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .size(5.dp)
+                                        .background(dotColor, CircleShape)
+                                )
+                                Text(
+                                    text = statusText,
+                                    color = textColor,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Normal,
+                                    maxLines = 1
+                                )
                             }
-                            val statusText = when {
-                                isScanningDeadFiles -> "Scanning channels..."
-                                deadFilesScanCount == null -> "Not scanned"
-                                deadFilesScanCount == 0 -> "Clean (0 dead entries)"
-                                deadFilesScanCount == 1 -> "1 dead entry found"
-                                else -> "$deadFilesScanCount dead entries found"
+                            if (isScanningDeadFiles && deadFilesProgress != null && deadFilesProgress!!.second > 0) {
+                                val (checked, total) = deadFilesProgress!!
+                                val progressVal = (checked.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+                                LinearProgressIndicator(
+                                    progress = { progressVal },
+                                    modifier = Modifier
+                                        .width(135.dp)
+                                        .height(3.dp)
+                                        .clip(CircleShape),
+                                    color = AccentYellow,
+                                    trackColor = Color(0xFF282A36)
+                                )
                             }
-                            val textColor = when {
-                                isScanningDeadFiles -> AccentYellow
-                                deadFilesScanCount == null -> TextTertiary
-                                deadFilesScanCount == 0 -> Color(0xFF00E676)
-                                else -> StatusRed
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .size(5.dp)
-                                    .background(dotColor, CircleShape)
-                            )
-                            Text(
-                                text = statusText,
-                                color = textColor,
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Normal,
-                                maxLines = 1
-                            )
                         }
                     },
                     action = {
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            val buttonText = if (isScanningDeadFiles) {
+                                val p = deadFilesProgress
+                                if (p != null && p.second > 0) "${(p.first * 100) / p.second}%" else "Scanning"
+                            } else "Scan"
                             NothingPillButton(
-                                text = if (isScanningDeadFiles) "Scanning" else "Scan",
+                                text = buttonText,
                                 isLoading = isScanningDeadFiles,
                                 enabled = !isScanningDeadFiles,
                                 onClick = { viewModel.startBackgroundDeadFilesScan() },
@@ -2402,44 +2430,15 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "Early Beta Access",
-                                color = Color.White,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            if (config.receiveBetaUpdates) {
-                                Spacer(modifier = Modifier.width(7.dp))
-                                Surface(
-                                    shape = CircleShape,
-                                    color = Color(0x24A855F7),
-                                    border = BorderStroke(0.7.dp, Color(0x66C084FC))
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.5.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(5.dp)
-                                                .background(Color(0xFFC084FC), CircleShape)
-                                        )
-                                        Text(
-                                            text = "BETA ACTIVE",
-                                            color = Color(0xFFE9D5FF),
-                                            fontSize = 8.5.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            letterSpacing = 0.4.sp
-                                        )
-                                    }
-                                }
-                            }
-                        }
+                        Text(
+                            text = "Early Beta Access",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Receive experimental features and pre-release updates before official rollout.",
+                            text = "Developer recommends the stable release for everyday use. Beta versions may contain unexpected bugs, crashes, or UI glitches.",
                             color = TextSecondary,
                             fontSize = 10.5.sp,
                             lineHeight = 14.sp

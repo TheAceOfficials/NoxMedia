@@ -1372,6 +1372,9 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     private val _deadFilesScanCount = MutableStateFlow<Int?>(null)
     val deadFilesScanCount: StateFlow<Int?> = _deadFilesScanCount.asStateFlow()
 
+    private val _deadFilesProgress = MutableStateFlow<Pair<Int, Int>?>(null)
+    val deadFilesProgress: StateFlow<Pair<Int, Int>?> = _deadFilesProgress.asStateFlow()
+
     fun startBackgroundDuplicateScan() {
         if (_isScanningDuplicates.value) return
         _isScanningDuplicates.value = true
@@ -1402,9 +1405,12 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     fun startBackgroundDeadFilesScan() {
         if (_isScanningDeadFiles.value) return
         _isScanningDeadFiles.value = true
+        _deadFilesProgress.value = Pair(0, 0)
         tgClient.launchBackgroundJob {
             try {
-                val res = tgClient.scanDeadFilesRemote()
+                val res = tgClient.scanDeadFilesRemote { checked, total ->
+                    _deadFilesProgress.value = Pair(checked, total)
+                }
                 _deadFilesScanCount.value = res
                 withContext(Dispatchers.Main) {
                     val msg = if (res == 0) "✓ All indexed media files verified & online" else "⚠ Detected $res deleted or broken files"
@@ -1414,6 +1420,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                 android.util.Log.e("MainAppViewModel", "Dead files scan failed", e)
             } finally {
                 _isScanningDeadFiles.value = false
+                _deadFilesProgress.value = null
             }
         }
     }
