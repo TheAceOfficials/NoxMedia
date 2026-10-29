@@ -46,64 +46,54 @@ data class WhatsNewRelease(
 object WhatsNewRepository {
 
     val currentRelease: WhatsNewRelease = WhatsNewRelease(
-        version = "1.2",
-        releaseTitle = "True Cloud Sync, Smart Library & Modern UI",
+        version = "1.3",
+        releaseTitle = "Content Detection Overhaul, Performance & UI Polish",
         releaseDate = "October 2026",
         items = listOf(
             WhatsNewItem(
                 category = ChangeCategory.NEW,
-                title = "True Cloud Sync & Multi-Device Backup",
-                description = "Bi-directional true sync across all your phones, Android TVs, and tablets. Full library snapshots, title merges, and hidden states are compressed with Gzip (~90% smaller) and pushed automatically to Telegram without re-scanning."
+                title = "Smart Content Detection System Overhaul",
+                description = "Comprehensive media parser upgrade: smart year detection (e.g. distinguishing Sherlock Holmes 2009 vs other versions), full support for 12x05 & 15x3 formats, intelligent symbol/punctuation filtering (';', ''', '-', '•'), international title diacritics normalization ('Shōgun' → 'Shogun', 'Pokémon' → 'Pokemon') for 100% exact API matching, and duplicate stream card elimination."
             ),
             WhatsNewItem(
                 category = ChangeCategory.NEW,
-                title = "Dynamic Library Tabs & Multi-Select Filters",
-                description = "Browse through smart categorical tabs (All, Movies, TV Shows, Anime, 4K UHD, Recent) with a stutter-free multi-tag filter bottom sheet for resolutions, sources, and sorting."
+                title = "Multi-Select in Unsupported Media",
+                description = "Select multiple unrecognized media entries to bulk match, re-categorize, or manage in a single batch operation."
             ),
             WhatsNewItem(
                 category = ChangeCategory.NEW,
-                title = "Batch Selection & Manual Title Merge",
-                description = "Long press any media card to enter selection mode: bulk hide, unhide, merge disparate episodes/parts under one title, or delete entries in a single tap."
+                title = "Hold to Hide / Unhide Content",
+                description = "Long press any content card in your library to quickly toggle hidden status without digging into nested menus."
             ),
             WhatsNewItem(
                 category = ChangeCategory.NEW,
-                title = "Alexa Voice Control & Quick Settings Tile",
-                description = "Control streaming server on/off via Echo voice commands over local Wi-Fi, and toggle Alexa Standby mode directly from your phone's notification shade control center tile."
-            ),
-            WhatsNewItem(
-                category = ChangeCategory.NEW,
-                title = "Anime Indexing Preference (Seasonal vs Absolute)",
-                description = "Select between Seasonal TVDB/TMDB (standard multi-season playback for Nuvio & Cinemeta) and Absolute Continuous (Kitsu 1..1000+) with balanced, equal-height OLED cards."
+                title = "Real-Time Dead Entries Progress Bar",
+                description = "Dead Entries cleanup now features live item progression tracking (e.g. 450/5638, 8%) alongside a smooth visual progress bar in Settings."
             ),
             WhatsNewItem(
                 category = ChangeCategory.IMPROVEMENT,
-                title = "Background Storage Cleanup (Unkillable Scans)",
-                description = "Duplicate Media Scan and Dead Entries Scan now run on an independent background supervisor scope. Navigating away or locking your screen will no longer cancel active scans."
+                title = "Optimized for Low-End & Budget Devices",
+                description = "Deep memory footprint optimizations and CPU efficiency improvements ensuring fluid navigation, faster catalog load times, and responsive UI on budget hardware."
             ),
             WhatsNewItem(
                 category = ChangeCategory.IMPROVEMENT,
-                title = "Emil Kowalski Micro-Interactions & Physics",
-                description = "Responsive spring scales (0.96x depression on press), organic dialog popups, Nothing OS typography, and refined tactile haptics across all buttons."
+                title = "Streaming Playback Pipeline Enhancements",
+                description = "Smoother byte-range chunk streaming on lower-spec hardware, minimizing buffering and frame drops during high-bitrate video playback."
             ),
             WhatsNewItem(
                 category = ChangeCategory.IMPROVEMENT,
-                title = "Settings Screen Polish & Strict Beta Separation",
-                description = "Redesigned sleek glowing 'BETA ACTIVE' pill tag, auto-fitting cloud action buttons without text cropping, sanitized changelog typography, and strict stable-only updates when Beta toggle is off."
+                title = "Early Beta Access Guidance & Settings Notice",
+                description = "Removed beta badge clutter and added clear developer guidance recommending stable builds for everyday streaming."
             ),
             WhatsNewItem(
                 category = ChangeCategory.FIX,
-                title = "Hide/Unhide Cloud State Persistence",
-                description = "Fixed hidden/unhidden status updates so timestamp changes immediately trigger background cloud backup and reflect accurately across all synced screens."
+                title = "Fix Metadata Candidate Preservation",
+                description = "Candidate selection in Fix Metadata Match now strictly queries TMDB and TVDB by exact IMDb ID, preventing selected candidates from being overridden by fuzzy title search mismatches."
             ),
             WhatsNewItem(
                 category = ChangeCategory.FIX,
-                title = "Filter BottomSheet Zero-Lag Opening",
-                description = "Pre-computed filter tags on media groups, completely eliminating UI stutter and freeze when opening the library filters sheet."
-            ),
-            WhatsNewItem(
-                category = ChangeCategory.FIX,
-                title = "Stremio & Nuvio Streaming Stability",
-                description = "Streamlined HTTP streaming pipeline ensuring zero infinite loading loops and rock-solid playback across Stremio Mobile, Desktop, and Nuvio."
+                title = "Eliminated Phantom Duplicate Cards",
+                description = "Enhanced exact stream deduplication so video files from multiple channel mirrors or re-posts are cleanly unified without duplicate cards appearing in Library."
             )
         )
     )

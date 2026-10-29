@@ -19,10 +19,10 @@
 
 ## 📑 Table of Contents
 
-- [What's New in v1.2!](#-whats-new-in-v12)
 - [What is NoxMedia?](#-what-is-noxmedia)
 - [Why NoxMedia? (Use-Cases)](#-why-noxmedia-use-cases)
 - [Key Features](#-key-features)
+- [ZIP Archive Handling & Playback](#-zip-archive-handling--playback)
 - [Platform Support & iOS Limitations](#-platform-support--compatibility)
 - [Step-by-Step Setup Guide](#-step-by-step-setup-guide)
   - [Step 1: Get Telegram API Credentials](#step-1-get-telegram-api-credentials)
@@ -30,47 +30,11 @@
   - [Step 3: Connect Monitored Channels](#step-3-connect-monitored-channels)
   - [Step 4: Stream in Stremio / Nuvio](#step-4-stream-in-stremio--nuvio)
   - [Finding Telegram Channel IDs (Private & Public)](#-finding-telegram-channel-ids-private--public)
-- [Remote Streaming (Tailscale & Custom Domains)](#-remote-streaming-tailscale--custom-domains)
+- [Remote Streaming & Mobile Data Fix (Tailscale)](#-remote-streaming--mobile-data-fix-tailscale)
 - [Background Streaming Best Practices](#-background-streaming-best-practices)
 - [Support & Sponsorship](#-support--sponsorship)
 - [Acknowledgements & Inspiration](#-acknowledgements--inspiration)
 - [License](#-license)
-
----
-
-## 🚀 What's New in v1.2!
-
-NoxMedia **v1.2** is a massive milestone release introducing multi-device True Cloud Sync, intelligent catalog organizing, hands-free smart home integration, and extensive design polish inspired by Nothing OS and Emil Kowalski micro-interactions.
-
-### 🌟 Key Highlights
-
-* **☁️ True Cloud Sync & Multi-Device Backup**:
-  * Bi-directional live sync across all your phones, Android TVs, and tablets.
-  * **Gzip Compression**: Snapshots are compressed by ~90%, saving bandwidth and storage.
-  * Auto-push triggers when new media is scanned, metadata matches are fixed, or titles are hidden/unhidden.
-  * Custom destination backup support (dedicated private channel or Telegram Saved Messages).
-
-* **📑 Dynamic Library Tabs & 60fps Filter Sheet**:
-  * Seamless browsing across smart tabs: **All, Movies, TV Shows, Anime, 4K UHD, Recent**.
-  * Multi-tag filter bottom sheet for resolutions (4K, 1080p, 720p), audio/source codecs (BluRay, WEB-DL, HDR/DV), and sorting.
-  * Zero-lag opening with pre-computed media group tags.
-
-* **✨ Batch Selection & Manual Title Merge**:
-  * Long press any library item to enter selection mode: bulk hide/unhide, delete, or merge multiple disparate episode parts under one show/movie card.
-
-* **🎙️ Alexa Voice Control & Standby Quick Settings Tile**:
-  * Control local streaming server on/off using Amazon Alexa voice commands over local Wi-Fi.
-  * Dedicated **Standby Control Center Tile** in Android's notification shade.
-
-* **🍙 Anime Indexing Preference (Seasonal vs Absolute)**:
-  * Choose between **Seasonal (TVDB/TMDB)** (standard multi-season playback for Nuvio & Cinemeta) and **Absolute (Kitsu)** (continuous Ep 1..1000+) with balanced, equal-height OLED cards.
-
-* **🛡️ Background Storage Cleanup (Unkillable Scans)**:
-  * Duplicate Media Scan and Dead Entries Scan run on an independent background supervisor scope, preventing Android from killing scans when navigating or locking the phone.
-
-* **🎨 Emil Kowalski Tactile Physics & Redesigned Settings**:
-  * Responsive spring scales (`0.96f` on press), organic sheet reveals, Nothing OS typography.
-  * Redesigned glowing **`BETA ACTIVE`** pill badge, auto-fitting cloud action buttons, and strict stable-only update isolation when Early Beta Access is turned off.
 
 ---
 
@@ -133,6 +97,17 @@ Install the local addon manifest URL once into **Stremio** or **Nuvio**, and all
 
 ### 🧪 Jellyfin Bridge Mode
 - **Jellyfin Compatibility Layer:** *(Currently on Hold / In Development — Planned for Future Stable Release)* — An experimental bridge architecture allowing native Jellyfin clients and apps to stream directly from NoxMedia's indexed catalog.
+
+---
+
+## 📦 ZIP Archive Handling & Playback
+
+NoxMedia natively scans and parses media files packed inside `.zip` archives directly from Telegram channels without downloading the whole archive or extracting it locally.
+
+> [!IMPORTANT]
+> **Direct Streaming Requirement (Store vs. Deflate Compression):**
+> * **Uncompressed ZIPs (0% / Store Mode):** Direct real-time streaming and seeking work seamlessly! Because video files (like `.mkv` or `.mp4`) are already internally compressed, saving them into a ZIP using `Store` (no compression) allows NoxMedia to read random byte-ranges on demand directly from Telegram's cloud.
+> * **Compressed ZIPs (Deflate):** If a `.zip` archive was created with standard compression, NoxMedia **will detect and catalog** the media file in your library with full posters and metadata, but **real-time playback is not supported**. Compressed ZIP streams do not allow arbitrary byte seeking without decompressing the entire file from the beginning.
 
 ---
 
@@ -224,17 +199,27 @@ You can easily get the ID of **any Telegram channel** (even private ones without
 
 ---
 
-## 🌐 Remote Streaming (Tailscale & Custom Domains)
+## 🌐 Remote Streaming & Mobile Data Fix (Tailscale)
 
-Want to access your Telegram media library in Stremio or Nuvio outside your house over mobile 4G/5G data?
+### ⚠️ The Mobile Data (4G/5G) Rotating IP Issue
+When using NoxMedia over cellular mobile data, your telecom carrier places your device behind **Carrier-Grade NAT (CGNAT)** and dynamically rotates your IP address frequently (whenever switching towers, reconnecting, or toggling airplane mode). 
 
-1. **Install Tailscale** on both your NoxMedia Android device and your client device (phone or laptop).
-2. NoxMedia automatically detects and displays your 100.x.x.x Tailscale IP address on the home screen.
-3. Use the Tailscale manifest link:
+This causes your local manifest URL (`http://192.168.x.x:7788/manifest.json` or carrier IP) to change or become unreachable by external client apps (like **Nuvio**, **Stremio**, Smart TVs, or laptops), forcing you to repeatedly copy and paste new addon URLs.
+
+### 💡 The Solution: Tailscale Mesh VPN (Permanent 100% Static IP)
+[Tailscale](https://tailscale.com) creates a secure, zero-config peer-to-peer virtual private network between all your devices:
+
+1. **Install Tailscale (Free)** on both your NoxMedia host phone and your client devices (Smart TV, laptop, or other phone).
+2. Sign in with the **same account** on both devices.
+3. Tailscale assigns your NoxMedia Android device a permanent, static **`100.x.y.z`** IP address that **NEVER changes**—even when switching between Wi-Fi and mobile 4G/5G data!
+4. NoxMedia automatically detects and displays this Tailscale IP address right on the **Home Screen**.
+5. Install your permanent Tailscale manifest link once in Nuvio or Stremio:
    ```
    http://100.x.y.z:7788/manifest.json
    ```
-4. Alternatively, enter a Cloudflare Tunnel or reverse-proxy domain into **Settings ➔ Remote Access URL**.
+6. Alternatively, enter a Cloudflare Tunnel or reverse-proxy domain into **Settings ➔ Remote Access URL**.
+
+Now your media server stays connected 24/7 without ever needing to update your manifest URL again!
 
 ---
 

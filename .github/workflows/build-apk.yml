@@ -66,9 +66,9 @@ jobs:
             echo "is_prerelease=false" >> $GITHUB_OUTPUT
             echo "make_latest=true" >> $GITHUB_OUTPUT
           elif [[ "$IS_BETA" == "true" ]]; then
-            # Beta branch push: tags as v1.2.<run_number>-beta
-            BASE_VER=$(grep -m1 'val baseVersion =' app/build.gradle.kts | cut -d '"' -f2 || echo "1.2")
-            [ -z "$BASE_VER" ] && BASE_VER="1.2"
+            # Beta branch push: tags as v1.3.<run_number>-beta
+            BASE_VER=$(grep -m1 'val baseVersion =' app/build.gradle.kts | cut -d '"' -f2 || echo "1.3")
+            [ -z "$BASE_VER" ] && BASE_VER="1.3"
             FULL_VER="${BASE_VER}.${{ github.run_number }}-beta"
             echo "tag_name=v${FULL_VER}" >> $GITHUB_OUTPUT
             echo "version_name=${FULL_VER}" >> $GITHUB_OUTPUT
@@ -76,9 +76,9 @@ jobs:
             echo "is_prerelease=true" >> $GITHUB_OUTPUT
             echo "make_latest=false" >> $GITHUB_OUTPUT
           else
-            # Continuous push on main/master: reads baseVersion from app/build.gradle.kts (e.g. 1.2)
-            BASE_VER=$(grep -m1 'val baseVersion =' app/build.gradle.kts | cut -d '"' -f2 || echo "1.2")
-            [ -z "$BASE_VER" ] && BASE_VER="1.2"
+            # Continuous push on main/master: reads baseVersion from app/build.gradle.kts (e.g. 1.3)
+            BASE_VER=$(grep -m1 'val baseVersion =' app/build.gradle.kts | cut -d '"' -f2 || echo "1.3")
+            [ -z "$BASE_VER" ] && BASE_VER="1.3"
             FULL_VER="${BASE_VER}.${{ github.run_number }}"
             echo "tag_name=v${FULL_VER}" >> $GITHUB_OUTPUT
             echo "version_name=${FULL_VER}" >> $GITHUB_OUTPUT
@@ -105,12 +105,30 @@ jobs:
           tag_name: ${{ steps.versioning.outputs.tag_name }}
           name: ${{ steps.versioning.outputs.release_title }}
           target_commitish: ${{ github.sha }}
+          generate_release_notes: true
           body: |
-            Direct APK downloads for ${{ steps.versioning.outputs.release_title }}:
+            ### 🌟 What's New & Fixes in ${{ steps.versioning.outputs.release_title }}:
 
-            • **NoxMedia-arm64-v8a.apk**: Modern 64-bit Android devices (Recommended, ~35MB)
-            • **NoxMedia-armeabi-v7a.apk**: Older & budget 32-bit Android devices (Compatible with older phones, ~33MB)
-            • **NoxMedia-universal.apk**: Universal build (Contains all architectures, ~65MB)
+            • **⚡ Performance Optimizations**: Significantly optimized resource utilization, lower memory footprint, and faster catalog navigation, especially smooth on low-end and budget Android devices.
+            • **🎬 Streaming Experience**: Enhanced byte-range chunk streaming pipeline for fluid, stutter-free playback on low-end hardware.
+            • **🎯 Advanced Content Detection Overhaul**:
+              - **Smart Year Detection**: Accurately recognizes and matches release years (e.g., distinguishing *Sherlock Holmes 2009* from other versions).
+              - **Expanded Syntax Support**: Native parsing for `12x05`, `15x3`, `S01E02`, and continuous anime episode numbering.
+              - **Symbol & Punctuation Cleanup**: Smart filtering of dividers, tags, and symbols (`;`, `'`, `-`, `•`, decorative brackets).
+              - **Diacritics & Accents Normalization**: Converts international titles (e.g. `Shōgun` → `Shogun`, `Pokémon` → `Pokemon`) for 100% exact API match.
+              - **Fix Metadata Candidate Preservation**: Preserves user-selected candidates directly via IMDb/TMDB find endpoints without overwriting manual selections with fuzzy search false positives.
+              - **Cross-Card Stream Deduplication**: Identifies identical video streams across duplicate channels or mirror posts and eliminates phantom duplicate cards in the library.
+            • **✨ Multi-Select in Unsupported Media**: Batch select unrecognized media files to quickly match, categorize, or manage in bulk.
+            • **👁️ Hide / Unhide Gestures**: Long-press any media card to instantly hide or unhide content across your library.
+            • **📊 Dead Entries Scan Progression**: Real-time progress percentage and visual progress bar while verifying deleted/broken Telegram messages.
+
+            ---
+
+            ### 📦 Direct APK Downloads for ${{ steps.versioning.outputs.release_title }}:
+
+            • **NoxMedia-arm64-v8a.apk**: Recommended for Mid-range & High-end devices (Modern 64-bit architecture, ~35MB).
+            • **NoxMedia-armeabi-v7a.apk**: Tailored for Low-end & Budget-friendly devices (Older 32-bit architecture, ~33MB).
+            • **NoxMedia-universal.apk**: Universal build containing all CPU architectures (~65MB). Compatible with all devices, but larger. If you know your device architecture (32-bit or 64-bit), we strongly recommend choosing the specific arm64 or armeabi build above for the smoothest, most optimized experience.
           files: output/*.apk
           draft: false
           prerelease: ${{ steps.versioning.outputs.is_prerelease == 'true' }}
