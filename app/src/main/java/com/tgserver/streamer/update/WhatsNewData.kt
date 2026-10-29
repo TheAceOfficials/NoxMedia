@@ -52,48 +52,48 @@ object WhatsNewRepository {
         items = listOf(
             WhatsNewItem(
                 category = ChangeCategory.NEW,
-                title = "Smart Content Detection System Overhaul",
-                description = "Comprehensive media parser upgrade: smart year detection (e.g. distinguishing Sherlock Holmes 2009 vs other versions), full support for 12x05 & 15x3 formats, intelligent symbol/punctuation filtering (';', ''', '-', '•'), international title diacritics normalization ('Shōgun' → 'Shogun', 'Pokémon' → 'Pokemon') for 100% exact API matching, and duplicate stream card elimination."
+                title = "Smart Content Detection Overhaul",
+                description = "Overhauled parser with smart year matching, symbol cleanup, multi-format syntax (12x05, 15x3), and international title diacritics normalization."
             ),
             WhatsNewItem(
                 category = ChangeCategory.NEW,
                 title = "Multi-Select in Unsupported Media",
-                description = "Select multiple unrecognized media entries to bulk match, re-categorize, or manage in a single batch operation."
+                description = "Select multiple unrecognized entries to bulk match, re-categorize, or manage in a single batch operation."
             ),
             WhatsNewItem(
                 category = ChangeCategory.NEW,
                 title = "Hold to Hide / Unhide Content",
-                description = "Long press any content card in your library to quickly toggle hidden status without digging into nested menus."
+                description = "Long press any content card in your library to quickly toggle hidden status."
             ),
             WhatsNewItem(
                 category = ChangeCategory.NEW,
                 title = "Real-Time Dead Entries Progress Bar",
-                description = "Dead Entries cleanup now features live item progression tracking (e.g. 450/5638, 8%) alongside a smooth visual progress bar in Settings."
+                description = "Added live progression tracking (checked/total, percentage) and a visual progress bar during dead entries scan."
             ),
             WhatsNewItem(
                 category = ChangeCategory.IMPROVEMENT,
                 title = "Optimized for Low-End & Budget Devices",
-                description = "Deep memory footprint optimizations and CPU efficiency improvements ensuring fluid navigation, faster catalog load times, and responsive UI on budget hardware."
+                description = "Reduced memory footprint and CPU overhead for fluid navigation and faster catalog loading on budget hardware."
             ),
             WhatsNewItem(
                 category = ChangeCategory.IMPROVEMENT,
                 title = "Streaming Playback Pipeline Enhancements",
-                description = "Smoother byte-range chunk streaming on lower-spec hardware, minimizing buffering and frame drops during high-bitrate video playback."
+                description = "Smoother byte-range chunk streaming pipeline minimizing buffering and frame drops."
             ),
             WhatsNewItem(
                 category = ChangeCategory.IMPROVEMENT,
-                title = "Early Beta Access Guidance & Settings Notice",
-                description = "Removed beta badge clutter and added clear developer guidance recommending stable builds for everyday streaming."
+                title = "Early Beta Access Guidance",
+                description = "Updated settings notice with developer recommendations for everyday streaming."
             ),
             WhatsNewItem(
                 category = ChangeCategory.FIX,
                 title = "Fix Metadata Candidate Preservation",
-                description = "Candidate selection in Fix Metadata Match now strictly queries TMDB and TVDB by exact IMDb ID, preventing selected candidates from being overridden by fuzzy title search mismatches."
+                description = "Manual candidate selections now strictly query by exact ID, preventing fuzzy search overrides."
             ),
             WhatsNewItem(
                 category = ChangeCategory.FIX,
                 title = "Eliminated Phantom Duplicate Cards",
-                description = "Enhanced exact stream deduplication so video files from multiple channel mirrors or re-posts are cleanly unified without duplicate cards appearing in Library."
+                description = "Pruned duplicate cards across mirrored channel streams and duplicate uploads."
             )
         )
     )

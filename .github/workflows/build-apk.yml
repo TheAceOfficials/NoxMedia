@@ -105,30 +105,25 @@ jobs:
           tag_name: ${{ steps.versioning.outputs.tag_name }}
           name: ${{ steps.versioning.outputs.release_title }}
           target_commitish: ${{ github.sha }}
-          generate_release_notes: true
+          generate_release_notes: false
           body: |
-            ### 🌟 What's New & Fixes in ${{ steps.versioning.outputs.release_title }}:
-
-            • **⚡ Performance Optimizations**: Significantly optimized resource utilization, lower memory footprint, and faster catalog navigation, especially smooth on low-end and budget Android devices.
-            • **🎬 Streaming Experience**: Enhanced byte-range chunk streaming pipeline for fluid, stutter-free playback on low-end hardware.
-            • **🎯 Advanced Content Detection Overhaul**:
-              - **Smart Year Detection**: Accurately recognizes and matches release years (e.g., distinguishing *Sherlock Holmes 2009* from other versions).
-              - **Expanded Syntax Support**: Native parsing for `12x05`, `15x3`, `S01E02`, and continuous anime episode numbering.
-              - **Symbol & Punctuation Cleanup**: Smart filtering of dividers, tags, and symbols (`;`, `'`, `-`, `•`, decorative brackets).
-              - **Diacritics & Accents Normalization**: Converts international titles (e.g. `Shōgun` → `Shogun`, `Pokémon` → `Pokemon`) for 100% exact API match.
-              - **Fix Metadata Candidate Preservation**: Preserves user-selected candidates directly via IMDb/TMDB find endpoints without overwriting manual selections with fuzzy search false positives.
-              - **Cross-Card Stream Deduplication**: Identifies identical video streams across duplicate channels or mirror posts and eliminates phantom duplicate cards in the library.
-            • **✨ Multi-Select in Unsupported Media**: Batch select unrecognized media files to quickly match, categorize, or manage in bulk.
-            • **👁️ Hide / Unhide Gestures**: Long-press any media card to instantly hide or unhide content across your library.
-            • **📊 Dead Entries Scan Progression**: Real-time progress percentage and visual progress bar while verifying deleted/broken Telegram messages.
+            ### What's Changed
+            • feat(detection): overhauled media parser with smart year matching, symbol cleanup, and multi-format support (12x05, 15x3)
+            • feat(metadata): preserve exact candidate matches via IMDb/TMDB ID and normalize title diacritics
+            • feat(library): added multi-select and batch actions in unsupported media
+            • feat(library): hold content card to quickly toggle hide or unhide
+            • feat(storage): added real-time progress percentage and visual bar to dead entries scan
+            • fix(library): eliminated phantom duplicate cards across mirrored channel streams
+            • perf(player): optimized streaming pipeline and reduced buffering on low-end devices
+            • perf(core): lowered memory footprint and improved app responsiveness on budget devices
+            • refactor(settings): updated beta access settings with developer guidance
 
             ---
 
-            ### 📦 Direct APK Downloads for ${{ steps.versioning.outputs.release_title }}:
-
-            • **NoxMedia-arm64-v8a.apk**: Recommended for Mid-range & High-end devices (Modern 64-bit architecture, ~35MB).
-            • **NoxMedia-armeabi-v7a.apk**: Tailored for Low-end & Budget-friendly devices (Older 32-bit architecture, ~33MB).
-            • **NoxMedia-universal.apk**: Universal build containing all CPU architectures (~65MB). Compatible with all devices, but larger. If you know your device architecture (32-bit or 64-bit), we strongly recommend choosing the specific arm64 or armeabi build above for the smoothest, most optimized experience.
+            ### Downloads
+            • **NoxMedia-arm64-v8a.apk**: Modern 64-bit devices (Recommended)
+            • **NoxMedia-armeabi-v7a.apk**: Older & budget 32-bit devices
+            • **NoxMedia-universal.apk**: Universal build (Contains all architectures)
           files: output/*.apk
           draft: false
           prerelease: ${{ steps.versioning.outputs.is_prerelease == 'true' }}
