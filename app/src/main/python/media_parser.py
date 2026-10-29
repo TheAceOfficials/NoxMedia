@@ -339,7 +339,7 @@ def parse_media_filename(filename: str, caption: str = "", is_anime: bool = Fals
 
     # Strip decorative Japanese/CJK furigana tags when Latin title words are present
     if re.search(r"[a-zA-Z]{2,}", clean_title):
-        clean_title = re.sub(r"[\s._\-\u2010-\\u2015\u2212\u30fc\uff0d\uff5e~·•【】（）「」『』［］()\[\]]*[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]+[\s._\-\u2010-\\u2015\u2212\u30fc\uff0d\uff5e~·•【】（）「」『』［］()\[\]]*", " ", clean_title)
+        clean_title = re.sub(r"[\s._\-\u2010-\u2015\u2212\u30fc\uff0d\uff5e~·•【】（）「」『』［］()\[\]]*[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]+[\s._\-\u2010-\u2015\u2212\u30fc\uff0d\uff5e~·•【】（）「」『』［］()\[\]]*", " ", clean_title)
 
     # Strip year from clean_title if present (e.g. "Doraemon (2005)" -> "Doraemon")
     y_in_title = _YEAR_RE.search(clean_title)
