@@ -243,10 +243,16 @@ fun List<MediaItem>.toMediaGroups(): List<MediaGroup> {
         val seenSizeKeys = mutableSetOf<String>()
         val seenNameKeys = mutableSetOf<String>()
         val sorted = effectiveMedia.sortedWith(
-            compareByDescending<MediaItem> { it.isSplit }
+            compareByDescending<MediaItem> { it.isManuallyMatched }
+                .thenByDescending<MediaItem> { it.isSplit }
                 .thenBy { item ->
                     val fn = item.fileName.lowercase()
                     if (fn.contains("momstealer") || fn.contains("vegamovies") || fn.contains("katmovie") || fn.contains("4khdhub")) 1 else 0
+                }
+                .thenByDescending {
+                    (if (!it.imdbId.isNullOrBlank()) 200 else 0) +
+                    (if ((it.tmdbId ?: 0) > 0) 150 else 0) +
+                    (if (!it.posterUrl.isNullOrBlank()) 100 else 0)
                 }
                 .thenByDescending { it.sizeBytes }
         )
@@ -257,7 +263,9 @@ fun List<MediaItem>.toMediaGroups(): List<MediaGroup> {
             val cleanTitle = item.title.trim().lowercase()
             val mediaId = item.imdbId ?: item.tmdbId?.toString() ?: cleanTitle
 
-            val sizeKey = if (item.sizeBytes > 0L) {
+            val sizeKey = if (item.sizeBytes > 10_000_000L) {
+                if (isSeries) "s${s}_e${e}_${item.sizeBytes}" else "movie_${item.sizeBytes}"
+            } else if (item.sizeBytes > 0L) {
                 if (isSeries) "${mediaId}_s${s}_e${e}_${item.sizeBytes}" else "${mediaId}_${item.sizeBytes}"
             } else null
 
@@ -266,7 +274,11 @@ fun List<MediaItem>.toMediaGroups(): List<MediaGroup> {
                 .replace(Regex("""[\(\[][^\)\]]*(?:momstealer|anipulse|toonworld|vegamovies|katmovie|4khdhub)[^\)\]]*[\)\]]""", RegexOption.IGNORE_CASE), "")
                 .replace(Regex("""[\s._-]+"""), " ")
                 .trim()
-            val nameKey = if (isSeries) "${mediaId}_s${s}_e${e}_$cleanFn" else "${mediaId}_$cleanFn"
+            val nameKey = if (cleanFn.length >= 8) {
+                if (isSeries) "s${s}_e${e}_$cleanFn" else "movie_$cleanFn"
+            } else {
+                if (isSeries) "${mediaId}_s${s}_e${e}_$cleanFn" else "${mediaId}_$cleanFn"
+            }
 
             val isDup = (sizeKey != null && seenSizeKeys.contains(sizeKey)) || seenNameKeys.contains(nameKey)
             if (!isDup) {

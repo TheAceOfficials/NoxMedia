@@ -8,6 +8,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.net.URLEncoder
+import java.text.Normalizer
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
@@ -149,15 +150,58 @@ class MetadataEnricher {
 
         // 1. TMDB: Priority 1 (Cleaner English metadata, posters, backdrops, episode stills)
         var tmdbId = resultMeta.tmdbId
+        val targetImdb = (resultMeta.imdbId ?: meta.imdbId)?.lowercase()?.trim()
         if (tmdbKey.isNotBlank()) {
-            if (tmdbId == null && !meta.title.isNullOrBlank()) {
+            // 1A. Direct lookup by IMDb ID via TMDB /find endpoint (Exact ID match, avoids fuzzy search mismatches)
+            if (tmdbId == null && !targetImdb.isNullOrBlank() && targetImdb.matches(Regex("(?i)^tt\\d+$"))) {
+                try {
+                    val findUrl = "https://api.themoviedb.org/3/find/$targetImdb?api_key=$tmdbKey&external_source=imdb_id"
+                    val req = Request.Builder().url(findUrl).build()
+                    httpClient.newCall(req).execute().use { resp ->
+                        if (resp.isSuccessful) {
+                            val body = resp.body?.string()
+                            if (!body.isNullOrBlank()) {
+                                val root = JsonParser.parseString(body).asJsonObject
+                                val priList = if (meta.type == "movie") root.getAsJsonArray("movie_results") else root.getAsJsonArray("tv_results")
+                                val secList = if (meta.type == "movie") root.getAsJsonArray("tv_results") else root.getAsJsonArray("movie_results")
+                                val targetArray = if (priList != null && priList.size() > 0) priList else secList
+                                if (targetArray != null && targetArray.size() > 0) {
+                                    val obj = targetArray[0].asJsonObject
+                                    tmdbId = obj.get("id").asInt
+                                    val name = if (obj.has("title")) obj.get("title")?.asString else obj.get("name")?.asString
+                                    val relDate = if (obj.has("release_date")) obj.get("release_date")?.asString else obj.get("first_air_date")?.asString
+                                    val year = relDate?.split("-")?.firstOrNull()
+                                    val overview = obj.get("overview")?.asString
+                                    val posterPath = obj.get("poster_path")?.asString
+                                    val bgPath = obj.get("backdrop_path")?.asString
+
+                                    resultMeta = resultMeta.copy(
+                                        tmdbId = tmdbId,
+                                        title = if (resultMeta.title.isNullOrBlank()) cleanCandidateTitle(name) else resultMeta.title,
+                                        year = resultMeta.year ?: year,
+                                        overview = if (!overview.isNullOrBlank() && !isCjkText(overview)) overview else resultMeta.overview,
+                                        posterUrl = resultMeta.posterUrl ?: posterPath?.let { "https://image.tmdb.org/t/p/w780$it" },
+                                        backdropUrl = resultMeta.backdropUrl ?: bgPath?.let { "https://image.tmdb.org/t/p/original$it" },
+                                        imdbId = targetImdb
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.d(TAG, "TMDB /find by imdbId failed: ${e.message}")
+                }
+            }
+
+            // 1B. Fallback search by title if still no tmdbId and no imdbId
+            if (tmdbId == null && targetImdb.isNullOrBlank() && !meta.title.isNullOrBlank()) {
                 val tmdbSearch = tryTmdb(meta.title, meta.type ?: "series", null, null, tmdbKey, meta.year)
                 if (tmdbSearch != null && tmdbSearch.tmdbId != null) {
                     tmdbId = tmdbSearch.tmdbId
                     resultMeta = resultMeta.copy(
                         tmdbId = tmdbId,
-                        title = cleanCandidateTitle(tmdbSearch.title),
-                        year = tmdbSearch.year ?: resultMeta.year,
+                        title = if (resultMeta.title.isNullOrBlank()) cleanCandidateTitle(tmdbSearch.title) else resultMeta.title,
+                        year = resultMeta.year ?: tmdbSearch.year,
                         overview = if (!tmdbSearch.overview.isNullOrBlank() && !isCjkText(tmdbSearch.overview)) tmdbSearch.overview else resultMeta.overview,
                         posterUrl = tmdbSearch.posterUrl ?: resultMeta.posterUrl,
                         backdropUrl = tmdbSearch.backdropUrl ?: resultMeta.backdropUrl
@@ -185,8 +229,8 @@ class MetadataEnricher {
                                 val resolvedImdb = extIds?.get("imdb_id")?.asString
 
                                 resultMeta = resultMeta.copy(
-                                    title = if (name.isNotBlank()) name else resultMeta.title,
-                                    year = cleanYear ?: resultMeta.year,
+                                    title = if (resultMeta.title.isNullOrBlank() && name.isNotBlank()) name else resultMeta.title,
+                                    year = resultMeta.year ?: cleanYear,
                                     overview = if (!desc.isNullOrBlank() && !isCjkText(desc)) desc else resultMeta.overview,
                                     posterUrl = posterPath?.let { "https://image.tmdb.org/t/p/w780$it" } ?: resultMeta.posterUrl,
                                     backdropUrl = bgPath?.let { "https://image.tmdb.org/t/p/original$it" } ?: resultMeta.backdropUrl,
@@ -239,7 +283,31 @@ class MetadataEnricher {
         if (tvdbKey.isNotBlank() && meta.type != "movie") {
             try {
                 var tvdbId = meta.tvdbId
-                if (tvdbId == null && !meta.title.isNullOrBlank()) {
+                val token = getTvdbAuthToken(tvdbKey)
+                // 2A. If IMDb ID is available, look up TVDB by remote_id directly
+                if (tvdbId == null && !targetImdb.isNullOrBlank() && !token.isNullOrBlank()) {
+                    try {
+                        val sUrl = "https://api4.thetvdb.com/v4/search?remote_id=$targetImdb"
+                        val sReq = Request.Builder().url(sUrl).addHeader("Authorization", "Bearer $token").build()
+                        httpClient.newCall(sReq).execute().use { sResp ->
+                            if (sResp.isSuccessful) {
+                                val sBody = sResp.body?.string()
+                                if (!sBody.isNullOrBlank()) {
+                                    val root = JsonParser.parseString(sBody).asJsonObject
+                                    val data = root.getAsJsonArray("data")
+                                    if (data != null && data.size() > 0) {
+                                        val firstObj = data[0].asJsonObject
+                                        val tId = firstObj.get("tvdb_id")?.asString?.toIntOrNull()
+                                            ?: firstObj.get("id")?.asString?.removePrefix("series-")?.toIntOrNull()
+                                        if (tId != null) tvdbId = tId
+                                    }
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+                // 2B. Fallback search by title
+                if (tvdbId == null && targetImdb.isNullOrBlank() && !meta.title.isNullOrBlank()) {
                     val tvdbRes = tryTvdb(meta.title, meta.type ?: "series", tvdbKey, year = meta.year)
                     if (tvdbRes != null && tvdbRes.tvdbId != null) {
                         tvdbId = tvdbRes.tvdbId
@@ -1795,7 +1863,9 @@ class MetadataEnricher {
     }
 
     private fun normalizeForComparison(s: String): String {
-        return s.lowercase()
+        val decomposed = Normalizer.normalize(s, Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}"), "")
+        return decomposed.lowercase()
             .replace(Regex("^(the|a|an)\\s+"), "")
             .replace(Regex("['’‘`]"), "")
             .replace(Regex("[^a-z0-9\\s]"), " ")

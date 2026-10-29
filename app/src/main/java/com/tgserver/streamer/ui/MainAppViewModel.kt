@@ -836,12 +836,31 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             }
             StreamerForegroundService.activeServer?.clearTitleCache()
 
+            // Also find and clean up any duplicate items in mediaIndex sharing the exact same files
+            val groupFileKeys = groupItems.filter { it.sizeBytes > 10_000_000L }.map {
+                val s = if (effectiveType == "series") (it.season ?: 1) else 0
+                val e = if (effectiveType == "series") (it.episode ?: 1) else 0
+                Triple(s, e, it.sizeBytes)
+            }.toSet()
+
+            val duplicateIdsToRemove = tgClient.getAllMediaItems().filter { ex ->
+                !groupItems.any { it.id == ex.id } && ex.sizeBytes > 10_000_000L &&
+                groupFileKeys.contains(Triple(if (ex.type == "series") (ex.season ?: 1) else 0, if (ex.type == "series") (ex.episode ?: 1) else 0, ex.sizeBytes))
+            }.map { it.id }
+
             tgClient.updateMediaItems(updated)
+            if (duplicateIdsToRemove.isNotEmpty()) {
+                tgClient.removeMediaItems(duplicateIdsToRemove)
+            }
+            tgClient.cleanupExactDuplicates()
             triggerAutoCloudBackupDebounced(0L)
             withContext(Dispatchers.Main) {
+                val displayTitle = enriched.title ?: meta.title ?: groupItems.firstOrNull()?.title ?: ""
+                val displayYear = enriched.year ?: meta.year ?: groupItems.firstOrNull()?.year ?: ""
+                val yearSuffix = if (displayYear.isNotBlank()) " ($displayYear)" else ""
                 Toast.makeText(
                     getApplication(),
-                    "✓ Metadata synced: ${enriched.title ?: meta.title} (${enriched.year ?: meta.year}) • ${effectiveType.uppercase()}",
+                    "✓ Metadata synced: $displayTitle$yearSuffix • ${effectiveType.uppercase()}",
                     Toast.LENGTH_SHORT
                 ).show()
             }

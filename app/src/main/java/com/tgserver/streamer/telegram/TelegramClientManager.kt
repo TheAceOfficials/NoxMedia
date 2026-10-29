@@ -526,26 +526,34 @@ class TelegramClientManager(private val context: Context) {
             val e = item.episode ?: 0
             val cleanTitle = item.title.trim().lowercase()
             val mediaId = item.imdbId ?: item.tmdbId?.toString() ?: cleanTitle
-            if (isSeries) "${mediaId}_s${s}_e${e}_${item.sizeBytes}" else "${mediaId}_${item.sizeBytes}"
+            if (item.sizeBytes > 10_000_000L) {
+                if (isSeries) "s${s}_e${e}_${item.sizeBytes}" else "movie_${item.sizeBytes}"
+            } else {
+                if (isSeries) "${mediaId}_s${s}_e${e}_${item.sizeBytes}" else "${mediaId}_${item.sizeBytes}"
+            }
         }
 
         val toRemove = mutableListOf<MediaItem>()
         for ((_, items) in grouped) {
             if (items.size > 1) {
-                // Sort so cleanest/best file comes first
+                // Sort so cleanly/manually matched and richest metadata file comes first
                 val sorted = items.sortedWith(
-                    compareBy<MediaItem> { item ->
-                        val fn = item.fileName.lowercase()
-                        if (fn.contains("momstealer") || fn.contains("vegamovies") || fn.contains("katmovie") || fn.contains("4khdhub")) 1 else 0
-                    }.thenByDescending {
-                        (if (!it.episodeThumbnailUrl.isNullOrBlank()) 100 else 0) +
-                        (if (!it.episodeTitle.isNullOrBlank()) 50 else 0) +
-                        (if (!it.overview.isNullOrBlank()) 20 else 0)
-                    }.thenBy {
-                        it.fileName.length
-                    }.thenBy {
-                        it.messageId
-                    }
+                    compareByDescending<MediaItem> { it.isManuallyMatched }
+                        .thenBy<MediaItem> { item ->
+                            val fn = item.fileName.lowercase()
+                            if (fn.contains("momstealer") || fn.contains("vegamovies") || fn.contains("katmovie") || fn.contains("4khdhub")) 1 else 0
+                        }.thenByDescending {
+                            (if (!it.imdbId.isNullOrBlank()) 200 else 0) +
+                            (if ((it.tmdbId ?: 0) > 0) 150 else 0) +
+                            (if (!it.posterUrl.isNullOrBlank()) 100 else 0) +
+                            (if (!it.episodeThumbnailUrl.isNullOrBlank()) 80 else 0) +
+                            (if (!it.episodeTitle.isNullOrBlank()) 50 else 0) +
+                            (if (!it.overview.isNullOrBlank()) 20 else 0)
+                        }.thenBy {
+                            it.fileName.length
+                        }.thenBy {
+                            it.messageId
+                        }
                 )
                 // First is preserved, others are removed
                 val keep = sorted.first()
@@ -1989,6 +1997,13 @@ class TelegramClientManager(private val context: Context) {
     fun updateMediaItems(items: List<MediaItem>) {
         items.forEach { mediaIndex[it.id] = it }
         saveMediaIndex()
+    }
+
+    fun removeMediaItems(itemIds: Collection<String>) {
+        if (itemIds.isEmpty()) return
+        itemIds.forEach { mediaIndex.remove(it) }
+        saveMediaIndex()
+        _mediaState.value = mediaIndex.values.toList()
     }
 
     fun getAllMediaItems(): List<MediaItem> {
