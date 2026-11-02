@@ -172,6 +172,17 @@ data class MediaGroup(
     val hasRemux: Boolean = items.any { it.fileName.contains("remux", true) }
 
     val hasNetflix: Boolean = items.any { it.fileName.contains("netflix", true) || it.fileName.contains(".nf.", true) || it.fileName.contains("-nf", true) }
+    val hasHbo: Boolean = items.any {
+        val fn = it.fileName.lowercase()
+        fn.contains(Regex("""(?i)[\W_](hbo|hmax|hbomax)[\W_]""")) ||
+        fn.startsWith("hbo", ignoreCase = true) ||
+        fn.contains(".hbo.", ignoreCase = true) ||
+        fn.contains("-hbo", ignoreCase = true)
+    }
+    val hasWarnerBros: Boolean = items.any {
+        val fn = it.fileName.lowercase()
+        fn.contains("warner", ignoreCase = true) || fn.contains(Regex("""(?i)[\W_]wb[\W_]"""))
+    }
     val hasCrunchyroll: Boolean = items.any { it.fileName.contains("crunchyroll", true) || it.fileName.contains(".cr.", true) }
     val hasPrimeVideo: Boolean = items.any { it.fileName.contains("amazon", true) || it.fileName.contains("prime", true) || it.fileName.contains(".amzn.", true) }
     val hasDisney: Boolean = items.any { it.fileName.contains("disney", true) || it.fileName.contains("hotstar", true) || it.fileName.contains(".dsnp.", true) }

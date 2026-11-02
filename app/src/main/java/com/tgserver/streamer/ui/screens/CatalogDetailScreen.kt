@@ -47,6 +47,8 @@ fun CatalogDetailScreen(
     val mediaGroups by viewModel.mediaGroups.collectAsState()
 
     var personFilmographyIds by remember { mutableStateOf<Set<Int>>(emptySet()) }
+    var companyFilmographyIds by remember { mutableStateOf<Set<Int>>(emptySet()) }
+
     LaunchedEffect(catalog.filter.personTmdbId) {
         val pid = catalog.filter.personTmdbId
         if (pid != null && pid > 0) {
@@ -54,8 +56,15 @@ fun CatalogDetailScreen(
         }
     }
 
-    val matchedItems = remember(mediaGroups, catalog, personFilmographyIds) {
-        viewModel.filterMediaForCatalog(catalog, personFilmographyIds)
+    LaunchedEffect(catalog.filter.studioTmdbId) {
+        val cid = catalog.filter.studioTmdbId
+        if (cid != null && cid > 0) {
+            companyFilmographyIds = viewModel.getCompanyFilmographyIds(cid)
+        }
+    }
+
+    val matchedItems = remember(mediaGroups, catalog, personFilmographyIds, companyFilmographyIds) {
+        viewModel.filterMediaForCatalog(catalog, personFilmographyIds, companyFilmographyIds)
     }
 
     var searchQuery by remember { mutableStateOf("") }

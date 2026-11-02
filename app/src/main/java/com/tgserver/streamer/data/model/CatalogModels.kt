@@ -28,8 +28,10 @@ data class CatalogFilterCriteria(
     val personQuery: String = "", // e.g. "Christopher Nolan"
     val personTmdbId: Int? = null,
     val personRole: String? = null, // "Directing", "Acting", etc.
+    val personProfilePath: String? = null,
     val studioQuery: String = "", // e.g. "Studio Ghibli", "Warner Bros", "Netflix"
     val studioTmdbId: Int? = null,
+    val studioLogoPath: String? = null,
     val genres: List<String> = emptyList(), // e.g. ["Sci-Fi", "Animation"]
     val languages: List<String> = emptyList(), // e.g. ["English", "Hindi", "Japanese"]
     val ratingFilterEnabled: Boolean = false,

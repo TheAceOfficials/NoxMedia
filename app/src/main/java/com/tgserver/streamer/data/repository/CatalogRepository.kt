@@ -229,6 +229,73 @@ class CatalogRepository(
         }
     }
 
+    suspend fun getCompanyFilmographyIds(companyId: Int, apiKey: String): Set<Int> = withContext(Dispatchers.IO) {
+        if (companyId <= 0 || apiKey.isBlank()) return@withContext emptySet()
+        companyFilmographyCache[companyId]?.let { return@withContext it }
+
+        try {
+            val idSet = mutableSetOf<Int>()
+            // 1. Discover movies with this company
+            val movieUrl = "https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_companies=$companyId&page=1"
+            httpClient.newCall(Request.Builder().url(movieUrl).build()).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string().orEmpty()
+                    val results = JSONObject(body).optJSONArray("results")
+                    if (results != null) {
+                        for (i in 0 until results.length()) {
+                            val id = results.getJSONObject(i).optInt("id", 0)
+                            if (id > 0) idSet.add(id)
+                        }
+                    }
+                }
+            }
+            // 2. Discover TV series with this company
+            val tvUrl = "https://api.themoviedb.org/3/discover/tv?api_key=$apiKey&with_companies=$companyId&page=1"
+            httpClient.newCall(Request.Builder().url(tvUrl).build()).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string().orEmpty()
+                    val results = JSONObject(body).optJSONArray("results")
+                    if (results != null) {
+                        for (i in 0 until results.length()) {
+                            val id = results.getJSONObject(i).optInt("id", 0)
+                            if (id > 0) idSet.add(id)
+                        }
+                    }
+                }
+            }
+            // 3. Known network discover fallback (e.g. HBO=49 / 3186)
+            val networkId = when (companyId) {
+                3268 -> 49 // HBO
+                1782 -> 213 // Netflix
+                2739 -> 2739 // Disney+
+                2552 -> 2552 // Apple TV+
+                20580 -> 1024 // Prime Video
+                else -> null
+            }
+            if (networkId != null) {
+                val netUrl = "https://api.themoviedb.org/3/discover/tv?api_key=$apiKey&with_networks=$networkId&page=1"
+                httpClient.newCall(Request.Builder().url(netUrl).build()).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string().orEmpty()
+                        val results = JSONObject(body).optJSONArray("results")
+                        if (results != null) {
+                            for (i in 0 until results.length()) {
+                                val id = results.getJSONObject(i).optInt("id", 0)
+                                if (id > 0) idSet.add(id)
+                            }
+                        }
+                    }
+                }
+            }
+
+            companyFilmographyCache[companyId] = idSet
+            idSet
+        } catch (e: Exception) {
+            Log.e(TAG, "getCompanyFilmographyIds error: ${e.message}")
+            emptySet()
+        }
+    }
+
     /**
      * Filters media groups using the catalog filter criteria.
      * High performance, single pass filtering with zero UI stutter.
@@ -236,7 +303,8 @@ class CatalogRepository(
     fun filterMediaForCatalog(
         catalog: CatalogDefinition,
         mediaGroups: List<MediaGroup>,
-        personTmdbIds: Set<Int> = emptySet()
+        personTmdbIds: Set<Int> = emptySet(),
+        studioTmdbIds: Set<Int> = emptySet()
     ): List<MediaGroup> {
         val f = catalog.filter
         val cleanPersonQuery = f.personQuery.trim().lowercase()
@@ -278,19 +346,25 @@ class CatalogRepository(
             }
 
             // Studio / Network match
-            if (cleanStudioQuery.isNotBlank()) {
+            if (cleanStudioQuery.isNotBlank() || studioTmdbIds.isNotEmpty()) {
                 val matchesPlatform = when {
-                    cleanStudioQuery.contains("ghibli") -> group.title.contains("ghibli", true) || group.overview?.contains("ghibli", true) == true || group.items.any { it.fileName.contains("ghibli", true) }
+                    studioTmdbIds.isNotEmpty() && group.tmdbId != null && group.tmdbId in studioTmdbIds -> true
+                    cleanStudioQuery.contains("ghibli") -> group.title.contains("ghibli", true) || group.items.any { it.fileName.contains("ghibli", true) }
+                    cleanStudioQuery.contains("hbo") || cleanStudioQuery.contains("max") -> group.hasHbo
                     cleanStudioQuery.contains("netflix") -> group.hasNetflix
                     cleanStudioQuery.contains("prime") || cleanStudioQuery.contains("amazon") -> group.hasPrimeVideo
                     cleanStudioQuery.contains("disney") || cleanStudioQuery.contains("hotstar") -> group.hasDisney
                     cleanStudioQuery.contains("apple") -> group.hasAppleTv
                     cleanStudioQuery.contains("crunchyroll") -> group.hasCrunchyroll
                     cleanStudioQuery.contains("zee5") -> group.hasZee5
-                    else -> {
-                        group.overview?.contains(cleanStudioQuery, ignoreCase = true) == true ||
-                        group.items.any { it.fileName.contains(cleanStudioQuery, ignoreCase = true) }
+                    cleanStudioQuery.contains("warner") -> group.hasWarnerBros
+                    cleanStudioQuery.contains("marvel") -> group.title.contains("marvel", true) || group.items.any { it.fileName.contains("marvel", true) }
+                    cleanStudioQuery.contains("a24") -> group.items.any { it.fileName.contains(Regex("""(?i)[\W_]a24[\W_]""")) }
+                    cleanStudioQuery.isNotBlank() -> {
+                        val wordRegex = Regex("""(?i)\b${Regex.escape(cleanStudioQuery)}\b""")
+                        wordRegex.containsMatchIn(group.title) || group.items.any { wordRegex.containsMatchIn(it.fileName) }
                     }
+                    else -> false
                 }
                 if (!matchesPlatform) return@filter false
             }

@@ -1405,6 +1405,11 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         return catalogRepo.getPersonFilmographyIds(personId, key)
     }
 
+    suspend fun getCompanyFilmographyIds(companyId: Int): Set<Int> {
+        val key = _config.value.tmdbApiKey
+        return catalogRepo.getCompanyFilmographyIds(companyId, key)
+    }
+
     suspend fun generateCatalogWithAi(prompt: String): Result<GeneratedCatalogResult> {
         val cfg = _config.value
         val provider = if (cfg.aiProvider.equals("openrouter", ignoreCase = true)) AiProvider.OPENROUTER else AiProvider.GEMINI
@@ -1416,8 +1421,12 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         return catalogAiService.verifyApiKey(provider, apiKey)
     }
 
-    fun filterMediaForCatalog(catalog: CatalogDefinition, personCredits: Set<Int> = emptySet()): List<MediaGroup> {
-        return catalogRepo.filterMediaForCatalog(catalog, mediaGroups.value, personCredits)
+    fun filterMediaForCatalog(
+        catalog: CatalogDefinition,
+        personCredits: Set<Int> = emptySet(),
+        companyCredits: Set<Int> = emptySet()
+    ): List<MediaGroup> {
+        return catalogRepo.filterMediaForCatalog(catalog, mediaGroups.value, personCredits, companyCredits)
     }
 
     fun updateAnimeMetadataPreference(pref: String) {

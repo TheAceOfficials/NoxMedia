@@ -50,9 +50,22 @@ private val STANDARD_GENRES = listOf(
     "Science Fiction", "Thriller", "War"
 )
 
+data class StandardStudioInfo(
+    val name: String,
+    val tmdbId: Int,
+    val logoPath: String
+)
+
 private val STANDARD_STUDIOS = listOf(
-    "Studio Ghibli", "Netflix", "Prime Video", "Disney+",
-    "HBO", "Apple TV+", "Warner Bros", "Marvel", "A24"
+    StandardStudioInfo("HBO", 3268, "/tuomPhY2UtuPTqqFnKMVHvSb724.png"),
+    StandardStudioInfo("Netflix", 1782, "/wwemzKWzjKYJFfCeiB57q3r4Bcm.png"),
+    StandardStudioInfo("Prime Video", 20580, "/ifhbNuuVnlwYy5oXA05XaM5Xi7P.png"),
+    StandardStudioInfo("Disney+", 2739, "/gJ8VX6JSu3ci4ewTuRztJiq9CuB.png"),
+    StandardStudioInfo("Apple TV+", 2552, "/4KAy34EHvRM25Ih8Mz8Bm9VOtwP.png"),
+    StandardStudioInfo("Studio Ghibli", 10342, "/7rwSXluNWZAlKL2qi0GtIPJuqih.png"),
+    StandardStudioInfo("Warner Bros", 174, "/ky0xOc5maQswTVI8VOYEN0mX094.png"),
+    StandardStudioInfo("Marvel", 420, "/hUzeosd33nzE5MCNsZxCGEKTXaQ.png"),
+    StandardStudioInfo("A24", 41077, "/1ZXVjXYUsCU99Yjh6CiPVYEx3BK.png")
 )
 
 private val STANDARD_LANGUAGES = listOf(
@@ -93,7 +106,14 @@ fun CatalogEditorSheet(
     var mediaType by remember { mutableStateOf(initialFilter.mediaType) } // "all", "movie", "series"
     var personQuery by remember { mutableStateOf(initialFilter.personQuery) }
     var selectedPersonId by remember { mutableStateOf(initialFilter.personTmdbId) }
+    var selectedPersonName by remember { mutableStateOf(initialFilter.personQuery) }
+    var selectedPersonProfilePath by remember { mutableStateOf(initialFilter.personProfilePath) }
+
     var studioQuery by remember { mutableStateOf(initialFilter.studioQuery) }
+    var selectedStudioId by remember { mutableStateOf(initialFilter.studioTmdbId) }
+    var selectedStudioName by remember { mutableStateOf(initialFilter.studioQuery) }
+    var selectedStudioLogoPath by remember { mutableStateOf(initialFilter.studioLogoPath) }
+
     var selectedGenres by remember { mutableStateOf(initialFilter.genres.toSet()) }
     var selectedLanguages by remember { mutableStateOf(initialFilter.languages.toSet()) }
 
@@ -143,19 +163,50 @@ fun CatalogEditorSheet(
         }
     }
 
+    // Studio search results
+    var studioSearchResults by remember { mutableStateOf<List<TmdbCompanyItem>>(emptyList()) }
+    var isSearchingStudio by remember { mutableStateOf(false) }
+
+    // Debounced TMDB Studio Search
+    LaunchedEffect(studioQuery) {
+        if (studioQuery.length >= 2 && selectedStudioId == null && config.tmdbApiKey.isNotBlank()) {
+            delay(350)
+            isSearchingStudio = true
+            studioSearchResults = viewModel.searchTmdbCompanies(studioQuery)
+            isSearchingStudio = false
+        } else {
+            studioSearchResults = emptyList()
+        }
+    }
+
+    // Company Filmography IDs
+    var companyFilmographyIds by remember { mutableStateOf<Set<Int>>(emptySet()) }
+    LaunchedEffect(selectedStudioId) {
+        val id = selectedStudioId
+        if (id != null && id > 0) {
+            companyFilmographyIds = viewModel.getCompanyFilmographyIds(id)
+        } else {
+            companyFilmographyIds = emptySet()
+        }
+    }
+
     // Live preview of matching items in library
     val liveMatchingCount = remember(
-        mediaGroups, mediaType, personQuery, selectedPersonId, personFilmographyIds,
-        studioQuery, selectedGenres, selectedLanguages,
+        mediaGroups, mediaType, selectedPersonName, selectedPersonId, personFilmographyIds,
+        selectedStudioName, selectedStudioId, companyFilmographyIds,
+        selectedGenres, selectedLanguages,
         ratingFilterEnabled, minRating, maxRating,
         yearFilterEnabled, minYear, maxYear,
         sortBy, sortAscending, semanticKeywords
     ) {
         val tempFilter = CatalogFilterCriteria(
             mediaType = mediaType,
-            personQuery = personQuery,
+            personQuery = selectedPersonName,
             personTmdbId = selectedPersonId,
-            studioQuery = studioQuery,
+            personProfilePath = selectedPersonProfilePath,
+            studioQuery = selectedStudioName,
+            studioTmdbId = selectedStudioId,
+            studioLogoPath = selectedStudioLogoPath,
             genres = selectedGenres.toList(),
             languages = selectedLanguages.toList(),
             ratingFilterEnabled = ratingFilterEnabled,
@@ -169,7 +220,7 @@ fun CatalogEditorSheet(
             keywords = semanticKeywords
         )
         val tempCatalog = CatalogDefinition(name = "Preview", filter = tempFilter)
-        viewModel.filterMediaForCatalog(tempCatalog, personFilmographyIds).size
+        viewModel.filterMediaForCatalog(tempCatalog, personFilmographyIds, companyFilmographyIds).size
     }
 
     Dialog(
@@ -230,16 +281,19 @@ fun CatalogEditorSheet(
                     Button(
                         onClick = {
                             val finalName = catalogName.trim().ifBlank {
-                                if (personQuery.isNotBlank()) "Films by $personQuery"
-                                else if (studioQuery.isNotBlank()) "$studioQuery Collection"
+                                if (selectedPersonName.isNotBlank()) "Films by $selectedPersonName"
+                                else if (selectedStudioName.isNotBlank()) "$selectedStudioName Collection"
                                 else if (selectedGenres.isNotEmpty()) "${selectedGenres.first()} Spotlight"
                                 else "Custom Catalog"
                             }
                             val finalFilter = CatalogFilterCriteria(
                                 mediaType = mediaType,
-                                personQuery = personQuery.trim(),
+                                personQuery = selectedPersonName.trim(),
                                 personTmdbId = selectedPersonId,
-                                studioQuery = studioQuery.trim(),
+                                personProfilePath = selectedPersonProfilePath,
+                                studioQuery = selectedStudioName.trim(),
+                                studioTmdbId = selectedStudioId,
+                                studioLogoPath = selectedStudioLogoPath,
                                 genres = selectedGenres.toList(),
                                 languages = selectedLanguages.toList(),
                                 ratingFilterEnabled = ratingFilterEnabled,
@@ -712,126 +766,412 @@ fun CatalogEditorSheet(
                             ) {
                                 // 1. Person Search (Actor / Director)
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text(
-                                        text = "PERSON (ACTOR / DIRECTOR)",
-                                        color = Color(0xFF9CA3AF),
-                                        fontFamily = NdotFont,
-                                        fontSize = 10.sp
-                                    )
+                                        Text(
+                                            text = "PERSON (ACTOR / DIRECTOR)",
+                                            color = Color(0xFF9CA3AF),
+                                            fontFamily = NdotFont,
+                                            fontSize = 10.sp
+                                        )
 
-                                    OutlinedTextField(
-                                        value = personQuery,
-                                        onValueChange = {
-                                            personQuery = it
-                                            selectedPersonId = null // clear id on edit
-                                        },
-                                        placeholder = { Text("e.g. Christopher Nolan, Leonardo DiCaprio", color = Color(0xFF6B7280), fontSize = 12.5.sp) },
-                                        singleLine = true,
-                                        modifier = Modifier.fillMaxWidth(),
-                                        shape = RoundedCornerShape(12.dp),
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedContainerColor = Color(0xFF1B1C22),
-                                            unfocusedContainerColor = Color(0xFF1B1C22),
-                                            focusedBorderColor = Color(0xFFA855F7),
-                                            unfocusedBorderColor = Color(0xFF282A31),
-                                            focusedTextColor = Color.White,
-                                            unfocusedTextColor = Color.White
-                                        ),
-                                        trailingIcon = {
-                                            if (isSearchingPeople) {
-                                                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color(0xFFA855F7))
-                                            } else if (personQuery.isNotBlank()) {
-                                                IconButton(onClick = { personQuery = ""; selectedPersonId = null }) {
-                                                    Icon(imageVector = Icons.Default.Close, contentDescription = "Clear", tint = Color(0xFF9CA3AF), modifier = Modifier.size(16.dp))
+                                        if (selectedPersonName.isNotBlank()) {
+                                            // Tagged Selected Person Card
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .background(Color(0xFF201830))
+                                                    .border(BorderStroke(1.dp, Color(0xFF5B21B6)), RoundedCornerShape(12.dp))
+                                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                                ) {
+                                                    if (!selectedPersonProfilePath.isNullOrBlank()) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(36.dp)
+                                                                .clip(CircleShape)
+                                                                .border(BorderStroke(1.dp, Color(0xFFA855F7)), CircleShape)
+                                                        ) {
+                                                            RemoteImage(
+                                                                url = if (selectedPersonProfilePath!!.startsWith("http")) selectedPersonProfilePath else "https://image.tmdb.org/t/p/w185$selectedPersonProfilePath",
+                                                                contentDescription = selectedPersonName,
+                                                                modifier = Modifier.fillMaxSize()
+                                                            )
+                                                        }
+                                                    } else {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(36.dp)
+                                                                .clip(CircleShape)
+                                                                .background(Color(0xFF382054)),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Default.Person,
+                                                                contentDescription = null,
+                                                                tint = Color(0xFFE9D5FF),
+                                                                modifier = Modifier.size(18.dp)
+                                                            )
+                                                        }
+                                                    }
+
+                                                    Column {
+                                                        Text(
+                                                            text = selectedPersonName,
+                                                            color = Color.White,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            fontSize = 13.sp
+                                                        )
+                                                        Text(
+                                                            text = "Tagged Person",
+                                                            color = Color(0xFFA855F7),
+                                                            fontFamily = NdotFont,
+                                                            fontSize = 9.5.sp
+                                                        )
+                                                    }
+                                                }
+
+                                                IconButton(
+                                                    onClick = {
+                                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                        selectedPersonId = null
+                                                        selectedPersonName = ""
+                                                        selectedPersonProfilePath = null
+                                                        personQuery = ""
+                                                    },
+                                                    modifier = Modifier.size(28.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Close,
+                                                        contentDescription = "Remove Tag",
+                                                        tint = Color(0xFF9CA3AF),
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
                                                 }
                                             }
-                                        }
-                                    )
+                                        } else {
+                                            // Search Input
+                                            OutlinedTextField(
+                                                value = personQuery,
+                                                onValueChange = { personQuery = it },
+                                                placeholder = { Text("Search actor/director (e.g. Christopher Nolan)", color = Color(0xFF6B7280), fontSize = 12.sp) },
+                                                singleLine = true,
+                                                modifier = Modifier.fillMaxWidth(),
+                                                shape = RoundedCornerShape(12.dp),
+                                                colors = OutlinedTextFieldDefaults.colors(
+                                                    focusedContainerColor = Color(0xFF1B1C22),
+                                                    unfocusedContainerColor = Color(0xFF1B1C22),
+                                                    focusedBorderColor = Color(0xFFA855F7),
+                                                    unfocusedBorderColor = Color(0xFF282A31),
+                                                    focusedTextColor = Color.White,
+                                                    unfocusedTextColor = Color.White
+                                                ),
+                                                trailingIcon = {
+                                                    if (isSearchingPeople) {
+                                                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color(0xFFA855F7))
+                                                    } else if (personQuery.isNotBlank()) {
+                                                        IconButton(onClick = { personQuery = "" }) {
+                                                            Icon(imageVector = Icons.Default.Close, contentDescription = "Clear", tint = Color(0xFF9CA3AF), modifier = Modifier.size(16.dp))
+                                                        }
+                                                    }
+                                                }
+                                            )
 
-                                    // TMDB Person suggestions
-                                    if (personSearchResults.isNotEmpty()) {
-                                        Column(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(12.dp))
-                                                .background(Color(0xFF20222A))
-                                                .padding(6.dp),
-                                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                                        ) {
-                                            personSearchResults.forEach { p ->
-                                                Row(
+                                            // TMDB Person suggestions with photo
+                                            if (personSearchResults.isNotEmpty()) {
+                                                Column(
                                                     modifier = Modifier
                                                         .fillMaxWidth()
-                                                        .clip(RoundedCornerShape(8.dp))
-                                                        .clickable {
-                                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                                            personQuery = p.name
-                                                            selectedPersonId = p.id
-                                                            personSearchResults = emptyList()
-                                                        }
-                                                        .padding(horizontal = 10.dp, vertical = 7.dp),
-                                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                                    verticalAlignment = Alignment.CenterVertically
+                                                        .clip(RoundedCornerShape(12.dp))
+                                                        .background(Color(0xFF20222A))
+                                                        .padding(6.dp),
+                                                    verticalArrangement = Arrangement.spacedBy(4.dp)
                                                 ) {
-                                                    Text(text = p.name, color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
-                                                    Text(text = p.department ?: "Crew", color = Color(0xFFA855F7), fontSize = 10.5.sp)
+                                                    personSearchResults.forEach { p ->
+                                                        Row(
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .clip(RoundedCornerShape(8.dp))
+                                                                .clickable {
+                                                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                                    selectedPersonName = p.name
+                                                                    selectedPersonId = p.id
+                                                                    selectedPersonProfilePath = p.profilePath
+                                                                    personQuery = p.name
+                                                                    personSearchResults = emptyList()
+                                                                }
+                                                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                                            verticalAlignment = Alignment.CenterVertically
+                                                        ) {
+                                                            Row(
+                                                                verticalAlignment = Alignment.CenterVertically,
+                                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                            ) {
+                                                                if (!p.profilePath.isNullOrBlank()) {
+                                                                    Box(
+                                                                        modifier = Modifier
+                                                                            .size(28.dp)
+                                                                            .clip(CircleShape)
+                                                                    ) {
+                                                                        RemoteImage(
+                                                                            url = p.fullProfileUrl,
+                                                                            contentDescription = p.name,
+                                                                            modifier = Modifier.fillMaxSize()
+                                                                        )
+                                                                    }
+                                                                } else {
+                                                                    Box(
+                                                                        modifier = Modifier
+                                                                            .size(28.dp)
+                                                                            .clip(CircleShape)
+                                                                            .background(Color(0xFF2D2E38)),
+                                                                        contentAlignment = Alignment.Center
+                                                                    ) {
+                                                                        Icon(Icons.Default.Person, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(16.dp))
+                                                                    }
+                                                                }
+                                                                Text(text = p.name, color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+                                                            }
+                                                            Text(text = p.department ?: "Actor / Crew", color = Color(0xFFA855F7), fontSize = 10.5.sp)
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
                                     }
-                                }
 
-                                // 2. Studio / OTT Platform
-                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text(
-                                        text = "STUDIO / NETWORK / PLATFORM",
-                                        color = Color(0xFF9CA3AF),
-                                        fontFamily = NdotFont,
-                                        fontSize = 10.sp
-                                    )
-
-                                    OutlinedTextField(
-                                        value = studioQuery,
-                                        onValueChange = { studioQuery = it },
-                                        placeholder = { Text("e.g. Studio Ghibli, HBO, Netflix, Warner Bros", color = Color(0xFF6B7280), fontSize = 12.5.sp) },
-                                        singleLine = true,
-                                        modifier = Modifier.fillMaxWidth(),
-                                        shape = RoundedCornerShape(12.dp),
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedContainerColor = Color(0xFF1B1C22),
-                                            unfocusedContainerColor = Color(0xFF1B1C22),
-                                            focusedBorderColor = Color(0xFFA855F7),
-                                            unfocusedBorderColor = Color(0xFF282A31),
-                                            focusedTextColor = Color.White,
-                                            unfocusedTextColor = Color.White
+                                    // 2. Studio / OTT Platform
+                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text(
+                                            text = "STUDIO / NETWORK / PLATFORM",
+                                            color = Color(0xFF9CA3AF),
+                                            fontFamily = NdotFont,
+                                            fontSize = 10.sp
                                         )
-                                    )
 
-                                    // Quick studio chips
-                                    FlowRow(
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        STANDARD_STUDIOS.forEach { std ->
-                                            val isSel = studioQuery.equals(std, ignoreCase = true)
-                                            FilterChip(
-                                                selected = isSel,
-                                                onClick = {
-                                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                                    studioQuery = if (isSel) "" else std
-                                                },
-                                                label = { Text(std, fontSize = 11.sp) },
-                                                colors = FilterChipDefaults.filterChipColors(
-                                                    selectedContainerColor = Color(0xFFA855F7),
-                                                    selectedLabelColor = Color.White,
-                                                    containerColor = Color(0xFF1F2027),
-                                                    labelColor = Color(0xFFD1D5DB)
-                                                )
+                                        if (selectedStudioName.isNotBlank()) {
+                                            // Tagged Selected Studio Card
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .background(Color(0xFF201830))
+                                                    .border(BorderStroke(1.dp, Color(0xFF5B21B6)), RoundedCornerShape(12.dp))
+                                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                                ) {
+                                                    if (!selectedStudioLogoPath.isNullOrBlank()) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(36.dp)
+                                                                .clip(RoundedCornerShape(8.dp))
+                                                                .background(Color(0xFF16171B))
+                                                                .padding(4.dp),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            RemoteImage(
+                                                                url = if (selectedStudioLogoPath!!.startsWith("http")) selectedStudioLogoPath else "https://image.tmdb.org/t/p/w185$selectedStudioLogoPath",
+                                                                contentDescription = selectedStudioName,
+                                                                modifier = Modifier.fillMaxSize()
+                                                            )
+                                                        }
+                                                    } else {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(36.dp)
+                                                                .clip(CircleShape)
+                                                                .background(Color(0xFF382054)),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Default.Business,
+                                                                contentDescription = null,
+                                                                tint = Color(0xFFE9D5FF),
+                                                                modifier = Modifier.size(18.dp)
+                                                            )
+                                                        }
+                                                    }
+
+                                                    Column {
+                                                        Text(
+                                                            text = selectedStudioName,
+                                                            color = Color.White,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            fontSize = 13.sp
+                                                        )
+                                                        Text(
+                                                            text = "Tagged Studio / Network",
+                                                            color = Color(0xFFA855F7),
+                                                            fontFamily = NdotFont,
+                                                            fontSize = 9.5.sp
+                                                        )
+                                                    }
+                                                }
+
+                                                IconButton(
+                                                    onClick = {
+                                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                        selectedStudioId = null
+                                                        selectedStudioName = ""
+                                                        selectedStudioLogoPath = null
+                                                        studioQuery = ""
+                                                    },
+                                                    modifier = Modifier.size(28.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Close,
+                                                        contentDescription = "Remove Tag",
+                                                        tint = Color(0xFF9CA3AF),
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
+                                        } else {
+                                            // Search Input
+                                            OutlinedTextField(
+                                                value = studioQuery,
+                                                onValueChange = { studioQuery = it },
+                                                placeholder = { Text("Search studio (e.g. HBO, Warner Bros, A24, Ghibli)", color = Color(0xFF6B7280), fontSize = 12.sp) },
+                                                singleLine = true,
+                                                modifier = Modifier.fillMaxWidth(),
+                                                shape = RoundedCornerShape(12.dp),
+                                                colors = OutlinedTextFieldDefaults.colors(
+                                                    focusedContainerColor = Color(0xFF1B1C22),
+                                                    unfocusedContainerColor = Color(0xFF1B1C22),
+                                                    focusedBorderColor = Color(0xFFA855F7),
+                                                    unfocusedBorderColor = Color(0xFF282A31),
+                                                    focusedTextColor = Color.White,
+                                                    unfocusedTextColor = Color.White
+                                                ),
+                                                trailingIcon = {
+                                                    if (isSearchingStudio) {
+                                                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color(0xFFA855F7))
+                                                    } else if (studioQuery.isNotBlank()) {
+                                                        IconButton(onClick = { studioQuery = "" }) {
+                                                            Icon(imageVector = Icons.Default.Close, contentDescription = "Clear", tint = Color(0xFF9CA3AF), modifier = Modifier.size(16.dp))
+                                                        }
+                                                    }
+                                                }
                                             )
+
+                                            // Live TMDB Studio suggestions
+                                            if (studioSearchResults.isNotEmpty()) {
+                                                Column(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clip(RoundedCornerShape(12.dp))
+                                                        .background(Color(0xFF20222A))
+                                                        .padding(6.dp),
+                                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                                ) {
+                                                    studioSearchResults.forEach { c ->
+                                                        Row(
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .clip(RoundedCornerShape(8.dp))
+                                                                .clickable {
+                                                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                                    selectedStudioName = c.name
+                                                                    selectedStudioId = c.id
+                                                                    selectedStudioLogoPath = c.logoPath
+                                                                    studioQuery = c.name
+                                                                    studioSearchResults = emptyList()
+                                                                }
+                                                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                                            verticalAlignment = Alignment.CenterVertically
+                                                        ) {
+                                                            Row(
+                                                                verticalAlignment = Alignment.CenterVertically,
+                                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                            ) {
+                                                                if (!c.logoPath.isNullOrBlank()) {
+                                                                    Box(
+                                                                        modifier = Modifier
+                                                                            .size(26.dp)
+                                                                            .clip(RoundedCornerShape(4.dp))
+                                                                            .background(Color(0xFF16171B))
+                                                                            .padding(2.dp),
+                                                                        contentAlignment = Alignment.Center
+                                                                    ) {
+                                                                        RemoteImage(
+                                                                            url = c.fullLogoUrl,
+                                                                            contentDescription = c.name,
+                                                                            modifier = Modifier.fillMaxSize()
+                                                                        )
+                                                                    }
+                                                                } else {
+                                                                    Icon(
+                                                                        imageVector = Icons.Default.Business,
+                                                                        contentDescription = null,
+                                                                        tint = Color(0xFFA855F7),
+                                                                        modifier = Modifier.size(18.dp)
+                                                                    )
+                                                                }
+                                                                Text(
+                                                                    text = c.name,
+                                                                    color = Color.White,
+                                                                    fontSize = 12.5.sp,
+                                                                    fontWeight = FontWeight.Medium
+                                                                )
+                                                            }
+                                                            Text(
+                                                                text = "Studio",
+                                                                color = Color(0xFFA855F7),
+                                                                fontSize = 10.5.sp
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            // Quick studio chips
+                                            FlowRow(
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                STANDARD_STUDIOS.forEach { std ->
+                                                    val isSel = selectedStudioName.equals(std.name, ignoreCase = true)
+                                                    FilterChip(
+                                                        selected = isSel,
+                                                        onClick = {
+                                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                            if (isSel) {
+                                                                selectedStudioName = ""
+                                                                selectedStudioId = null
+                                                                selectedStudioLogoPath = null
+                                                                studioQuery = ""
+                                                            } else {
+                                                                selectedStudioName = std.name
+                                                                selectedStudioId = std.tmdbId
+                                                                selectedStudioLogoPath = std.logoPath
+                                                                studioQuery = std.name
+                                                                studioSearchResults = emptyList()
+                                                            }
+                                                        },
+                                                        label = { Text(std.name, fontSize = 11.sp) },
+                                                        colors = FilterChipDefaults.filterChipColors(
+                                                            selectedContainerColor = Color(0xFFA855F7),
+                                                            selectedLabelColor = Color.White,
+                                                            containerColor = Color(0xFF1F2027),
+                                                            labelColor = Color(0xFFD1D5DB)
+                                                        )
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
-                                }
 
                                 // 3. Genres Selection
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
