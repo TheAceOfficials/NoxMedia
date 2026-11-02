@@ -128,42 +128,50 @@ fun CatalogsScreen(viewModel: MainAppViewModel) {
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            IconButton(
-                                onClick = {
-                                    isMultiSelectMode = false
-                                    selectedCatalogIds = emptySet()
-                                },
+                            Box(
                                 modifier = Modifier
-                                    .size(34.dp)
+                                    .size(36.dp)
                                     .clip(CircleShape)
                                     .background(Color(0xFF1E1F24))
+                                    .clickable {
+                                        isMultiSelectMode = false
+                                        selectedCatalogIds = emptySet()
+                                    },
+                                contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Default.Close, contentDescription = "Cancel", tint = Color.White, modifier = Modifier.size(16.dp))
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Cancel",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
                             }
 
                             Text(
                                 text = "${selectedCatalogIds.size} Selected",
                                 color = Color.White,
                                 fontFamily = NdotFont,
-                                fontSize = 15.sp
+                                fontSize = 14.5.sp
                             )
                         }
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            // Select All / Deselect All
-                            TextButton(
-                                onClick = {
+                        Box(
+                            modifier = Modifier
+                                .height(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable {
                                     selectedCatalogIds = if (selectedCatalogIds.size == displayedCatalogs.size) emptySet()
                                     else displayedCatalogs.map { it.id }.toSet()
                                 }
-                            ) {
-                                Text(
-                                    text = if (selectedCatalogIds.size == displayedCatalogs.size) "Clear" else "Select All",
-                                    color = Color(0xFFA855F7),
-                                    fontFamily = NdotFont,
-                                    fontSize = 11.sp
-                                )
-                            }
+                                .padding(horizontal = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (selectedCatalogIds.size == displayedCatalogs.size) "Clear" else "Select All",
+                                color = Color(0xFFA855F7),
+                                fontFamily = NdotFont,
+                                fontSize = 11.5.sp
+                            )
                         }
                     }
                 } else {
@@ -175,18 +183,25 @@ fun CatalogsScreen(viewModel: MainAppViewModel) {
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 12.dp)
+                        ) {
                             Text(
                                 text = "Catalogs",
                                 color = Color.White,
                                 fontFamily = NdotFont,
                                 fontSize = 20.sp,
-                                letterSpacing = 0.8.sp
+                                letterSpacing = 0.8.sp,
+                                maxLines = 1
                             )
                             Text(
-                                text = "Smart Curations & Custom Shelves",
+                                text = "Smart Curations & Shelves",
                                 color = Color(0xFF8B909A),
-                                fontSize = 11.5.sp
+                                fontSize = 11.5.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
 
@@ -195,32 +210,58 @@ fun CatalogsScreen(viewModel: MainAppViewModel) {
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             // Multi-Select Trigger
-                            IconButton(
-                                onClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    isMultiSelectMode = true
-                                },
+                            Box(
                                 modifier = Modifier
                                     .size(36.dp)
                                     .clip(CircleShape)
                                     .background(Color(0xFF1E1F24))
+                                    .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        isMultiSelectMode = true
+                                    },
+                                contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Default.Checklist, contentDescription = "Select Multiple", tint = Color.White, modifier = Modifier.size(18.dp))
+                                Icon(
+                                    imageVector = Icons.Default.Checklist,
+                                    contentDescription = "Select Multiple",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(17.dp)
+                                )
                             }
 
                             // Add Catalog Button
-                            Button(
-                                onClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    showAddCatalogSheet = true
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFA855F7)),
-                                shape = RoundedCornerShape(20.dp),
-                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                            Box(
+                                modifier = Modifier
+                                    .height(36.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFA855F7))
+                                    .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        showAddCatalogSheet = true
+                                    }
+                                    .padding(horizontal = 14.dp),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("New Catalog", color = Color.White, fontFamily = NdotFont, fontSize = 12.sp)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = Color.White
+                                    )
+                                    Spacer(modifier = Modifier.width(5.dp))
+                                    Text(
+                                        text = "New Catalog",
+                                        color = Color.White,
+                                        fontFamily = NdotFont,
+                                        fontSize = 11.5.sp,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
                             }
                         }
                     }

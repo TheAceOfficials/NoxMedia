@@ -84,51 +84,8 @@ data class TmdbCompanyItem(
 }
 
 /**
- * Pre-made default catalogs for a brand new user
+ * Pre-made default catalogs for a brand new user (empty by default)
  */
 fun getDefaultStarterCatalogs(): List<CatalogDefinition> {
-    return listOf(
-        CatalogDefinition(
-            id = "starter_top_rated",
-            name = "Top Rated (8.0+)",
-            isAiPowered = false,
-            pinToHome = true,
-            sortOrder = 0,
-            filter = CatalogFilterCriteria(
-                mediaType = "all",
-                ratingFilterEnabled = true,
-                minRating = 8.0f,
-                maxRating = 10.0f,
-                sortBy = CatalogSortBy.RATING,
-                sortAscending = false
-            )
-        ),
-        CatalogDefinition(
-            id = "starter_cinema_4k",
-            name = "Cinema 4K UHD",
-            isAiPowered = false,
-            pinToHome = true,
-            sortOrder = 1,
-            filter = CatalogFilterCriteria(
-                mediaType = "all",
-                keywords = listOf("4k", "2160p", "uhd"),
-                sortBy = CatalogSortBy.RECENT,
-                sortAscending = false
-            )
-        ),
-        CatalogDefinition(
-            id = "starter_sci_fi",
-            name = "Sci-Fi & Cyberpunk",
-            isAiPowered = false,
-            pinToHome = true,
-            sortOrder = 2,
-            filter = CatalogFilterCriteria(
-                mediaType = "all",
-                genres = listOf("Science Fiction"),
-                keywords = listOf("cyberpunk", "future", "space", "ai", "dystopia"),
-                sortBy = CatalogSortBy.RATING,
-                sortAscending = false
-            )
-        )
-    )
+    return emptyList()
 }

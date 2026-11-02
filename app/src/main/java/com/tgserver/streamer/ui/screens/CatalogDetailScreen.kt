@@ -288,25 +288,6 @@ private fun CatalogMediaCard(
                 modifier = Modifier.fillMaxSize()
             )
 
-            // Rating Pill if present
-            if (group.rating > 0.0) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(5.dp)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(Color(0xE6101115))
-                        .padding(horizontal = 4.dp, vertical = 2.dp)
-                ) {
-                    Text(
-                        text = String.format("%.1f", group.rating),
-                        color = Color(0xFFFFD700),
-                        fontFamily = NdotFont,
-                        fontSize = 8.5.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
         }
 
         Text(

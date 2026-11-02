@@ -7,6 +7,8 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.tgserver.streamer.data.model.MediaItem
 import com.tgserver.streamer.data.model.ServerConfig
+import com.tgserver.streamer.data.model.toMediaGroups
+import com.tgserver.streamer.data.repository.CatalogRepository
 import com.tgserver.streamer.posters.SpatialPosterService
 import com.tgserver.streamer.telegram.TelegramClientManager
 import fi.iki.elonen.NanoHTTPD
@@ -45,6 +47,8 @@ class LocalHttpServer(
             localIpProvider = { getLocalIpAddress() }
         )
     }
+
+    private val catalogRepo by lazy { CatalogRepository(context) }
 
     fun getLocalIpAddress(): String = Companion.getLocalIpAddress()
 
@@ -178,6 +182,84 @@ class LocalHttpServer(
     }
 
     private fun handleManifest(): Response {
+        val customCatalogs = try {
+            catalogRepo.getCatalogs().filter { !it.isHidden }
+        } catch (_: Exception) {
+            emptyList()
+        }
+
+        val catalogEntries = mutableListOf<Map<String, Any>>(
+            mapOf(
+                "type" to "movie",
+                "id" to "tg_movies",
+                "name" to "NoxMedia",
+                "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
+                "extraSupported" to listOf("search", "skip")
+            ),
+            mapOf(
+                "type" to "series",
+                "id" to "tg_series",
+                "name" to "NoxMedia",
+                "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
+                "extraSupported" to listOf("search", "skip")
+            ),
+            mapOf(
+                "type" to "series",
+                "id" to "tg_anime",
+                "name" to "NoxMedia Anime",
+                "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
+                "extraSupported" to listOf("search", "skip")
+            )
+        )
+
+        // Inject dynamic custom catalogs
+        customCatalogs.forEach { cat ->
+            when (cat.filter.mediaType) {
+                "movie" -> {
+                    catalogEntries.add(
+                        mapOf(
+                            "type" to "movie",
+                            "id" to "cat_${cat.id}",
+                            "name" to cat.name,
+                            "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
+                            "extraSupported" to listOf("search", "skip")
+                        )
+                    )
+                }
+                "series" -> {
+                    catalogEntries.add(
+                        mapOf(
+                            "type" to "series",
+                            "id" to "cat_${cat.id}",
+                            "name" to cat.name,
+                            "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
+                            "extraSupported" to listOf("search", "skip")
+                        )
+                    )
+                }
+                else -> { // "all"
+                    catalogEntries.add(
+                        mapOf(
+                            "type" to "movie",
+                            "id" to "cat_${cat.id}",
+                            "name" to cat.name,
+                            "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
+                            "extraSupported" to listOf("search", "skip")
+                        )
+                    )
+                    catalogEntries.add(
+                        mapOf(
+                            "type" to "series",
+                            "id" to "cat_${cat.id}",
+                            "name" to cat.name,
+                            "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
+                            "extraSupported" to listOf("search", "skip")
+                        )
+                    )
+                }
+            }
+        }
+
         val manifest = JsonObject().apply {
             addProperty("id", "org.noxmedia.streamer")
             addProperty("version", getAppVersionForManifest())
@@ -185,43 +267,71 @@ class LocalHttpServer(
             addProperty("description", "NoxMedia - Designed for Your Media")
             addProperty("logo", "http://${getLocalIpAddress()}:${config.port}/logo.png")
             add("types", gson.toJsonTree(listOf("movie", "series", "anime")))
-            add("catalogs", gson.toJsonTree(listOf(
-                mapOf(
-                    "type" to "movie",
-                    "id" to "tg_movies",
-                    "name" to "NoxMedia",
-                    "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
-                    "extraSupported" to listOf("search", "skip")
-                ),
-                mapOf(
-                    "type" to "series",
-                    "id" to "tg_series",
-                    "name" to "NoxMedia",
-                    "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
-                    "extraSupported" to listOf("search", "skip")
-                ),
-                mapOf(
-                    "type" to "series",
-                    "id" to "tg_anime",
-                    "name" to "NoxMedia Anime",
-                    "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
-                    "extraSupported" to listOf("search", "skip")
-                )
-            )))
+            add("catalogs", gson.toJsonTree(catalogEntries))
             add("resources", gson.toJsonTree(listOf("catalog", "meta", "stream")))
-            add("idPrefixes", gson.toJsonTree(listOf("tg_", "tt", "kitsu")))
+            add("idPrefixes", gson.toJsonTree(listOf("tg_", "tt", "kitsu", "cat_")))
         }
         return newFixedLengthResponse(Response.Status.OK, "application/json", gson.toJson(manifest))
     }
 
     private fun handleCatalog(uri: String): Response {
-        val isSeries = uri.contains("/series/")
-        val isAnime = uri.contains("tg_anime")
         val searchQuery = if (uri.contains("search=")) {
             try {
                 java.net.URLDecoder.decode(uri.substringAfter("search=").substringBefore(".json").substringBefore("&"), "UTF-8")
             } catch (_: Exception) { "" }
         } else ""
+
+        // Check if requesting custom catalog: /catalog/{type}/cat_{id}...
+        if (uri.contains("/cat_") || uri.contains("cat_")) {
+            val catId = uri.substringAfter("cat_").substringBefore("/").substringBefore(".json")
+            val catalog = catalogRepo.getCatalogs().find { it.id == catId }
+            if (catalog != null) {
+                val allGroups = tgClient.getAllMedia().toMediaGroups()
+                var filtered = catalogRepo.filterMediaForCatalog(catalog, allGroups)
+                if (searchQuery.isNotBlank()) {
+                    filtered = filtered.filter {
+                        it.title.contains(searchQuery, ignoreCase = true) ||
+                        it.items.any { item -> item.fileName.contains(searchQuery, ignoreCase = true) }
+                    }
+                }
+                val isMovieReq = uri.contains("/movie/")
+                val isSeriesReq = uri.contains("/series/")
+                if (isMovieReq) {
+                    filtered = filtered.filter { it.type == "movie" }
+                } else if (isSeriesReq) {
+                    filtered = filtered.filter { it.type == "series" || it.type == "anime" }
+                }
+
+                val metasArray = filtered.map { group ->
+                    val firstItem = group.items.firstOrNull()
+                    val poster = group.posterUrl ?: firstItem?.posterUrl ?: posterService.resolvePoster(
+                        group.title,
+                        config.customPosterUrl,
+                        config.customPosterApiKey,
+                        config.tmdbApiKey,
+                        config.tvdbApiKey
+                    )?.also { resolved ->
+                        group.posterUrl = resolved
+                    }
+                    val stremioType = if (group.type == "series" || group.type == "anime") "series" else "movie"
+                    val metaId = if (!group.imdbId.isNullOrBlank()) group.imdbId else (firstItem?.id ?: group.id)
+                    val desc = group.overview ?: "${group.rating} Rating • ${group.items.size} files"
+                    mapOf(
+                        "id" to metaId,
+                        "type" to stremioType,
+                        "name" to group.title,
+                        "poster" to (poster ?: "https://images.metahub.space/poster/medium/placeholder/img"),
+                        "releaseInfo" to (group.year ?: "2024"),
+                        "description" to desc
+                    )
+                }
+                val res = mapOf("metas" to metasArray)
+                return newFixedLengthResponse(Response.Status.OK, "application/json", gson.toJson(res))
+            }
+        }
+
+        val isSeries = uri.contains("/series/")
+        val isAnime = uri.contains("tg_anime")
 
         var mediaList = tgClient.getAllMedia().filter { !it.isHidden }.filter { item ->
             val isItemSeries = item.type == "series" || item.type == "anime" || (item.season != null && item.episode != null)

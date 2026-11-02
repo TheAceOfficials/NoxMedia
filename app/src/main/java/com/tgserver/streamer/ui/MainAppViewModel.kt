@@ -256,6 +256,9 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         autoBackupJob = viewModelScope.launch(Dispatchers.IO) {
             delay(delayMs)
             try {
+                if (cfg.cloudSyncLibrary) {
+                    postSyncProgress(isSyncing = true, message = "Syncing changes to cloud...")
+                }
                 val dest = cfg.backupDestination.ifBlank { "me" }
                 val backupJson = exportBackupJson()
                 val chCount = channels.value.size
@@ -275,11 +278,20 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                         .putLong("last_cloud_sync_timestamp", now)
                         .apply()
                     Log.i("MainAppViewModel", "Auto-backup pushed successfully to Telegram ($dest)")
+                    if (cfg.cloudSyncLibrary) {
+                        postSyncProgress(isSyncing = false, isSuccess = true, message = "Cloud library up to date", autoDismissMs = 2500L)
+                    }
                 } else {
                     Log.w("MainAppViewModel", "Auto-backup push failed: ${res.exceptionOrNull()?.message}")
+                    if (cfg.cloudSyncLibrary) {
+                        postSyncProgress(isSyncing = false, isSuccess = false, message = "Cloud sync failed", autoDismissMs = 2500L)
+                    }
                 }
             } catch (e: Exception) {
                 Log.w("MainAppViewModel", "Auto-backup error: ${e.message}")
+                if (cfg.cloudSyncLibrary) {
+                    postSyncProgress(isSyncing = false, isSuccess = false, message = "Cloud sync error", autoDismissMs = 2500L)
+                }
             }
         }
     }
@@ -1338,37 +1350,44 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             openRouterApiKey = openRouterKey.trim()
         )
         saveStoredConfig(updated)
+        triggerAutoCloudBackupDebounced(1500L)
         Toast.makeText(getApplication(), "AI Settings Saved", Toast.LENGTH_SHORT).show()
     }
 
     fun addCatalog(catalog: CatalogDefinition) {
         val updated = catalogRepo.addCatalog(catalog)
         _catalogs.value = updated
+        triggerAutoCloudBackupDebounced(1500L)
     }
 
     fun updateCatalog(catalog: CatalogDefinition) {
         val updated = catalogRepo.updateCatalog(catalog)
         _catalogs.value = updated
+        triggerAutoCloudBackupDebounced(1500L)
     }
 
     fun deleteCatalogs(ids: Set<String>) {
         val updated = catalogRepo.deleteCatalogs(ids)
         _catalogs.value = updated
+        triggerAutoCloudBackupDebounced(1500L)
     }
 
     fun reorderCatalogs(orderedIds: List<String>) {
         val updated = catalogRepo.reorderCatalogs(orderedIds)
         _catalogs.value = updated
+        triggerAutoCloudBackupDebounced(1500L)
     }
 
     fun toggleCatalogHide(id: String) {
         val updated = catalogRepo.toggleHide(id)
         _catalogs.value = updated
+        triggerAutoCloudBackupDebounced(1500L)
     }
 
     fun toggleCatalogPin(id: String) {
         val updated = catalogRepo.togglePin(id)
         _catalogs.value = updated
+        triggerAutoCloudBackupDebounced(1500L)
     }
 
     suspend fun searchTmdbPeople(query: String): List<TmdbPersonItem> {

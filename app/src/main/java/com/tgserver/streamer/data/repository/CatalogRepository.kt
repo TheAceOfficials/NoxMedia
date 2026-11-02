@@ -42,20 +42,21 @@ class CatalogRepository(
     fun getCatalogs(): List<CatalogDefinition> {
         val rawJson = prefs.getString(PREF_KEY_CATALOGS, null)
         if (rawJson.isNullOrBlank()) {
-            val defaults = getDefaultStarterCatalogs()
-            saveCatalogs(defaults)
-            return defaults
+            return emptyList()
         }
 
         return try {
             val type = object : TypeToken<List<CatalogDefinition>>() {}.type
-            val list: List<CatalogDefinition> = gson.fromJson(rawJson, type) ?: getDefaultStarterCatalogs()
-            list.sortedBy { it.sortOrder }
+            val list: List<CatalogDefinition> = gson.fromJson(rawJson, type) ?: emptyList()
+            // Clean up any legacy starter catalogs if present
+            val cleaned = list.filter { !it.id.startsWith("starter_") }
+            if (cleaned.size != list.size) {
+                saveCatalogs(cleaned)
+            }
+            cleaned.sortedBy { it.sortOrder }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to parse catalogs json: ${e.message}", e)
-            val defaults = getDefaultStarterCatalogs()
-            saveCatalogs(defaults)
-            defaults
+            emptyList()
         }
     }
 

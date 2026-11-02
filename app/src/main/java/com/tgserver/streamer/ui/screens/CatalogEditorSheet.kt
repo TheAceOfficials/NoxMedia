@@ -808,17 +808,17 @@ fun CatalogEditorSheet(
                                     )
 
                                     // Quick studio chips
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .horizontalScroll(rememberScrollState()),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    FlowRow(
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                                        modifier = Modifier.fillMaxWidth()
                                     ) {
                                         STANDARD_STUDIOS.forEach { std ->
                                             val isSel = studioQuery.equals(std, ignoreCase = true)
                                             FilterChip(
                                                 selected = isSel,
                                                 onClick = {
+                                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                                     studioQuery = if (isSel) "" else std
                                                 },
                                                 label = { Text(std, fontSize = 11.sp) },
@@ -876,17 +876,17 @@ fun CatalogEditorSheet(
                                         fontSize = 10.sp
                                     )
 
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .horizontalScroll(rememberScrollState()),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    FlowRow(
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                                        modifier = Modifier.fillMaxWidth()
                                     ) {
                                         STANDARD_LANGUAGES.forEach { lang ->
                                             val isSel = selectedLanguages.contains(lang)
                                             FilterChip(
                                                 selected = isSel,
                                                 onClick = {
+                                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                                     selectedLanguages = if (isSel) selectedLanguages - lang else selectedLanguages + lang
                                                 },
                                                 label = { Text(lang, fontSize = 11.sp) },
