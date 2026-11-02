@@ -52,6 +52,11 @@ object WhatsNewRepository {
         items = listOf(
             WhatsNewItem(
                 category = ChangeCategory.NEW,
+                title = "Custom & AI-Powered Smart Catalogs",
+                description = "Build custom shelves with actors, studios, genres, and ratings or let Gemini/OpenRouter curate bespoke collections with drag-and-drop curation."
+            ),
+            WhatsNewItem(
+                category = ChangeCategory.NEW,
                 title = "Smart Content Detection Overhaul",
                 description = "Overhauled parser with smart year matching, symbol cleanup, multi-format syntax (12x05, 15x3), and international title diacritics normalization."
             ),
