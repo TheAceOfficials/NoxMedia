@@ -311,10 +311,10 @@ class LocalHttpServer(
                         config.tmdbApiKey,
                         config.tvdbApiKey
                     )?.also { resolved ->
-                        group.posterUrl = resolved
+                        firstItem?.posterUrl = resolved
                     }
                     val stremioType = if (group.type == "series" || group.type == "anime") "series" else "movie"
-                    val metaId = if (!group.imdbId.isNullOrBlank()) group.imdbId else (firstItem?.id ?: group.id)
+                    val metaId = if (!group.imdbId.isNullOrBlank()) group.imdbId else (firstItem?.id ?: group.key)
                     val desc = group.overview ?: "${group.rating} Rating • ${group.items.size} files"
                     mapOf(
                         "id" to metaId,
