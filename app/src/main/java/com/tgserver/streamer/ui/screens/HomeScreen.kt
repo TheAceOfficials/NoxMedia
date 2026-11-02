@@ -17,6 +17,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -68,6 +70,8 @@ private val NdotFont = FontFamily(Font(R.font.ndot))
 fun HomeScreen(viewModel: MainAppViewModel) {
     val telemetry by viewModel.telemetry.collectAsState()
     val media by viewModel.media.collectAsState()
+    val mediaGroups by viewModel.mediaGroups.collectAsState()
+    val catalogs by viewModel.catalogs.collectAsState()
     val session by viewModel.session.collectAsState()
     val haptic = LocalHapticFeedback.current
 
@@ -661,6 +665,82 @@ fun HomeScreen(viewModel: MainAppViewModel) {
                                 viewModel.openMediaDetails(group.key)
                             }
                         )
+                    }
+                }
+            }
+        }
+
+        // PINNED CATALOGS SHELVES
+        val pinnedCatalogs = remember(catalogs) {
+            catalogs.filter { it.pinToHome && !it.isHidden }
+        }
+
+        pinnedCatalogs.forEach { catalog ->
+            val matchedGroups = remember(catalog, mediaGroups) {
+                viewModel.filterMediaForCatalog(catalog).take(15)
+            }
+
+            if (matchedGroups.isNotEmpty()) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = catalog.name,
+                                color = Color.White,
+                                fontFamily = NdotFont,
+                                fontSize = 14.sp,
+                                letterSpacing = 0.8.sp
+                            )
+                            if (catalog.isAiPowered) {
+                                Icon(
+                                    imageVector = Icons.Default.AutoAwesome,
+                                    contentDescription = "AI Powered",
+                                    tint = Color(0xFFA855F7),
+                                    modifier = Modifier.size(13.dp)
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = "view all →",
+                            color = Color(0xFFA855F7),
+                            fontFamily = NdotFont,
+                            fontSize = 11.sp,
+                            modifier = Modifier
+                                .clickable {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    viewModel.selectTab(AppTab.CATALOGS)
+                                }
+                                .padding(4.dp)
+                        )
+                    }
+
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        contentPadding = PaddingValues(horizontal = 20.dp)
+                    ) {
+                        items(matchedGroups, key = { it.key }) { group ->
+                            RecentMediaCard(
+                                group = group,
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    viewModel.openMediaDetails(group.key)
+                                }
+                            )
+                        }
                     }
                 }
             }

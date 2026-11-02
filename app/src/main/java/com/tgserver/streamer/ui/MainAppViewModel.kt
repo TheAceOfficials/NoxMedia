@@ -50,9 +50,17 @@ import org.json.JSONObject
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Job
+import com.tgserver.streamer.data.model.CatalogDefinition
+import com.tgserver.streamer.data.model.CatalogFilterCriteria
+import com.tgserver.streamer.data.model.AiProvider
+import com.tgserver.streamer.data.model.TmdbPersonItem
+import com.tgserver.streamer.data.model.TmdbCompanyItem
+import com.tgserver.streamer.data.repository.CatalogRepository
+import com.tgserver.streamer.data.ai.CatalogAiService
+import com.tgserver.streamer.data.ai.GeneratedCatalogResult
 
 enum class AppTab {
-    HOME, CHANNELS, LIBRARY, SETTINGS
+    HOME, CATALOGS, CHANNELS, LIBRARY, SETTINGS
 }
 
 data class TelemetryUiState(
@@ -128,6 +136,11 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     val unmatchedMedia: StateFlow<List<com.tgserver.streamer.data.model.UnmatchedItem>> = tgClient.unmatchedState
     val scanProgress: StateFlow<Map<Long, com.tgserver.streamer.data.model.ScanProgressState>> = tgClient.scanProgress
     val apiCredentials: StateFlow<Pair<Int, String>> = tgClient.apiCredentials
+
+    val catalogRepo = CatalogRepository(application.applicationContext)
+    val catalogAiService = CatalogAiService()
+    private val _catalogs = MutableStateFlow<List<CatalogDefinition>>(catalogRepo.getCatalogs())
+    val catalogs: StateFlow<List<CatalogDefinition>> = _catalogs.asStateFlow()
 
     private val _selectedTab = MutableStateFlow(AppTab.HOME)
     val selectedTab: StateFlow<AppTab> = _selectedTab.asStateFlow()
@@ -1083,7 +1096,10 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             receiveBetaUpdates = prefs.getBoolean("receive_beta_updates", false),
             animeMetadataPreference = prefs.getString("anime_metadata_preference", "seasonal") ?: "seasonal",
             backupDestination = prefs.getString("backup_destination", "") ?: "",
-            cloudSyncLibrary = prefs.getBoolean("cloud_sync_library", true)
+            cloudSyncLibrary = prefs.getBoolean("cloud_sync_library", true),
+            aiProvider = prefs.getString("ai_provider", "gemini") ?: "gemini",
+            geminiApiKey = prefs.getString("gemini_api_key", "") ?: "",
+            openRouterApiKey = prefs.getString("openrouter_api_key", "") ?: ""
         )
     }
 
@@ -1114,6 +1130,9 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             putString("anime_metadata_preference", cfg.animeMetadataPreference)
             putString("backup_destination", cfg.backupDestination)
             putBoolean("cloud_sync_library", cfg.cloudSyncLibrary)
+            putString("ai_provider", cfg.aiProvider)
+            putString("gemini_api_key", cfg.geminiApiKey)
+            putString("openrouter_api_key", cfg.openRouterApiKey)
             apply()
         }
         _config.value = cfg
@@ -1308,6 +1327,78 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             updateManager.resetUpdateState()
         }
         checkForAppUpdate(manual = false)
+    }
+
+    // --- Custom Catalogs & AI Engine ---
+
+    fun updateAiSettings(provider: String, geminiKey: String, openRouterKey: String) {
+        val updated = _config.value.copy(
+            aiProvider = provider,
+            geminiApiKey = geminiKey.trim(),
+            openRouterApiKey = openRouterKey.trim()
+        )
+        saveStoredConfig(updated)
+        Toast.makeText(getApplication(), "AI Settings Saved", Toast.LENGTH_SHORT).show()
+    }
+
+    fun addCatalog(catalog: CatalogDefinition) {
+        val updated = catalogRepo.addCatalog(catalog)
+        _catalogs.value = updated
+    }
+
+    fun updateCatalog(catalog: CatalogDefinition) {
+        val updated = catalogRepo.updateCatalog(catalog)
+        _catalogs.value = updated
+    }
+
+    fun deleteCatalogs(ids: Set<String>) {
+        val updated = catalogRepo.deleteCatalogs(ids)
+        _catalogs.value = updated
+    }
+
+    fun reorderCatalogs(orderedIds: List<String>) {
+        val updated = catalogRepo.reorderCatalogs(orderedIds)
+        _catalogs.value = updated
+    }
+
+    fun toggleCatalogHide(id: String) {
+        val updated = catalogRepo.toggleHide(id)
+        _catalogs.value = updated
+    }
+
+    fun toggleCatalogPin(id: String) {
+        val updated = catalogRepo.togglePin(id)
+        _catalogs.value = updated
+    }
+
+    suspend fun searchTmdbPeople(query: String): List<TmdbPersonItem> {
+        val key = _config.value.tmdbApiKey
+        return catalogRepo.searchTmdbPeople(query, key)
+    }
+
+    suspend fun searchTmdbCompanies(query: String): List<TmdbCompanyItem> {
+        val key = _config.value.tmdbApiKey
+        return catalogRepo.searchTmdbCompanies(query, key)
+    }
+
+    suspend fun getPersonFilmographyIds(personId: Int): Set<Int> {
+        val key = _config.value.tmdbApiKey
+        return catalogRepo.getPersonFilmographyIds(personId, key)
+    }
+
+    suspend fun generateCatalogWithAi(prompt: String): Result<GeneratedCatalogResult> {
+        val cfg = _config.value
+        val provider = if (cfg.aiProvider.equals("openrouter", ignoreCase = true)) AiProvider.OPENROUTER else AiProvider.GEMINI
+        val apiKey = if (provider == AiProvider.OPENROUTER) cfg.openRouterApiKey else cfg.geminiApiKey
+        return catalogAiService.generateCatalog(prompt, provider, apiKey)
+    }
+
+    suspend fun verifyAiKey(provider: AiProvider, apiKey: String): Result<String> {
+        return catalogAiService.verifyApiKey(provider, apiKey)
+    }
+
+    fun filterMediaForCatalog(catalog: CatalogDefinition, personCredits: Set<Int> = emptySet()): List<MediaGroup> {
+        return catalogRepo.filterMediaForCatalog(catalog, mediaGroups.value, personCredits)
     }
 
     fun updateAnimeMetadataPreference(pref: String) {
@@ -1518,11 +1609,14 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             put("autoBackupEnabled", cfg.autoBackupEnabled)
             put("autoBackupIntervalHours", cfg.autoBackupIntervalHours)
             put("animeMetadataPreference", cfg.animeMetadataPreference)
-            put("backupDestination", cfg.backupDestination)
             put("cloudSyncLibrary", cfg.cloudSyncLibrary)
+            put("aiProvider", cfg.aiProvider)
+            put("geminiApiKey", cfg.geminiApiKey)
+            put("openRouterApiKey", cfg.openRouterApiKey)
         }
 
         val mediaList = tgClient.getAllMediaItems()
+        val catalogList = _catalogs.value
         val root = JSONObject().apply {
             put("version", 3)
             put("appName", "NoxMedia")
@@ -1534,6 +1628,9 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             put("mediaCount", mediaList.size)
             if (mediaList.isNotEmpty()) {
                 put("mediaItems", JSONArray(Gson().toJson(mediaList)))
+            }
+            if (catalogList.isNotEmpty()) {
+                put("catalogs", JSONArray(Gson().toJson(catalogList)))
             }
         }
 
@@ -1570,10 +1667,27 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                     autoBackupIntervalHours = settingsObj.optInt("autoBackupIntervalHours", cur.autoBackupIntervalHours),
                     animeMetadataPreference = settingsObj.optString("animeMetadataPreference", cur.animeMetadataPreference),
                     backupDestination = settingsObj.optString("backupDestination", cur.backupDestination),
-                    cloudSyncLibrary = settingsObj.optBoolean("cloudSyncLibrary", cur.cloudSyncLibrary)
+                    cloudSyncLibrary = settingsObj.optBoolean("cloudSyncLibrary", cur.cloudSyncLibrary),
+                    aiProvider = settingsObj.optString("aiProvider", cur.aiProvider),
+                    geminiApiKey = settingsObj.optString("geminiApiKey", cur.geminiApiKey),
+                    openRouterApiKey = settingsObj.optString("openRouterApiKey", cur.openRouterApiKey)
                 )
                 saveStoredConfig(updated)
                 settingsRestored = true
+            }
+
+            if (root.has("catalogs")) {
+                try {
+                    val catArr = root.getJSONArray("catalogs")
+                    val type = object : TypeToken<List<CatalogDefinition>>() {}.type
+                    val list: List<CatalogDefinition> = Gson().fromJson(catArr.toString(), type) ?: emptyList()
+                    if (list.isNotEmpty()) {
+                        catalogRepo.saveCatalogs(list)
+                        _catalogs.value = list
+                    }
+                } catch (e: Exception) {
+                    Log.e("MainAppViewModel", "Failed to restore catalogs: ${e.message}")
+                }
             }
 
             if (root.has("channels")) {

@@ -445,7 +445,10 @@ data class ServerConfig(
     var receiveBetaUpdates: Boolean = false,
     var animeMetadataPreference: String = "seasonal",
     var backupDestination: String = "",
-    var cloudSyncLibrary: Boolean = true
+    var cloudSyncLibrary: Boolean = true,
+    var aiProvider: String = "gemini",
+    var geminiApiKey: String = "",
+    var openRouterApiKey: String = ""
 )
 
 data class AuthSession(

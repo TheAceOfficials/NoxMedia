@@ -22,11 +22,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CollectionsBookmark
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.outlined.CollectionsBookmark
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Settings
@@ -65,6 +67,7 @@ import androidx.compose.ui.unit.sp
 import com.tgserver.streamer.R
 import com.tgserver.streamer.theme.*
 import com.tgserver.streamer.ui.screens.ApiCredentialsScreen
+import com.tgserver.streamer.ui.screens.CatalogsScreen
 import com.tgserver.streamer.ui.screens.ChannelsScreen
 import com.tgserver.streamer.ui.screens.HomeScreen
 import com.tgserver.streamer.ui.screens.LibraryScreen
@@ -86,6 +89,7 @@ private data class NavItemData(
 
 private val NAV_TABS = listOf(
     NavItemData(AppTab.HOME, Icons.Filled.Home, Icons.Outlined.Home),
+    NavItemData(AppTab.CATALOGS, Icons.Filled.CollectionsBookmark, Icons.Outlined.CollectionsBookmark),
     NavItemData(AppTab.LIBRARY, Icons.Filled.VideoLibrary, Icons.Outlined.VideoLibrary),
     NavItemData(AppTab.CHANNELS, Icons.Filled.Hub, Icons.Outlined.Hub),
     NavItemData(AppTab.SETTINGS, Icons.Filled.Settings, Icons.Outlined.Settings)
@@ -157,6 +161,7 @@ fun AppRootScreen(viewModel: MainAppViewModel) {
                 ) { tab ->
                     when (tab) {
                         AppTab.HOME -> HomeScreen(viewModel = viewModel)
+                        AppTab.CATALOGS -> CatalogsScreen(viewModel = viewModel)
                         AppTab.LIBRARY -> LibraryScreen(viewModel = viewModel)
                         AppTab.CHANNELS -> ChannelsScreen(viewModel = viewModel)
                         AppTab.SETTINGS -> SettingsScreen(viewModel = viewModel)
@@ -366,7 +371,7 @@ private fun MinimalFloatingNavDock(
         // Floating Island Capsule (Compact, Centered, Symmetrical, Frosted Glass)
         Box(
             modifier = Modifier
-                .width(276.dp)
+                .width(336.dp)
                 .height(54.dp)
                 .shadow(
                     elevation = 24.dp,

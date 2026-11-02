@@ -107,12 +107,21 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
     var expandedAccount by remember { mutableStateOf(false) }
     var expandedPlayback by remember { mutableStateOf(false) }
     var expandedMetadata by remember { mutableStateOf(false) }
+    var expandedAiEngine by remember { mutableStateOf(false) }
     var expandedArtworks by remember { mutableStateOf(false) }
     var expandedServer by remember { mutableStateOf(false) }
     var expandedStorage by remember { mutableStateOf(false) }
     var expandedAutomation by remember { mutableStateOf(false) }
     var expandedBackup by remember { mutableStateOf(false) }
     var expandedUpdates by remember { mutableStateOf(false) }
+
+    // AI Provider form state
+    var aiProviderInput by remember(config.aiProvider) { mutableStateOf(config.aiProvider) }
+    var geminiKeyInput by remember(config.geminiApiKey) { mutableStateOf(config.geminiApiKey) }
+    var openRouterKeyInput by remember(config.openRouterApiKey) { mutableStateOf(config.openRouterApiKey) }
+    var isVerifyingAiKey by remember { mutableStateOf(false) }
+    var aiKeyError by remember { mutableStateOf<String?>(null) }
+    var aiKeySuccess by remember { mutableStateOf<String?>(null) }
     var expandedWhatsNew by remember { mutableStateOf(false) }
     var showArtworkInfo by remember { mutableStateOf(false) }
     var showServerEngineInfo by remember { mutableStateOf(false) }
@@ -915,6 +924,160 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                                     Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                                 }
                             }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    variant = NothingButtonVariant.Secondary,
+                    height = 42.dp
+                )
+            }
+
+            // ==================== 3B. AI ENGINE ====================
+            MinimalSettingsCard(
+                icon = Icons.Default.AutoAwesome,
+                title = "AI Engine",
+                subtitle = "Gemini & OpenRouter for AI categories",
+                isExpanded = expandedAiEngine,
+                onToggleExpand = { expandedAiEngine = !expandedAiEngine }
+            ) {
+                // Provider Selector Tab
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "ACTIVE AI PROVIDER",
+                        color = Color(0xFF9CA3AF),
+                        fontFamily = NdotFont,
+                        fontSize = 10.5.sp,
+                        letterSpacing = 0.5.sp
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF161820))
+                            .border(1.dp, Color(0xFF242732), RoundedCornerShape(12.dp))
+                            .padding(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        listOf("gemini" to "Google Gemini", "openrouter" to "OpenRouter").forEach { (provId, provLabel) ->
+                            val isSel = aiProviderInput == provId
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSel) Color(0xFFA855F7) else Color.Transparent)
+                                    .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        aiProviderInput = provId
+                                        aiKeyError = null
+                                        aiKeySuccess = null
+                                    }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = provLabel,
+                                    color = if (isSel) Color.White else Color(0xFF9CA3AF),
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isSel) FontWeight.SemiBold else FontWeight.Normal
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                if (aiProviderInput == "gemini") {
+                    NothingTextField(
+                        value = geminiKeyInput,
+                        onValueChange = {
+                            geminiKeyInput = it
+                            aiKeyError = null
+                            aiKeySuccess = null
+                        },
+                        label = "GEMINI API KEY",
+                        badgeText = "FREE TIER",
+                        placeholder = "Paste Gemini API Key from Google AI Studio",
+                        isMonospace = true,
+                        singleLine = true,
+                        isError = aiKeyError != null,
+                        errorMessage = aiKeyError
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Free API key from aistudio.google.com (15 RPM free tier)",
+                        color = Color(0xFF6B7280),
+                        fontSize = 11.sp
+                    )
+                } else {
+                    NothingTextField(
+                        value = openRouterKeyInput,
+                        onValueChange = {
+                            openRouterKeyInput = it
+                            aiKeyError = null
+                            aiKeySuccess = null
+                        },
+                        label = "OPENROUTER API KEY",
+                        badgeText = "MULTI MODEL",
+                        placeholder = "Paste OpenRouter API Key",
+                        isMonospace = true,
+                        singleLine = true,
+                        isError = aiKeyError != null,
+                        errorMessage = aiKeyError
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "API key from openrouter.ai (supports Claude, DeepSeek, GPT)",
+                        color = Color(0xFF6B7280),
+                        fontSize = 11.sp
+                    )
+                }
+
+                if (aiKeySuccess != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = aiKeySuccess ?: "",
+                        color = Color(0xFF2ECC71),
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                NothingPillButton(
+                    text = if (isVerifyingAiKey) "Verifying Key..." else "Save & Verify AI Key →",
+                    isLoading = isVerifyingAiKey,
+                    onClick = {
+                        coroutineScope.launch {
+                            isVerifyingAiKey = true
+                            aiKeyError = null
+                            aiKeySuccess = null
+                            val providerEnum = if (aiProviderInput == "openrouter") com.tgserver.streamer.data.model.AiProvider.OPENROUTER else com.tgserver.streamer.data.model.AiProvider.GEMINI
+                            val targetKey = if (providerEnum == com.tgserver.streamer.data.model.AiProvider.OPENROUTER) openRouterKeyInput else geminiKeyInput
+
+                            if (targetKey.isBlank()) {
+                                viewModel.updateAiSettings(aiProviderInput, geminiKeyInput, openRouterKeyInput)
+                                isVerifyingAiKey = false
+                                aiKeySuccess = "AI configuration cleared"
+                                return@launch
+                            }
+
+                            val verifyRes = viewModel.verifyAiKey(providerEnum, targetKey)
+                            isVerifyingAiKey = false
+                            verifyRes.fold(
+                                onSuccess = { msg ->
+                                    viewModel.updateAiSettings(aiProviderInput, geminiKeyInput, openRouterKeyInput)
+                                    aiKeySuccess = msg
+                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                },
+                                onFailure = { err ->
+                                    aiKeyError = err.localizedMessage ?: "Verification failed"
+                                }
+                            )
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
