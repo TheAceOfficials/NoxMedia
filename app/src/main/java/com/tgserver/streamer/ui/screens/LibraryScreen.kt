@@ -3079,31 +3079,26 @@ private fun EpisodeGroupAccordionRow(
                     overflow = TextOverflow.Ellipsis
                 )
 
-                // Available Qualities in Apple TV badge style
+                // Available Qualities with modern badge drawables
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     val distinctResolutions = remember(epItems) {
                         epItems.map { detectItemResolution(it) }.distinct()
                     }
                     distinctResolutions.forEach { res ->
-                        NetflixAppleBadge(
-                            text = res,
-                            textColor = if (res == "4K") Color.White else Color(0xFFD1D5DB),
-                            borderColor = if (res == "4K") Color(0x66FFFFFF) else Color(0x33FFFFFF),
-                            bgColor = if (res == "4K") Color(0x28FFFFFF) else Color(0x14FFFFFF)
-                        )
+                        when (res) {
+                            "4K" -> LocalBadgeImage(R.drawable.badge_r_4k, "4K", height = 13.dp)
+                            "FHD", "1080p", "1080" -> LocalBadgeImage(R.drawable.badge_r_1080, "1080p", height = 13.dp)
+                            "HD", "720p", "720" -> LocalBadgeImage(R.drawable.badge_r_720, "720p", height = 13.dp)
+                            else -> DisneyResolutionBadge(text = res, height = 13.dp)
+                        }
                     }
 
                     val hasDv = epItems.any { (it.qualityBadge + " " + it.fileName).contains("dv", ignoreCase = true) }
                     if (hasDv) {
-                        NetflixAppleBadge(
-                            text = "DV",
-                            textColor = Color(0xFFFBBF24),
-                            borderColor = Color(0x66FBBF24),
-                            bgColor = Color(0x20FBBF24)
-                        )
+                        LocalBadgeImage(R.drawable.badge_v_dv, "Dolby Vision", height = 13.dp)
                     }
 
                     Text(
@@ -3162,21 +3157,16 @@ private fun EpisodeGroupAccordionRow(
                             )
 
                             // 2. Details - Quality specs pill
-                            val formattedBadge = formatShortBadge(item.qualityBadge.ifBlank { item.quality })
-                            if (formattedBadge.isNotBlank()) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(5.dp))
-                                        .background(Color(0xFF2E1C0A))
-                                        .border(1.dp, Color(0xFFF59E0B), RoundedCornerShape(5.dp))
-                                        .padding(horizontal = 6.dp, vertical = 2.5.dp)
-                                ) {
-                                    Text(
-                                        text = formattedBadge,
-                                        color = Color(0xFFFBBF24),
-                                        fontSize = 9.5.sp,
-                                        lineHeight = 13.sp
-                                    )
+                            val itemRes = detectItemResolution(item)
+                            when (itemRes) {
+                                "4K" -> LocalBadgeImage(R.drawable.badge_r_4k, "4K", height = 13.dp)
+                                "FHD", "1080p", "1080" -> LocalBadgeImage(R.drawable.badge_r_1080, "1080p", height = 13.dp)
+                                "HD", "720p", "720" -> LocalBadgeImage(R.drawable.badge_r_720, "720p", height = 13.dp)
+                                else -> {
+                                    val formattedBadge = formatShortBadge(item.qualityBadge.ifBlank { item.quality })
+                                    if (formattedBadge.isNotBlank()) {
+                                        DisneyResolutionBadge(text = formattedBadge, height = 13.dp)
+                                    }
                                 }
                             }
 
@@ -3753,7 +3743,7 @@ private fun LocalBadgeImage(
     @DrawableRes resId: Int,
     contentDescription: String,
     modifier: Modifier = Modifier,
-    height: Dp = 21.dp
+    height: Dp = 15.5.dp
 ) {
     Image(
         painter = painterResource(id = resId),
@@ -3764,43 +3754,51 @@ private fun LocalBadgeImage(
 }
 
 @Composable
-private fun DisneyLanguageBadge(code: String, modifier: Modifier = Modifier) {
+private fun DisneyLanguageBadge(
+    code: String,
+    modifier: Modifier = Modifier,
+    height: Dp = 15.5.dp
+) {
     Box(
         modifier = modifier
-            .height(21.dp)
-            .clip(RoundedCornerShape(4.5.dp))
+            .height(height)
+            .clip(RoundedCornerShape(3.5.dp))
             .background(Color(0xFF26272B))
-            .padding(horizontal = 7.dp),
+            .padding(horizontal = 5.5.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = code,
             color = Color(0xFFEDEDED),
-            fontSize = 11.sp,
+            fontSize = 9.sp,
             fontWeight = FontWeight.Bold,
-            letterSpacing = 0.5.sp,
-            lineHeight = 11.sp
+            letterSpacing = 0.4.sp,
+            lineHeight = 9.sp
         )
     }
 }
 
 @Composable
-private fun DisneyResolutionBadge(text: String, modifier: Modifier = Modifier) {
+private fun DisneyResolutionBadge(
+    text: String,
+    modifier: Modifier = Modifier,
+    height: Dp = 15.5.dp
+) {
     Box(
         modifier = modifier
-            .height(21.dp)
-            .clip(RoundedCornerShape(4.5.dp))
+            .height(height)
+            .clip(RoundedCornerShape(3.5.dp))
             .background(Color(0xFF26272B))
-            .padding(horizontal = 6.5.dp),
+            .padding(horizontal = 5.5.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = text,
             color = Color.White,
-            fontSize = 11.sp,
+            fontSize = 9.sp,
             fontWeight = FontWeight.Bold,
             letterSpacing = 0.3.sp,
-            lineHeight = 11.sp
+            lineHeight = 9.sp
         )
     }
 }
@@ -3809,61 +3807,62 @@ private fun DisneyResolutionBadge(text: String, modifier: Modifier = Modifier) {
 @Composable
 private fun DisneyBadgesRow(
     visualSpecs: MediaVisualSpecs,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    badgeHeight: Dp = 15.5.dp
 ) {
     FlowRow(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp)
     ) {
         // 1. Resolution Badge: 4K, 1080p, 720p
         if (visualSpecs.is4K) {
-            LocalBadgeImage(R.drawable.badge_r_4k, "4K")
-        } else if (visualSpecs.resolutionBadge == "1080p" || visualSpecs.resolutionBadge == "FHD") {
-            LocalBadgeImage(R.drawable.badge_r_1080, "1080p")
+            LocalBadgeImage(R.drawable.badge_r_4k, "4K", height = badgeHeight)
+        } else if (visualSpecs.resolutionBadge == "1080p" || visualSpecs.resolutionBadge == "FHD" || visualSpecs.resolutionBadge == "HD") {
+            LocalBadgeImage(R.drawable.badge_r_1080, "1080p", height = badgeHeight)
         } else if (visualSpecs.resolutionBadge == "720p") {
-            LocalBadgeImage(R.drawable.badge_r_720, "720p")
+            LocalBadgeImage(R.drawable.badge_r_720, "720p", height = badgeHeight)
         } else if (visualSpecs.resolutionBadge.isNotBlank() && visualSpecs.resolutionBadge != "SD") {
-            DisneyResolutionBadge(text = visualSpecs.resolutionBadge)
+            DisneyResolutionBadge(text = visualSpecs.resolutionBadge, height = badgeHeight)
         }
 
         // 2. Dolby Vision or HDR
         if (visualSpecs.isDolbyVision) {
-            LocalBadgeImage(R.drawable.badge_v_dv, "Dolby Vision")
+            LocalBadgeImage(R.drawable.badge_v_dv, "Dolby Vision", height = badgeHeight)
         } else if (visualSpecs.isHdr10Plus) {
-            LocalBadgeImage(R.drawable.badge_v_hdr10plus, "HDR10+")
+            LocalBadgeImage(R.drawable.badge_v_hdr10plus, "HDR10+", height = badgeHeight)
         } else if (visualSpecs.isHdr) {
-            LocalBadgeImage(R.drawable.badge_v_hdr, "HDR")
+            LocalBadgeImage(R.drawable.badge_v_hdr, "HDR", height = badgeHeight)
         }
 
         // 3. IMAX / IMAX Enhanced
         if (visualSpecs.isImaxEnhanced) {
-            LocalBadgeImage(R.drawable.badge_v_imax_enhanced, "IMAX Enhanced")
+            LocalBadgeImage(R.drawable.badge_v_imax_enhanced, "IMAX Enhanced", height = badgeHeight)
         } else if (visualSpecs.isImax) {
-            LocalBadgeImage(R.drawable.badge_v_imax, "IMAX")
+            LocalBadgeImage(R.drawable.badge_v_imax, "IMAX", height = badgeHeight)
         }
 
         // 4. Audio: Dolby Atmos, TrueHD, DTS:X, DTS-HD MA, DTS, Digital+, Digital, 7.1, 5.1
         when (visualSpecs.audioBadge) {
-            "ATMOS" -> LocalBadgeImage(R.drawable.badge_a_atmos, "Dolby Atmos")
-            "TRUEHD" -> LocalBadgeImage(R.drawable.badge_a_truehd, "Dolby TrueHD")
-            "DTS:X", "DTS-X" -> LocalBadgeImage(R.drawable.badge_a_dtsx, "DTS:X")
-            "DTS-HD MA" -> LocalBadgeImage(R.drawable.badge_a_dtshdma, "DTS-HD MA")
-            "DTS-HD" -> LocalBadgeImage(R.drawable.badge_a_dtshd, "DTS-HD")
-            "DTS" -> LocalBadgeImage(R.drawable.badge_a_dts, "DTS")
-            "DIGITAL+", "DD+", "EAC3" -> LocalBadgeImage(R.drawable.badge_a_ddp, "Dolby Digital Plus")
-            "DD", "AC3" -> LocalBadgeImage(R.drawable.badge_a_dd, "Dolby Digital")
-            "7.1" -> LocalBadgeImage(R.drawable.badge_c_71, "7.1")
-            "5.1" -> LocalBadgeImage(R.drawable.badge_c_51, "5.1")
+            "ATMOS" -> LocalBadgeImage(R.drawable.badge_a_atmos, "Dolby Atmos", height = badgeHeight)
+            "TRUEHD" -> LocalBadgeImage(R.drawable.badge_a_truehd, "Dolby TrueHD", height = badgeHeight)
+            "DTS:X", "DTS-X" -> LocalBadgeImage(R.drawable.badge_a_dtsx, "DTS:X", height = badgeHeight)
+            "DTS-HD MA" -> LocalBadgeImage(R.drawable.badge_a_dtshdma, "DTS-HD MA", height = badgeHeight)
+            "DTS-HD" -> LocalBadgeImage(R.drawable.badge_a_dtshd, "DTS-HD", height = badgeHeight)
+            "DTS" -> LocalBadgeImage(R.drawable.badge_a_dts, "DTS", height = badgeHeight)
+            "DIGITAL+", "DD+", "EAC3" -> LocalBadgeImage(R.drawable.badge_a_ddp, "Dolby Digital Plus", height = badgeHeight)
+            "DD", "AC3" -> LocalBadgeImage(R.drawable.badge_a_dd, "Dolby Digital", height = badgeHeight)
+            "7.1" -> LocalBadgeImage(R.drawable.badge_c_71, "7.1", height = badgeHeight)
+            "5.1" -> LocalBadgeImage(R.drawable.badge_c_51, "5.1", height = badgeHeight)
             null -> {}
             else -> {
-                DisneyResolutionBadge(text = visualSpecs.audioBadge)
+                DisneyResolutionBadge(text = visualSpecs.audioBadge, height = badgeHeight)
             }
         }
 
         // 5. Language Pills (e.g. HI, EN, JA, TA)
         visualSpecs.languageCodes.take(4).forEach { code ->
-            DisneyLanguageBadge(code = code)
+            DisneyLanguageBadge(code = code, height = badgeHeight)
         }
     }
 }
@@ -4107,15 +4106,22 @@ private fun extractMediaVisualSpecs(group: MediaGroup): MediaVisualSpecs {
         "8.2"
     }
 
-    // 3. Resolution Badge: uses strict item resolution detection
-    val itemResolutions = group.items.map { detectItemResolution(it) }.distinct()
+    // 3. Resolution Badge: uses strict item resolution detection with group pre-computed flags
     val resBadge = when {
-        itemResolutions.contains("4K") -> "4K"
-        itemResolutions.contains("2K") -> "2K"
-        itemResolutions.contains("FHD") -> "FHD"
-        itemResolutions.contains("HD") -> "HD"
-        itemResolutions.contains("SD") -> "SD"
-        else -> "FHD"
+        group.has4K -> "4K"
+        group.has1080p -> "1080p"
+        group.has720p -> "720p"
+        group.hasSD -> "SD"
+        else -> {
+            val itemResolutions = group.items.map { detectItemResolution(it) }.distinct()
+            when {
+                itemResolutions.contains("4K") -> "4K"
+                itemResolutions.contains("FHD") || itemResolutions.contains("1080p") -> "1080p"
+                itemResolutions.contains("HD") || itemResolutions.contains("720p") -> "720p"
+                itemResolutions.contains("SD") || itemResolutions.contains("480p") -> "SD"
+                else -> "1080p"
+            }
+        }
     }
 
     // 4. Visual Badges: DV, HDR, HDR10+, IMAX, 10-bit, 5.1/ATMOS, HEVC
@@ -4174,7 +4180,7 @@ private fun extractMediaVisualSpecs(group: MediaGroup): MediaVisualSpecs {
     val audioLangs = detectAudioTracks(listOf(group.qualityBadge) + group.items.take(20).map { it.fileName + " " + it.qualityBadge })
     val langCodes = audioLangs.map { mapLanguageToCode(it) }.distinct().filter { it != "UNKNOWN" }
 
-    val is4K = resBadge == "4K" || allText.contains("2160") || allText.contains("4k") || allText.contains("uhd")
+    val is4K = resBadge == "4K"
 
     return MediaVisualSpecs(
         year = year,
@@ -4203,6 +4209,8 @@ private data class MediaVersionInfo(
     val releaseTag: String,
     val brandColor: Color,
     val brandBgColor: Color,
+    val providerBadgeRes: Int? = null,
+    val qualityBadgeRes: Int? = null,
     val fileCount: Int,
     val totalSizeBytes: Long,
     val resolutions: List<String>,
@@ -4317,12 +4325,41 @@ private fun detectMediaVersions(items: List<MediaItem>): List<MediaVersionInfo> 
 
         val audioSet = detectAudioTracks(versionItems.take(20).map { it.qualityBadge + " " + it.fileName })
 
+        val allVersionTokens = versionItems.take(10).flatMap { itm ->
+            itm.fileName.lowercase().split('.', '_', '-', ' ', '[', ']', '(', ')', '+')
+        }.filter { it.isNotBlank() }.toSet()
+
+        val provBadge: Int? = when {
+            allVersionTokens.contains("nf") || allVersionTokens.contains("netflix") -> R.drawable.badge_p_netflix
+            allVersionTokens.contains("amzn") || allVersionTokens.contains("prime") || allVersionTokens.contains("primevideo") -> R.drawable.badge_p_prime
+            allVersionTokens.contains("atvp") || allVersionTokens.contains("atv") || allVersionTokens.contains("appletv") -> R.drawable.badge_p_appletv
+            allVersionTokens.contains("dsnp") || allVersionTokens.contains("disney") || allVersionTokens.contains("hotstar") -> R.drawable.badge_p_disney
+            allVersionTokens.contains("max") || allVersionTokens.contains("hmax") || allVersionTokens.contains("hbomax") || allVersionTokens.contains("hbo") -> R.drawable.badge_p_max
+            allVersionTokens.contains("hulu") -> R.drawable.badge_p_hulu
+            allVersionTokens.contains("cr") || allVersionTokens.contains("crunchyroll") -> R.drawable.badge_p_crunchyroll
+            allVersionTokens.contains("peacock") || allVersionTokens.contains("pcok") -> R.drawable.badge_p_peacock
+            allVersionTokens.contains("paramount") || allVersionTokens.contains("pmtp") -> R.drawable.badge_p_paramount
+            allVersionTokens.contains("crave") -> R.drawable.badge_p_crave
+            else -> null
+        }
+
+        val qualBadge: Int? = when {
+            allVersionTokens.contains("remux") -> R.drawable.badge_q_remux
+            allVersionTokens.contains("bluray") || allVersionTokens.contains("blu-ray") || allVersionTokens.contains("bdrip") || allVersionTokens.contains("brrip") -> R.drawable.badge_q_bluray
+            allVersionTokens.contains("webdl") || versionItems.any { it.fileName.contains("web-dl", true) || it.fileName.contains("webdl", true) } -> R.drawable.badge_q_webdl
+            allVersionTokens.contains("webrip") || versionItems.any { it.fileName.contains("web-rip", true) || it.fileName.contains("webrip", true) } -> R.drawable.badge_q_webrip
+            allVersionTokens.contains("seadex") -> R.drawable.badge_q_seadex
+            else -> null
+        }
+
         MediaVersionInfo(
             platformKey = vMatch.key,
             platformName = vMatch.platformName,
             releaseTag = vMatch.tag,
             brandColor = vMatch.brandColor,
             brandBgColor = vMatch.brandBgColor,
+            providerBadgeRes = provBadge,
+            qualityBadgeRes = qualBadge,
             fileCount = versionItems.size,
             totalSizeBytes = totalBytes,
             resolutions = resSet.toList(),
@@ -4401,41 +4438,57 @@ private fun MediaVersionsSection(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            // Brand badge with subtle glow
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = version.brandBgColor,
-                                border = BorderStroke(1.dp, version.brandColor.copy(alpha = 0.7f))
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                            if (version.providerBadgeRes != null) {
+                                LocalBadgeImage(
+                                    resId = version.providerBadgeRes,
+                                    contentDescription = version.platformName,
+                                    height = 18.dp
+                                )
+                            } else {
+                                // Brand badge with subtle glow
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = version.brandBgColor,
+                                    border = BorderStroke(1.dp, version.brandColor.copy(alpha = 0.7f))
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(5.dp)
-                                            .clip(CircleShape)
-                                            .background(version.brandColor)
-                                    )
-                                    Text(
-                                        text = version.platformName,
-                                        color = version.brandColor,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 11.5.sp,
-                                        letterSpacing = 0.3.sp
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(5.dp)
+                                                .clip(CircleShape)
+                                                .background(version.brandColor)
+                                        )
+                                        Text(
+                                            text = version.platformName,
+                                            color = version.brandColor,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.5.sp,
+                                            letterSpacing = 0.3.sp
+                                        )
+                                    }
                                 }
                             }
 
-                            // Source Tag
-                            Text(
-                                text = version.releaseTag,
-                                color = Color(0xFF9CA3AF),
-                                fontFamily = NdotFont,
-                                fontSize = 10.5.sp,
-                                letterSpacing = 0.5.sp
-                            )
+                            if (version.qualityBadgeRes != null) {
+                                LocalBadgeImage(
+                                    resId = version.qualityBadgeRes,
+                                    contentDescription = version.releaseTag,
+                                    height = 18.dp
+                                )
+                            } else {
+                                // Source Tag
+                                Text(
+                                    text = version.releaseTag,
+                                    color = Color(0xFF9CA3AF),
+                                    fontFamily = NdotFont,
+                                    fontSize = 10.5.sp,
+                                    letterSpacing = 0.5.sp
+                                )
+                            }
                         }
 
                         // Right: Storage size in Nothing OS badge
