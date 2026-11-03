@@ -17,6 +17,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
@@ -236,25 +237,129 @@ class CatalogRepository(
         }
     }
 
+    private fun searchTvmazePeople(query: String): List<TmdbPersonItem> {
+        val clean = query.trim()
+        if (clean.length < 2) return emptyList()
+        val queriesToTry = mutableListOf(clean)
+        if (clean.equals("shahrukh khan", ignoreCase = true) || clean.equals("shahrukh", ignoreCase = true) || clean.equals("srk", ignoreCase = true)) {
+            queriesToTry.add("shah rukh khan")
+        }
+        for (q in queriesToTry) {
+            try {
+                val encoded = URLEncoder.encode(q, "UTF-8")
+                val url = "https://api.tvmaze.com/search/people?q=$encoded"
+                val req = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
+                    .header("Accept", "application/json")
+                    .get()
+                    .build()
+                httpClient.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string().orEmpty()
+                        val arr = JSONArray(body)
+                        if (arr.length() > 0) {
+                            val items = mutableListOf<TmdbPersonItem>()
+                            for (i in 0 until minOf(arr.length(), 8)) {
+                                val personObj = arr.getJSONObject(i).optJSONObject("person") ?: continue
+                                val name = personObj.optString("name")
+                                val id = personObj.optInt("id", -(i + 1))
+                                val imgObj = personObj.optJSONObject("image")
+                                val img = imgObj?.optString("medium") ?: imgObj?.optString("original")
+                                if (name.isNotBlank()) {
+                                    items.add(
+                                        TmdbPersonItem(
+                                            id = id,
+                                            name = name,
+                                            department = "Cast & Crew",
+                                            profilePath = img
+                                        )
+                                    )
+                                }
+                            }
+                            if (items.isNotEmpty()) return items
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+        return emptyList()
+    }
+
     suspend fun searchPeople(query: String, tmdbKey: String, tvdbKey: String): List<TmdbPersonItem> = withContext(Dispatchers.IO) {
         val clean = query.trim()
         if (clean.isBlank()) return@withContext emptyList()
         val results = mutableListOf<TmdbPersonItem>()
         val seenNames = mutableSetOf<String>()
 
-        // 1. Search TMDb if key is present
+        val normalizedQuery = when (clean.lowercase()) {
+            "srk", "shahrukh", "shahrukh khan" -> "Shah Rukh Khan"
+            "salman", "bhai" -> "Salman Khan"
+            "aamir" -> "Aamir Khan"
+            "akshay" -> "Akshay Kumar"
+            "amitabh", "big b" -> "Amitabh Bachchan"
+            "hrithik" -> "Hrithik Roshan"
+            "ranbir" -> "Ranbir Kapoor"
+            "ranveer" -> "Ranveer Singh"
+            "deepika" -> "Deepika Padukone"
+            "priyanka" -> "Priyanka Chopra"
+            "alia" -> "Alia Bhatt"
+            "nolan" -> "Christopher Nolan"
+            "zack", "snyder" -> "Zack Snyder"
+            "tarantino" -> "Quentin Tarantino"
+            "scorsese" -> "Martin Scorsese"
+            "spielberg" -> "Steven Spielberg"
+            "fincher" -> "David Fincher"
+            "cameron" -> "James Cameron"
+            "villeneuve" -> "Denis Villeneuve"
+            "leo", "dicaprio" -> "Leonardo DiCaprio"
+            "cruise" -> "Tom Cruise"
+            "keanu" -> "Keanu Reeves"
+            "bale" -> "Christian Bale"
+            "rdj", "downey" -> "Robert Downey Jr."
+            "cillian" -> "Cillian Murphy"
+            else -> clean
+        }
+
+        // 1. Instant match from Curated Directory (top Indian + Hollywood directors/actors)
+        CURATED_PEOPLE.filter {
+            it.name.contains(clean, ignoreCase = true) || it.name.contains(normalizedQuery, ignoreCase = true)
+        }.forEach {
+            if (seenNames.add(it.name.lowercase())) {
+                results.add(it)
+            }
+        }
+
+        // 2. Search TMDb if key is present
         if (tmdbKey.isNotBlank()) {
-            val tmdbItems = searchTmdbPeople(clean, tmdbKey)
+            val tmdbItems = searchTmdbPeople(normalizedQuery, tmdbKey)
             tmdbItems.forEach {
+                if (seenNames.add(it.name.lowercase())) {
+                    results.add(it)
+                }
+            }
+            if (clean != normalizedQuery) {
+                searchTmdbPeople(clean, tmdbKey).forEach {
+                    if (seenNames.add(it.name.lowercase())) {
+                        results.add(it)
+                    }
+                }
+            }
+        }
+
+        // 3. Search TVmaze (Free open public directory - No API key required!)
+        if (results.size < 8) {
+            val tvmazeItems = searchTvmazePeople(normalizedQuery)
+            tvmazeItems.forEach {
                 if (seenNames.add(it.name.lowercase())) {
                     results.add(it)
                 }
             }
         }
 
-        // 2. Search TVDb if key is present and results < 6
-        if (tvdbKey.isNotBlank() && results.size < 6) {
-            val tvdbItems = searchTvdbPeople(clean, tvdbKey)
+        // 4. Search TVDb if key is present and results < 8
+        if (tvdbKey.isNotBlank() && results.size < 8) {
+            val tvdbItems = searchTvdbPeople(normalizedQuery, tvdbKey)
             tvdbItems.forEach {
                 if (seenNames.add(it.name.lowercase())) {
                     results.add(it)
@@ -262,14 +367,7 @@ class CatalogRepository(
             }
         }
 
-        // 3. Match curated directors & actors (works even offline/without key)
-        CURATED_PEOPLE.filter { it.name.contains(clean, ignoreCase = true) }.forEach {
-            if (seenNames.add(it.name.lowercase())) {
-                results.add(it)
-            }
-        }
-
-        // 4. Always provide an option to tag exact query if not already exactly matched
+        // 5. Always provide an option to tag exact query if not already exactly matched
         if (clean.length >= 2 && seenNames.none { it.equals(clean.lowercase(), true) }) {
             results.add(TmdbPersonItem(id = -1, name = clean, department = "Custom Person"))
         }
@@ -283,30 +381,60 @@ class CatalogRepository(
         val results = mutableListOf<TmdbCompanyItem>()
         val seenNames = mutableSetOf<String>()
 
-        // 1. Search TMDb if key is present
+        val normalizedQuery = when (clean.lowercase()) {
+            "hullu", "hulu" -> "Hulu"
+            "peacock" -> "Peacock"
+            "paramount", "paramount+", "paramount plus" -> "Paramount+"
+            "showtime" -> "Showtime"
+            "jio", "jiocinema" -> "JioCinema"
+            "sonyliv", "sony liv" -> "Sony LIV"
+            "zee", "zee5" -> "ZEE5"
+            "hotstar", "disney hotstar", "disney+ hotstar" -> "Disney+ Hotstar"
+            "prime", "prime video", "amazon", "amazon prime" -> "Prime Video"
+            "apple", "appletv", "apple tv", "apple tv+" -> "Apple TV+"
+            "netflix", "nf" -> "Netflix"
+            "hbo", "hbomax", "max" -> "HBO"
+            "crunchyroll", "cr" -> "Crunchyroll"
+            "warner", "warner bros", "wb" -> "Warner Bros."
+            "ghibli", "studio ghibli" -> "Studio Ghibli"
+            "marvel", "mcu" -> "Marvel Studios"
+            "dc", "dcu" -> "DC Studios"
+            else -> clean
+        }
+
+        // 1. Instant match from Curated Directory (All global + Indian + Asian OTT & Studios)
+        CURATED_STUDIOS.filter {
+            it.name.contains(clean, ignoreCase = true) || it.name.contains(normalizedQuery, ignoreCase = true)
+        }.forEach {
+            if (seenNames.add(it.name.lowercase())) {
+                results.add(it)
+            }
+        }
+
+        // 2. Search TMDb if key is present
         if (tmdbKey.isNotBlank()) {
-            val tmdbItems = searchTmdbCompanies(clean, tmdbKey)
+            val tmdbItems = searchTmdbCompanies(normalizedQuery, tmdbKey)
             tmdbItems.forEach {
                 if (seenNames.add(it.name.lowercase())) {
                     results.add(it)
                 }
             }
-        }
-
-        // 2. Search TVDb if key is present and results < 6
-        if (tvdbKey.isNotBlank() && results.size < 6) {
-            val tvdbItems = searchTvdbCompanies(clean, tvdbKey)
-            tvdbItems.forEach {
-                if (seenNames.add(it.name.lowercase())) {
-                    results.add(it)
+            if (clean != normalizedQuery) {
+                searchTmdbCompanies(clean, tmdbKey).forEach {
+                    if (seenNames.add(it.name.lowercase())) {
+                        results.add(it)
+                    }
                 }
             }
         }
 
-        // 3. Match curated studios & networks (works even offline/without key)
-        CURATED_STUDIOS.filter { it.name.contains(clean, ignoreCase = true) }.forEach {
-            if (seenNames.add(it.name.lowercase())) {
-                results.add(it)
+        // 3. Search TVDb if key is present and results < 8
+        if (tvdbKey.isNotBlank() && results.size < 8) {
+            val tvdbItems = searchTvdbCompanies(normalizedQuery, tvdbKey)
+            tvdbItems.forEach {
+                if (seenNames.add(it.name.lowercase())) {
+                    results.add(it)
+                }
             }
         }
 
@@ -540,7 +668,11 @@ class CatalogRepository(
                 val inTitle = group.title.contains(cleanPersonQuery, ignoreCase = true)
                 val inOverview = group.overview?.contains(cleanPersonQuery, ignoreCase = true) == true
                 val inItems = group.items.any { it.fileName.contains(cleanPersonQuery, ignoreCase = true) }
-                if (!inTitle && !inOverview && !inItems) return@filter false
+                val tokens = cleanPersonQuery.split(" ", "_", ".").filter { it.length >= 3 }
+                val tokenMatch = tokens.size >= 2 && tokens.all { t ->
+                    group.title.contains(t, true) || group.overview?.contains(t, true) == true || group.items.any { it.fileName.contains(t, true) }
+                }
+                if (!inTitle && !inOverview && !inItems && !tokenMatch) return@filter false
             }
 
             // Studio / Network match
@@ -554,9 +686,14 @@ class CatalogRepository(
                     cleanStudioQuery.contains("disney") || cleanStudioQuery.contains("hotstar") -> group.hasDisney
                     cleanStudioQuery.contains("apple") -> group.hasAppleTv
                     cleanStudioQuery.contains("crunchyroll") -> group.hasCrunchyroll
-                    cleanStudioQuery.contains("zee5") -> group.hasZee5
+                    cleanStudioQuery.contains("zee5") || cleanStudioQuery.contains("zee") -> group.hasZee5
                     cleanStudioQuery.contains("warner") -> group.hasWarnerBros
                     cleanStudioQuery.contains("marvel") -> group.title.contains("marvel", true) || group.items.any { it.fileName.contains("marvel", true) }
+                    cleanStudioQuery.contains("hulu") -> group.items.any { it.fileName.contains("hulu", true) || it.fileName.contains(".hulu.", true) }
+                    cleanStudioQuery.contains("peacock") -> group.items.any { it.fileName.contains("peacock", true) }
+                    cleanStudioQuery.contains("paramount") -> group.items.any { it.fileName.contains("paramount", true) }
+                    cleanStudioQuery.contains("jiocinema") || cleanStudioQuery.contains("jio") -> group.items.any { it.fileName.contains("jio", true) }
+                    cleanStudioQuery.contains("sonyliv") || cleanStudioQuery.contains("sony liv") -> group.items.any { it.fileName.contains("sonyliv", true) || it.fileName.contains("sony", true) }
                     cleanStudioQuery.contains("a24") -> group.items.any { it.fileName.contains(Regex("""(?i)[\W_]a24[\W_]""")) }
                     cleanStudioQuery.isNotBlank() -> {
                         val wordRegex = Regex("""(?i)\b${Regex.escape(cleanStudioQuery)}\b""")
@@ -635,6 +772,40 @@ class CatalogRepository(
 }
 
 private val CURATED_PEOPLE = listOf(
+    // Indian Icons & Directors
+    TmdbPersonItem(35742, "Shah Rukh Khan", "Acting", "https://static.tvmaze.com/uploads/images/medium_portrait/519/1297756.jpg"),
+    TmdbPersonItem(52763, "Salman Khan", "Acting", null),
+    TmdbPersonItem(52764, "Aamir Khan", "Acting", null),
+    TmdbPersonItem(35741, "Amitabh Bachchan", "Acting", null),
+    TmdbPersonItem(35745, "Akshay Kumar", "Acting", null),
+    TmdbPersonItem(78875, "Hrithik Roshan", "Acting", null),
+    TmdbPersonItem(85034, "Ranbir Kapoor", "Acting", null),
+    TmdbPersonItem(111116, "Ranveer Singh", "Acting", null),
+    TmdbPersonItem(93703, "Deepika Padukone", "Acting", null),
+    TmdbPersonItem(53655, "Priyanka Chopra", "Acting", null),
+    TmdbPersonItem(1108120, "Alia Bhatt", "Acting", null),
+    TmdbPersonItem(85035, "Katrina Kaif", "Acting", null),
+    TmdbPersonItem(35743, "Kareena Kapoor", "Acting", null),
+    TmdbPersonItem(14887, "Prabhas", "Acting", null),
+    TmdbPersonItem(23788, "Allu Arjun", "Acting", null),
+    TmdbPersonItem(1184318, "Ram Charan", "Acting", null),
+    TmdbPersonItem(1184319, "Jr NTR", "Acting", null),
+    TmdbPersonItem(135899, "Thalapathy Vijay", "Acting", null),
+    TmdbPersonItem(52762, "Rajinikanth", "Acting", null),
+    TmdbPersonItem(52761, "Kamal Haasan", "Acting", null),
+    TmdbPersonItem(14888, "Dhanush", "Acting", null),
+    TmdbPersonItem(14889, "Suriya", "Acting", null),
+    TmdbPersonItem(19888, "Yash", "Acting", null),
+    TmdbPersonItem(14890, "S.S. Rajamouli", "Directing", null),
+    TmdbPersonItem(19889, "Prashanth Neel", "Directing", null),
+    TmdbPersonItem(14891, "Anurag Kashyap", "Directing", null),
+    TmdbPersonItem(14892, "Sanjay Leela Bhansali", "Directing", null),
+    TmdbPersonItem(14893, "Rohit Shetty", "Directing", null),
+    TmdbPersonItem(14894, "Mani Ratnam", "Directing", null),
+    TmdbPersonItem(19890, "Lokesh Kanagaraj", "Directing", null),
+    TmdbPersonItem(14895, "Rajkumar Hirani", "Directing", null),
+
+    // Hollywood & Global Directors & Creators
     TmdbPersonItem(15217, "Zack Snyder", "Directing", "/en46a8D99o2B99n9j33tZ27bM81.jpg"),
     TmdbPersonItem(525, "Christopher Nolan", "Directing", "/xuAIuYSmsUzKlUMBFGVZaWsY3Z5.jpg"),
     TmdbPersonItem(138, "Quentin Tarantino", "Directing", "/9O9GgV0jK0U4Z4Lw9f5lZ0o2B1P.jpg"),
@@ -646,6 +817,20 @@ private val CURATED_PEOPLE = listOf(
     TmdbPersonItem(578, "Ridley Scott", "Directing", null),
     TmdbPersonItem(608, "Hayao Miyazaki", "Directing", null),
     TmdbPersonItem(12519, "Makoto Shinkai", "Directing", null),
+    TmdbPersonItem(240, "Stanley Kubrick", "Directing", null),
+    TmdbPersonItem(2636, "Alfred Hitchcock", "Directing", null),
+    TmdbPersonItem(510, "Tim Burton", "Directing", null),
+    TmdbPersonItem(5655, "Wes Anderson", "Directing", null),
+    TmdbPersonItem(10828, "Guillermo del Toro", "Directing", null),
+    TmdbPersonItem(7623, "Sam Raimi", "Directing", null),
+    TmdbPersonItem(108, "Peter Jackson", "Directing", null),
+    TmdbPersonItem(1, "George Lucas", "Directing", null),
+    TmdbPersonItem(956, "Guy Ritchie", "Directing", null),
+    TmdbPersonItem(21684, "Bong Joon-ho", "Directing", null),
+    TmdbPersonItem(19271, "Anthony & Joe Russo", "Directing", null),
+    TmdbPersonItem(15277, "James Gunn", "Directing", null),
+
+    // Hollywood Stars
     TmdbPersonItem(6193, "Leonardo DiCaprio", "Acting", null),
     TmdbPersonItem(500, "Tom Cruise", "Acting", null),
     TmdbPersonItem(6384, "Keanu Reeves", "Acting", null),
@@ -654,25 +839,74 @@ private val CURATED_PEOPLE = listOf(
     TmdbPersonItem(2037, "Cillian Murphy", "Acting", null),
     TmdbPersonItem(287, "Brad Pitt", "Acting", null),
     TmdbPersonItem(30614, "Ryan Gosling", "Acting", null),
-    TmdbPersonItem(31, "Tom Hanks", "Acting", null)
+    TmdbPersonItem(31, "Tom Hanks", "Acting", null),
+    TmdbPersonItem(85, "Johnny Depp", "Acting", null),
+    TmdbPersonItem(1810, "Heath Ledger", "Acting", null),
+    TmdbPersonItem(6968, "Hugh Jackman", "Acting", null),
+    TmdbPersonItem(10859, "Ryan Reynolds", "Acting", null),
+    TmdbPersonItem(74568, "Chris Hemsworth", "Acting", null),
+    TmdbPersonItem(16828, "Chris Evans", "Acting", null),
+    TmdbPersonItem(1245, "Scarlett Johansson", "Acting", null),
+    TmdbPersonItem(234352, "Margot Robbie", "Acting", null),
+    TmdbPersonItem(54693, "Emma Stone", "Acting", null),
+    TmdbPersonItem(505710, "Zendaya", "Acting", null),
+    TmdbPersonItem(1190668, "Timothée Chalamet", "Acting", null),
+    TmdbPersonItem(73968, "Henry Cavill", "Acting", null),
+    TmdbPersonItem(1253360, "Pedro Pascal", "Acting", null)
 )
 
 private val CURATED_STUDIOS = listOf(
-    TmdbCompanyItem(174, "Warner Bros.", "/ky0xOc5maQswTVI8VOYEN0mX094.png"),
-    TmdbCompanyItem(3268, "HBO", "/tuomPhY2UtuPTqqFnKMVHvSb724.png"),
+    // Global OTT & Streaming
+    TmdbCompanyItem(2, "Hulu", null),
     TmdbCompanyItem(1782, "Netflix", "/wwemzKWzjKYJFfCeiB57q3r4Bcm.png"),
     TmdbCompanyItem(20580, "Prime Video", "/ifhbNuuVnlwYy5oXA05XaM5Xi7P.png"),
     TmdbCompanyItem(2739, "Disney+", "/gJ8VX6JSu3ci4ewTuRztJiq9CuB.png"),
+    TmdbCompanyItem(3919, "Disney+ Hotstar", null),
+    TmdbCompanyItem(3268, "HBO / Max", "/tuomPhY2UtuPTqqFnKMVHvSb724.png"),
     TmdbCompanyItem(2552, "Apple TV+", "/4KAy34EHvRM25Ih8Mz8Bm9VOtwP.png"),
-    TmdbCompanyItem(10342, "Studio Ghibli", "/7rwSXluNWZAlKL2qi0GtIPJuqih.png"),
-    TmdbCompanyItem(420, "Marvel Studios", "/hUzeosd33nzE5MCNsZxCGEKTXaQ.png"),
-    TmdbCompanyItem(41077, "A24", "/1ZXVjXYUsCU99Yjh6CiPVYEx3BK.png"),
+    TmdbCompanyItem(3353, "Peacock", null),
+    TmdbCompanyItem(4330, "Paramount+", null),
+    TmdbCompanyItem(67, "Showtime", null),
+    TmdbCompanyItem(9991, "JioCinema", null),
+    TmdbCompanyItem(9992, "Sony LIV", null),
+    TmdbCompanyItem(9993, "ZEE5", null),
+    TmdbCompanyItem(11111, "Crunchyroll", null),
+    TmdbCompanyItem(4353, "Discovery+", null),
+
+    // Major Hollywood Studios
+    TmdbCompanyItem(174, "Warner Bros.", "/ky0xOc5maQswTVI8VOYEN0mX094.png"),
     TmdbCompanyItem(33, "Universal Pictures", "/8lvHyhjr8oUKOOy2dKXoALWKdp0.png"),
     TmdbCompanyItem(4, "Paramount Pictures", null),
     TmdbCompanyItem(34, "Sony Pictures", null),
+    TmdbCompanyItem(420, "Marvel Studios", "/hUzeosd33nzE5MCNsZxCGEKTXaQ.png"),
+    TmdbCompanyItem(9994, "DC Studios", null),
+    TmdbCompanyItem(41077, "A24", "/1ZXVjXYUsCU99Yjh6CiPVYEx3BK.png"),
     TmdbCompanyItem(1632, "Lionsgate", null),
+    TmdbCompanyItem(25, "20th Century Studios", null),
+    TmdbCompanyItem(21, "MGM", null),
+    TmdbCompanyItem(3, "Pixar", null),
+    TmdbCompanyItem(1, "Lucasfilm", null),
+    TmdbCompanyItem(521, "DreamWorks Animation", null),
+    TmdbCompanyItem(3172, "Blumhouse", null),
+
+    // Indian Production Houses
+    TmdbCompanyItem(1569, "Yash Raj Films", null),
+    TmdbCompanyItem(1935, "Dharma Productions", null),
+    TmdbCompanyItem(7212, "Red Chillies Entertainment", null),
+    TmdbCompanyItem(3522, "T-Series", null),
+    TmdbCompanyItem(9995, "Hombale Films", null),
+    TmdbCompanyItem(9996, "Mythri Movie Makers", null),
+    TmdbCompanyItem(9997, "Lyca Productions", null),
+    TmdbCompanyItem(9998, "Geetha Arts", null),
+
+    // Anime & Animation Studios
+    TmdbCompanyItem(10342, "Studio Ghibli", "/7rwSXluNWZAlKL2qi0GtIPJuqih.png"),
     TmdbCompanyItem(13589, "MAPPA", null),
     TmdbCompanyItem(12693, "Ufotable", null),
     TmdbCompanyItem(5542, "Toei Animation", null),
-    TmdbCompanyItem(11111, "Crunchyroll", null)
+    TmdbCompanyItem(3734, "Madhouse", null),
+    TmdbCompanyItem(2883, "Bones", null),
+    TmdbCompanyItem(5267, "Kyoto Animation", null),
+    TmdbCompanyItem(20779, "Wit Studio", null),
+    TmdbCompanyItem(9999, "CloverWorks", null)
 )

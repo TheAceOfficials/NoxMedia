@@ -670,6 +670,7 @@ fun CatalogEditorSheet(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(
+                        modifier = Modifier.weight(1f, fill = false),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
@@ -683,20 +684,25 @@ fun CatalogEditorSheet(
                             text = if (liveMatchingCount > 0) "$liveMatchingCount titles match in library" else "No matching titles currently in library",
                             color = Color(0xFFD1D5DB),
                             fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
+
+                    Spacer(modifier = Modifier.width(10.dp))
 
                     // Pin to Home Screen toggle
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
                             .clickable {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 pinToHome = !pinToHome
                             }
-                            .padding(4.dp)
+                            .padding(horizontal = 6.dp, vertical = 4.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.PushPin,
@@ -708,7 +714,9 @@ fun CatalogEditorSheet(
                             text = if (pinToHome) "Pinned" else "Pin",
                             color = if (pinToHome) Color(0xFFA855F7) else Color(0xFF6B7280),
                             fontFamily = NdotFont,
-                            fontSize = 10.5.sp
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
                 }
