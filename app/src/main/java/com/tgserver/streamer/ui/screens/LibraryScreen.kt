@@ -3259,6 +3259,7 @@ private fun EpisodeGroupAccordionRow(
 /**
  * Stream item row for Movies with Apple TV card styling, 16:9 thumbnail, Hide/Unhide toggle and full filename
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun MovieStreamItemRow(
     item: MediaItem,
@@ -3302,40 +3303,84 @@ private fun MovieStreamItemRow(
                     )
 
                     val res = detectItemResolution(item)
-                    NetflixAppleBadge(
-                        text = res,
-                        textColor = Color.White,
-                        borderColor = Color(0x66FFFFFF),
-                        bgColor = Color(0x33000000),
-                        modifier = Modifier
-                            .padding(4.dp)
-                            .align(Alignment.TopStart)
-                    )
+                    val resBadge = when (res) {
+                        "4K" -> R.drawable.badge_r_4k
+                        "FHD", "1080p", "1080" -> R.drawable.badge_r_1080
+                        "HD", "720p", "720" -> R.drawable.badge_r_720
+                        else -> null
+                    }
+                    if (resBadge != null) {
+                        LocalBadgeImage(
+                            resId = resBadge,
+                            contentDescription = res,
+                            modifier = Modifier
+                                .padding(4.dp)
+                                .align(Alignment.TopStart),
+                            height = 12.dp
+                        )
+                    } else {
+                        NetflixAppleBadge(
+                            text = res,
+                            textColor = Color.White,
+                            borderColor = Color(0x66FFFFFF),
+                            bgColor = Color(0x33000000),
+                            modifier = Modifier
+                                .padding(4.dp)
+                                .align(Alignment.TopStart)
+                        )
+                    }
                 }
 
-                // File Details & Name
+                // File Details & Clean Movie Name
                 Column(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    val cleanTitle = remember(item.fileName, item.title) {
+                        extractCleanMovieTitle(item.fileName, item.title)
+                    }
                     Text(
-                        text = item.fileName.ifBlank { item.title },
+                        text = cleanTitle,
                         color = if (isHidden) Color(0xFF94A3B8).copy(alpha = 0.6f) else Color.White,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 11.5.sp,
-                        lineHeight = 15.sp,
-                        maxLines = 3,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 12.5.sp,
+                        lineHeight = 16.sp,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
 
-                    val formattedBadge = formatShortBadge(item.qualityBadge.ifBlank { item.quality })
-                    if (formattedBadge.isNotBlank()) {
-                        Text(
-                            text = formattedBadge,
-                            color = Color(0xFFFBBF24),
-                            fontSize = 10.sp,
-                            maxLines = 1
-                        )
+                    // Matched Xperience Badges: Quality, Visual, Audio, Channels, Provider (EXCLUDING codec)
+                    val streamBadges = remember(item.qualityBadge, item.fileName) {
+                        XperienceBadgeEngine.detectBadges(item.qualityBadge + " " + item.fileName)
+                            .filter { it.category != "gr" }
+                    }
+                    val streamLangs = remember(item.qualityBadge, item.fileName) {
+                        detectAudioTracks(listOf(item.qualityBadge + " " + item.fileName))
+                            .map { mapLanguageToCode(it) }
+                            .filter { it != "UNKNOWN" }
+                            .take(3)
+                    }
+
+                    if (streamBadges.isNotEmpty() || streamLangs.isNotEmpty()) {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            verticalArrangement = Arrangement.spacedBy(3.dp),
+                            modifier = Modifier.padding(top = 2.dp)
+                        ) {
+                            streamBadges.forEach { badge ->
+                                LocalBadgeImage(
+                                    resId = badge.resId,
+                                    contentDescription = badge.title,
+                                    height = 13.dp
+                                )
+                            }
+                            streamLangs.forEach { langCode ->
+                                DisneyLanguageBadge(
+                                    code = langCode,
+                                    height = 13.dp
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -3735,6 +3780,79 @@ private fun CandidateCard(
 }
 
 /**
+ * Official Xperience Pack Badge Engine.
+ * Matches exact regular expressions from xperience-app pack:
+ * Categories: Resolution (gr), Quality (gq), Visual (gv), Audio (ga), Channels (gc), Provider (gp).
+ * Explicitly EXCLUDES Codec (gco) as requested.
+ */
+private object XperienceBadgeEngine {
+    data class BadgeItem(
+        val id: String,
+        val category: String,
+        val title: String,
+        @DrawableRes val resId: Int,
+        val pattern: Regex
+    )
+
+    val BADGES = listOf(
+        // Provider (gp)
+        BadgeItem("p-netflix", "gp", "Netflix", R.drawable.badge_p_netflix, Regex("""(?i)\b(?:nflx|netflix|nf)\b""")),
+        BadgeItem("p-prime", "gp", "Prime Video", R.drawable.badge_p_prime, Regex("""(?i)\b(?:amzn|amazon|primevideo|prime[\s._-]?video)\b""")),
+        BadgeItem("p-appletv", "gp", "Apple TV+", R.drawable.badge_p_appletv, Regex("""(?i)\b(?:atvp|appletv|apple[\s._-]?tv)\b""")),
+        BadgeItem("p-disney", "gp", "Disney+", R.drawable.badge_p_disney, Regex("""(?i)(?:\b(?:dsnp|dsny)\b|\bdisney\+)""")),
+        BadgeItem("p-max", "gp", "HBO Max", R.drawable.badge_p_max, Regex("""(?i)\b(?:hmax|hbomax|hbo[\s._-]?max)\b""")),
+        BadgeItem("p-hulu", "gp", "Hulu", R.drawable.badge_p_hulu, Regex("""(?i)\bhulu\b""")),
+        BadgeItem("p-peacock", "gp", "Peacock", R.drawable.badge_p_peacock, Regex("""(?i)\b(?:pcok|peacock)\b""")),
+        BadgeItem("p-paramount", "gp", "Paramount+", R.drawable.badge_p_paramount, Regex("""(?i)\b(?:pmtp|pamp|paramount)\b""")),
+        BadgeItem("p-crave", "gp", "Crave", R.drawable.badge_p_crave, Regex("""(?i)\b(?:crav|crave)\b""")),
+        BadgeItem("p-crunchyroll", "gp", "Crunchyroll", R.drawable.badge_p_crunchyroll, Regex("""(?i)\b(?:cr|crunchyroll)\b""")),
+
+        // Resolution (gr)
+        BadgeItem("r-4k", "gr", "4K", R.drawable.badge_r_4k, Regex("""(?i)^(?=.*(?:2160[pi]?|4k|uhd|ultra[\s._-]?hd))(?!.*(?:1080[pi]?|720[pi]?))""")),
+        BadgeItem("r-1080", "gr", "1080p", R.drawable.badge_r_1080, Regex("""(?i)\b1080[pi]?\b""")),
+        BadgeItem("r-720", "gr", "720p", R.drawable.badge_r_720, Regex("""(?i)\b720[pi]?\b""")),
+
+        // Quality (gq)
+        BadgeItem("q-remux", "gq", "Remux", R.drawable.badge_q_remux, Regex("""(?i)\bremux\b""")),
+        BadgeItem("q-bluray", "gq", "BluRay", R.drawable.badge_q_bluray, Regex("""(?i)^(?=.*(?:bluray|blu-ray))(?!.*remux)""")),
+        BadgeItem("q-webdl", "gq", "WEB-DL", R.drawable.badge_q_webdl, Regex("""(?i)\b(?:web[-_. ]?dl|webdl)\b""")),
+        BadgeItem("q-webrip", "gq", "WEBRip", R.drawable.badge_q_webrip, Regex("""(?i)\bweb[-_. ]?rip\b""")),
+        BadgeItem("q-seadex", "gq", "SeaDex", R.drawable.badge_q_seadex, Regex("""(?i)\bseadex\b""")),
+
+        // Visual (gv)
+        BadgeItem("v-dv", "gv", "Dolby Vision", R.drawable.badge_v_dv, Regex("""(?i)^(?=.*\b(?:dv|dovi|dolby[\s._-]?vision)\b)(?!.*\batmos\b)(?!.*\btrue[\s._-]?hd\b)(?!.*(?:\bddp|\bdd\+|\beac-?3|\be-?ac-?3))(?!.*\b(?:dd[25][. ][01]|ac-?3)\b)""")),
+        BadgeItem("v-hdr10plus", "gv", "HDR10+", R.drawable.badge_v_hdr10plus, Regex("""(?i)hdr[\s._-]?10[\s._-]?(?:\+|(?:plus|p)\b)""")),
+        BadgeItem("v-hdr10", "gv", "HDR10", R.drawable.badge_v_hdr10, Regex("""(?i)^(?=.*hdr[\s._-]?10(?![\s._-]?bits?\b))(?!.*hdr[\s._-]?10[\s._-]?(?:\+|(?:plus|p)\b))""")),
+        BadgeItem("v-hdr", "gv", "HDR", R.drawable.badge_v_hdr, Regex("""(?i)^(?=.*\b(?:hdr|hlg)\b)(?!.*hdr[\s._-]?10(?![\s._-]?bits?\b))""")),
+        BadgeItem("v-imax-enhanced", "gv", "IMAX Enhanced", R.drawable.badge_v_imax_enhanced, Regex("""(?i)\bimax[\s._-]?enhanced\b""")),
+        BadgeItem("v-imax", "gv", "IMAX", R.drawable.badge_v_imax, Regex("""(?i)^(?=.*\bimax\b)(?!.*\bimax[\s._-]?enhanced\b)""")),
+        BadgeItem("v-sdr", "gv", "SDR", R.drawable.badge_v_sdr, Regex("""(?i)\bsdr\b""")),
+
+        // Audio (ga)
+        BadgeItem("a-atmos-dv", "ga", "Atmos + Vision", R.drawable.badge_a_atmos_dv, Regex("""(?i)^(?=.*\batmos\b)(?=.*\b(?:dv|dovi|dolby[\s._-]?vision)\b)""")),
+        BadgeItem("a-atmos", "ga", "Atmos", R.drawable.badge_a_atmos, Regex("""(?i)^(?=.*\batmos\b)(?!.*\b(?:dv|dovi|dolby[\s._-]?vision)\b)""")),
+        BadgeItem("a-truehd-dv", "ga", "TrueHD + Vision", R.drawable.badge_a_truehd_dv, Regex("""(?i)^(?=.*\btrue[\s._-]?hd\b)(?!.*\batmos\b)(?=.*\b(?:dv|dovi|dolby[\s._-]?vision)\b)""")),
+        BadgeItem("a-truehd", "ga", "TrueHD", R.drawable.badge_a_truehd, Regex("""(?i)^(?=.*\btrue[\s._-]?hd\b)(?!.*\batmos\b)(?!.*\b(?:dv|dovi|dolby[\s._-]?vision)\b)""")),
+        BadgeItem("a-dtsx", "ga", "DTS:X", R.drawable.badge_a_dtsx, Regex("""(?i)\bdts[-_.: ]?x\b""")),
+        BadgeItem("a-dtshdma", "ga", "DTS-HD MA", R.drawable.badge_a_dtshdma, Regex("""(?i)^(?=.*\bdts[-_. ]?(?:hd[-_. ]?)?ma\b)(?!.*\bdts[-_.: ]?x\b)""")),
+        BadgeItem("a-dtshd", "ga", "DTS-HD", R.drawable.badge_a_dtshd, Regex("""(?i)^(?=.*\bdts[-_. ]?hd\b)(?!.*\bdts[-_. ]?(?:hd[-_. ]?)?ma\b)(?!.*\bdts[-_.: ]?x\b)""")),
+        BadgeItem("a-dts", "ga", "DTS", R.drawable.badge_a_dts, Regex("""(?i)^(?=.*\bdts\b)(?!.*\bdts[-_.: ]?(?:hd|ma|xll|x)\b)""")),
+        BadgeItem("a-dd-dv", "ga", "Digital + Vision", R.drawable.badge_a_dd_dv, Regex("""(?i)^(?=.*(?:(?:\bddp|\bdd\+|\beac-?3|\be-?ac-?3)|\b(?:dd[25][. ][01]|ac-?3)\b))(?!.*\batmos\b)(?!.*\btrue[\s._-]?hd\b)(?=.*\b(?:dv|dovi|dolby[\s._-]?vision)\b)""")),
+        BadgeItem("a-ddp", "ga", "DD+", R.drawable.badge_a_ddp, Regex("""(?i)^(?=.*(?:\bddp|\bdd\+|\beac-?3|\be-?ac-?3))(?!.*\batmos\b)(?!.*\btrue[\s._-]?hd\b)(?!.*\b(?:dv|dovi|dolby[\s._-]?vision)\b)""")),
+        BadgeItem("a-dd", "ga", "DD", R.drawable.badge_a_dd, Regex("""(?i)^(?=.*\b(?:dd[25][. ][01]|ac-?3)\b)(?!.*(?:\bddp|\bdd\+|\beac-?3|\be-?ac-?3))(?!.*\batmos\b)(?!.*\btrue[\s._-]?hd\b)(?!.*\b(?:dv|dovi|dolby[\s._-]?vision)\b)""")),
+
+        // Channels (gc)
+        BadgeItem("c-71", "gc", "7.1", R.drawable.badge_c_71, Regex("""[^0-9][7-8][. ][01](?![0-9])""")),
+        BadgeItem("c-51", "gc", "5.1", R.drawable.badge_c_51, Regex("""^(?=.*[^0-9]5[. ][01](?![0-9]))(?!.*[^0-9][7-8][. ][01](?![0-9]))"""))
+    )
+
+    fun detectBadges(text: String): List<BadgeItem> {
+        if (text.isBlank()) return emptyList()
+        return BADGES.filter { it.pattern.containsMatchIn(text) }
+    }
+}
+
+/**
  * Official vector/webp badge loaded directly from offline local app drawables.
  * 100% independent, zero network requests, pixel-perfect rendering across all screen densities.
  */
@@ -3826,41 +3944,48 @@ private fun DisneyBadgesRow(
             DisneyResolutionBadge(text = visualSpecs.resolutionBadge, height = badgeHeight)
         }
 
-        // 2. Dolby Vision or HDR
-        if (visualSpecs.isDolbyVision) {
-            LocalBadgeImage(R.drawable.badge_v_dv, "Dolby Vision", height = badgeHeight)
-        } else if (visualSpecs.isHdr10Plus) {
-            LocalBadgeImage(R.drawable.badge_v_hdr10plus, "HDR10+", height = badgeHeight)
-        } else if (visualSpecs.isHdr) {
-            LocalBadgeImage(R.drawable.badge_v_hdr, "HDR", height = badgeHeight)
+        // 2. Visual / Audio combo badges or individual visual & audio badges from Xperience Pack
+        val detected = remember(visualSpecs) {
+            val combined = (visualSpecs.visualBadges.joinToString(" ") + " " + (visualSpecs.audioBadge ?: "")).lowercase()
+            XperienceBadgeEngine.detectBadges(combined).filter { it.category in listOf("gv", "ga", "gc") }
         }
 
-        // 3. IMAX / IMAX Enhanced
-        if (visualSpecs.isImaxEnhanced) {
-            LocalBadgeImage(R.drawable.badge_v_imax_enhanced, "IMAX Enhanced", height = badgeHeight)
-        } else if (visualSpecs.isImax) {
-            LocalBadgeImage(R.drawable.badge_v_imax, "IMAX", height = badgeHeight)
-        }
+        if (detected.isNotEmpty()) {
+            detected.forEach { b ->
+                LocalBadgeImage(b.resId, b.title, height = badgeHeight)
+            }
+        } else {
+            // Fallback to explicit visual flags if regex didn't catch combined string
+            if (visualSpecs.isDolbyVision) {
+                LocalBadgeImage(R.drawable.badge_v_dv, "Dolby Vision", height = badgeHeight)
+            } else if (visualSpecs.isHdr10Plus) {
+                LocalBadgeImage(R.drawable.badge_v_hdr10plus, "HDR10+", height = badgeHeight)
+            } else if (visualSpecs.isHdr) {
+                LocalBadgeImage(R.drawable.badge_v_hdr, "HDR", height = badgeHeight)
+            }
 
-        // 4. Audio: Dolby Atmos, TrueHD, DTS:X, DTS-HD MA, DTS, Digital+, Digital, 7.1, 5.1
-        when (visualSpecs.audioBadge) {
-            "ATMOS" -> LocalBadgeImage(R.drawable.badge_a_atmos, "Dolby Atmos", height = badgeHeight)
-            "TRUEHD" -> LocalBadgeImage(R.drawable.badge_a_truehd, "Dolby TrueHD", height = badgeHeight)
-            "DTS:X", "DTS-X" -> LocalBadgeImage(R.drawable.badge_a_dtsx, "DTS:X", height = badgeHeight)
-            "DTS-HD MA" -> LocalBadgeImage(R.drawable.badge_a_dtshdma, "DTS-HD MA", height = badgeHeight)
-            "DTS-HD" -> LocalBadgeImage(R.drawable.badge_a_dtshd, "DTS-HD", height = badgeHeight)
-            "DTS" -> LocalBadgeImage(R.drawable.badge_a_dts, "DTS", height = badgeHeight)
-            "DIGITAL+", "DD+", "EAC3" -> LocalBadgeImage(R.drawable.badge_a_ddp, "Dolby Digital Plus", height = badgeHeight)
-            "DD", "AC3" -> LocalBadgeImage(R.drawable.badge_a_dd, "Dolby Digital", height = badgeHeight)
-            "7.1" -> LocalBadgeImage(R.drawable.badge_c_71, "7.1", height = badgeHeight)
-            "5.1" -> LocalBadgeImage(R.drawable.badge_c_51, "5.1", height = badgeHeight)
-            null -> {}
-            else -> {
-                DisneyResolutionBadge(text = visualSpecs.audioBadge, height = badgeHeight)
+            if (visualSpecs.isImaxEnhanced) {
+                LocalBadgeImage(R.drawable.badge_v_imax_enhanced, "IMAX Enhanced", height = badgeHeight)
+            } else if (visualSpecs.isImax) {
+                LocalBadgeImage(R.drawable.badge_v_imax, "IMAX", height = badgeHeight)
+            }
+
+            when (visualSpecs.audioBadge) {
+                "ATMOS" -> LocalBadgeImage(R.drawable.badge_a_atmos, "Dolby Atmos", height = badgeHeight)
+                "TRUEHD" -> LocalBadgeImage(R.drawable.badge_a_truehd, "Dolby TrueHD", height = badgeHeight)
+                "DTS:X", "DTS-X" -> LocalBadgeImage(R.drawable.badge_a_dtsx, "DTS:X", height = badgeHeight)
+                "DTS-HD MA" -> LocalBadgeImage(R.drawable.badge_a_dtshdma, "DTS-HD MA", height = badgeHeight)
+                "DTS-HD" -> LocalBadgeImage(R.drawable.badge_a_dtshd, "DTS-HD", height = badgeHeight)
+                "DTS" -> LocalBadgeImage(R.drawable.badge_a_dts, "DTS", height = badgeHeight)
+                "DIGITAL+", "DD+", "EAC3" -> LocalBadgeImage(R.drawable.badge_a_ddp, "Dolby Digital Plus", height = badgeHeight)
+                "DD", "AC3" -> LocalBadgeImage(R.drawable.badge_a_dd, "Dolby Digital", height = badgeHeight)
+                "7.1" -> LocalBadgeImage(R.drawable.badge_c_71, "7.1", height = badgeHeight)
+                "5.1" -> LocalBadgeImage(R.drawable.badge_c_51, "5.1", height = badgeHeight)
+                else -> {}
             }
         }
 
-        // 5. Language Pills (e.g. HI, EN, JA, TA)
+        // 3. Language Pills (e.g. HI, EN, JA, TA)
         visualSpecs.languageCodes.take(4).forEach { code ->
             DisneyLanguageBadge(code = code, height = badgeHeight)
         }
@@ -4073,6 +4198,31 @@ private fun mapLanguageToCode(lang: String): String {
         l.length <= 3 -> l.uppercase()
         else -> l.take(2).uppercase()
     }
+}
+
+/**
+ * Extracts a clean movie stream title from filename and media title without raw release junk
+ */
+private fun extractCleanMovieTitle(fileName: String, itemTitle: String?): String {
+    val candidate = itemTitle?.trim()?.takeIf { it.isNotBlank() && it != "Unknown" }
+    if (candidate != null && !candidate.contains(Regex("""(?i)\b(2160p|1080p|720p|hevc|x264|x265|web-?dl|bluray)\b"""))) {
+        return candidate
+    }
+    if (fileName.isBlank()) return candidate ?: "Movie Stream"
+    val base = fileName.substringBeforeLast('.')
+
+    val yearMatch = Regex("""(?i)^(.*?(\(\d{4}\)|\b(?:19|20)\d{2}\b))(?:\s*[\.\-\_\(\[]\s*(?:2160p|1080p|720p|480p|4k|uhd|web|bluray|amzn|nf|cr|dsnp|atvp|max|hevc|x264|x265|hdr|dv|dovi|remux|bdrip|aac|\d+bit)|[\.\s\-\_]+).*$""").matchEntire(base)
+    if (yearMatch != null) {
+        val t = yearMatch.groupValues[1].replace('.', ' ').replace('_', ' ').trim()
+        val cleaned = t.replace(Regex("""\s+"""), " ").trim(' ', '-', '_')
+        if (cleaned.length > 2) return cleaned
+    }
+
+    val stripped = base.replace(Regex("""(?i)[\s._\-\(\[]*(?:2160p|1080p|720p|4k|uhd|bluray|web-?dl|webrip|remux|hevc|x265|x264|hdr|dv|dovi|h\.?264|h\.?265|aac\d?|dts|ddp\d?|truehd|atmos|esub|multi|hindi|english|dual|amzn|nf|dsnp).*$"""), "")
+        .replace('.', ' ')
+        .replace('_', ' ')
+        .trim()
+    return if (stripped.length > 2) stripped else base
 }
 
 /**
@@ -4530,46 +4680,56 @@ private fun MediaVersionsSection(
 
                     // Disney+ Style Specs & Quality Badges
                     FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(7.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         if (version.resolutions.any { it.contains("4K", true) }) {
-                            LocalBadgeImage(R.drawable.badge_r_4k, "4K")
+                            LocalBadgeImage(R.drawable.badge_r_4k, "4K", height = 15.5.dp)
                         } else if (version.resolutions.any { it.contains("1080", true) || it.contains("FHD", true) }) {
-                            LocalBadgeImage(R.drawable.badge_r_1080, "1080p")
+                            LocalBadgeImage(R.drawable.badge_r_1080, "1080p", height = 15.5.dp)
                         } else if (version.resolutions.any { it.contains("720", true) }) {
-                            LocalBadgeImage(R.drawable.badge_r_720, "720p")
+                            LocalBadgeImage(R.drawable.badge_r_720, "720p", height = 15.5.dp)
                         }
 
-                        if (version.visualFeatures.any { it == "DV" || it.contains("VISION", true) }) {
-                            LocalBadgeImage(R.drawable.badge_v_dv, "Dolby Vision")
-                        } else if (version.visualFeatures.any { it.contains("HDR10+", true) }) {
-                            LocalBadgeImage(R.drawable.badge_v_hdr10plus, "HDR10+")
-                        } else if (version.visualFeatures.any { it.contains("HDR", true) }) {
-                            LocalBadgeImage(R.drawable.badge_v_hdr, "HDR")
+                        val specsBadges = remember(version) {
+                            XperienceBadgeEngine.detectBadges(version.sampleFileName + " " + version.releaseTag)
+                                .filter { it.category in listOf("gv", "ga", "gc") }
+                        }
+                        if (specsBadges.isNotEmpty()) {
+                            specsBadges.forEach { b ->
+                                LocalBadgeImage(b.resId, b.title, height = 15.5.dp)
+                            }
+                        } else {
+                            if (version.visualFeatures.any { it == "DV" || it.contains("VISION", true) }) {
+                                LocalBadgeImage(R.drawable.badge_v_dv, "Dolby Vision", height = 15.5.dp)
+                            } else if (version.visualFeatures.any { it.contains("HDR10+", true) }) {
+                                LocalBadgeImage(R.drawable.badge_v_hdr10plus, "HDR10+", height = 15.5.dp)
+                            } else if (version.visualFeatures.any { it.contains("HDR", true) }) {
+                                LocalBadgeImage(R.drawable.badge_v_hdr, "HDR", height = 15.5.dp)
+                            }
+
+                            if (version.visualFeatures.any { it.contains("ENHANCED", true) }) {
+                                LocalBadgeImage(R.drawable.badge_v_imax_enhanced, "IMAX Enhanced", height = 15.5.dp)
+                            } else if (version.visualFeatures.any { it.contains("IMAX", true) }) {
+                                LocalBadgeImage(R.drawable.badge_v_imax, "IMAX", height = 15.5.dp)
+                            }
+
+                            if (version.visualFeatures.any { it.contains("ATMOS", true) }) {
+                                LocalBadgeImage(R.drawable.badge_a_atmos, "Dolby Atmos", height = 15.5.dp)
+                            } else if (version.visualFeatures.any { it.contains("TRUEHD", true) }) {
+                                LocalBadgeImage(R.drawable.badge_a_truehd, "Dolby TrueHD", height = 15.5.dp)
+                            } else if (version.visualFeatures.any { it.contains("DTS", true) }) {
+                                LocalBadgeImage(R.drawable.badge_a_dts, "DTS", height = 15.5.dp)
+                            } else if (version.visualFeatures.any { it.contains("DD+", true) || it.contains("DIGITAL+", true) }) {
+                                LocalBadgeImage(R.drawable.badge_a_ddp, "Dolby Digital Plus", height = 15.5.dp)
+                            } else if (version.visualFeatures.any { it.contains("5.1", true) }) {
+                                LocalBadgeImage(R.drawable.badge_c_51, "5.1", height = 15.5.dp)
+                            }
                         }
 
-                        if (version.visualFeatures.any { it.contains("ENHANCED", true) }) {
-                            LocalBadgeImage(R.drawable.badge_v_imax_enhanced, "IMAX Enhanced")
-                        } else if (version.visualFeatures.any { it.contains("IMAX", true) }) {
-                            LocalBadgeImage(R.drawable.badge_v_imax, "IMAX")
-                        }
-
-                        if (version.visualFeatures.any { it.contains("ATMOS", true) }) {
-                            LocalBadgeImage(R.drawable.badge_a_atmos, "Dolby Atmos")
-                        } else if (version.visualFeatures.any { it.contains("TRUEHD", true) }) {
-                            LocalBadgeImage(R.drawable.badge_a_truehd, "Dolby TrueHD")
-                        } else if (version.visualFeatures.any { it.contains("DTS", true) }) {
-                            LocalBadgeImage(R.drawable.badge_a_dts, "DTS")
-                        } else if (version.visualFeatures.any { it.contains("DD+", true) || it.contains("DIGITAL+", true) }) {
-                            LocalBadgeImage(R.drawable.badge_a_ddp, "Dolby Digital Plus")
-                        } else if (version.visualFeatures.any { it.contains("5.1", true) }) {
-                            LocalBadgeImage(R.drawable.badge_c_51, "5.1")
-                        }
-
-                        version.audioTracks.map { mapLanguageToCode(it) }.distinct().filter { it != "UNKNOWN" }.take(3).forEach { code ->
-                            DisneyLanguageBadge(code = code)
+                        version.audioTracks.map { mapLanguageToCode(it) }.distinct().filter { it != "UNKNOWN" }.take(4).forEach { code ->
+                            DisneyLanguageBadge(code = code, height = 15.5.dp)
                         }
                     }
 
