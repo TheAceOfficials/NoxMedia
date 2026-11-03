@@ -60,12 +60,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -79,6 +76,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -3745,82 +3743,38 @@ private fun CandidateCard(
 }
 
 /**
- * Disney+ minimal aesthetic Dolby monogram logo, drawn with pure Compose Vector Canvas.
+ * Disney+ minimal aesthetic Dolby monogram logo.
  * 100% offline, zero external dependencies, crystal sharp on any display.
  */
 @Composable
 private fun DolbyEmblem(
     modifier: Modifier = Modifier,
     color: Color = Color.White,
-    width: androidx.compose.ui.unit.Dp = 15.dp,
-    height: androidx.compose.ui.unit.Dp = 12.dp
+    width: Dp = 15.dp,
+    height: Dp = 12.dp
 ) {
-    Canvas(modifier = modifier.size(width, height)) {
-        val w = size.width
-        val h = size.height
-        val gap = w * 0.12f
-        val dWidth = (w - gap) / 2f
-        val strokeW = h * 0.22f
-        val outerRadius = h / 2f
-        val innerH = h - 2 * strokeW
-        val innerRadius = innerH / 2f
-
-        // 1. Left D (Curved on left, flat on right)
-        val leftPath = Path().apply {
-            fillType = PathFillType.EvenOdd
-            moveTo(dWidth, 0f)
-            lineTo(outerRadius, 0f)
-            arcTo(
-                rect = Rect(0f, 0f, outerRadius * 2f, h),
-                startAngleDegrees = 270f,
-                sweepAngleDegrees = -180f,
-                forceMoveTo = false
-            )
-            lineTo(dWidth, h)
-            close()
-
-            val innerRight = dWidth - strokeW
-            moveTo(innerRight, strokeW)
-            lineTo(strokeW + innerRadius, strokeW)
-            arcTo(
-                rect = Rect(strokeW, strokeW, strokeW + innerRadius * 2f, h - strokeW),
-                startAngleDegrees = 270f,
-                sweepAngleDegrees = -180f,
-                forceMoveTo = false
-            )
-            lineTo(innerRight, h - strokeW)
-            close()
-        }
-        drawPath(leftPath, color = color)
-
-        // 2. Right D (Flat on left, curved on right)
-        val rightStartX = dWidth + gap
-        val rightPath = Path().apply {
-            fillType = PathFillType.EvenOdd
-            moveTo(rightStartX, 0f)
-            lineTo(w - outerRadius, 0f)
-            arcTo(
-                rect = Rect(w - outerRadius * 2f, 0f, w, h),
-                startAngleDegrees = 270f,
-                sweepAngleDegrees = 180f,
-                forceMoveTo = false
-            )
-            lineTo(rightStartX, h)
-            close()
-
-            val innerLeft = rightStartX + strokeW
-            moveTo(innerLeft, strokeW)
-            lineTo(w - strokeW - innerRadius, strokeW)
-            arcTo(
-                rect = Rect(w - strokeW - innerRadius * 2f, strokeW, w - strokeW, h - strokeW),
-                startAngleDegrees = 270f,
-                sweepAngleDegrees = 180f,
-                forceMoveTo = false
-            )
-            lineTo(innerLeft, h - strokeW)
-            close()
-        }
-        drawPath(rightPath, color = color)
+    val dWidth = (width - 1.5.dp) / 2
+    Row(
+        modifier = modifier.size(width, height),
+        horizontalArrangement = Arrangement.spacedBy(1.5.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Left D (curved on left, flat on right)
+        Box(
+            modifier = Modifier
+                .width(dWidth)
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(topStart = 100.dp, bottomStart = 100.dp, topEnd = 0.dp, bottomEnd = 0.dp))
+                .background(color)
+        )
+        // Right D (flat on left, curved on right)
+        Box(
+            modifier = Modifier
+                .width(dWidth)
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(topStart = 0.dp, bottomStart = 0.dp, topEnd = 100.dp, bottomEnd = 100.dp))
+                .background(color)
+        )
     }
 }
 
@@ -4030,8 +3984,7 @@ private fun DisneyBadgesRow(
     FlowRow(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(9.dp),
-        verticalArrangement = Arrangement.spacedBy(7.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalArrangement = Arrangement.spacedBy(7.dp)
     ) {
         // 1. Resolution: 4K (Solid white pill) or HD
         if (visualSpecs.is4K) {
@@ -4678,8 +4631,7 @@ private fun MediaVersionsSection(
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         if (version.resolutions.any { it.contains("4K", true) }) {
                             Disney4KBadge()
