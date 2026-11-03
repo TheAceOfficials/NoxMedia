@@ -1078,7 +1078,6 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                                     }
                                 }
                             }
-                            }
 
                             // Smooth Top Fader Effect (Soft Gradient Fade-out for Posters on Scroll)
                             Box(

@@ -1,5 +1,20 @@
 package com.tgserver.streamer.data.model
 
+// Precompiled regexes to eliminate regex compilation overhead in large media lists (10k-100k items)
+private val REGEX_4K_HDHUB = Regex("""(?i)4khdhub(\.com|\.org|\.net|\.in)?""")
+private val REGEX_4K_UHD = Regex("""(?i)\b(4k|uhd)\b""")
+private val REGEX_HBO = Regex("""(?i)[\W_](hbo|hmax|hbomax)[\W_]""")
+private val REGEX_WB = Regex("""(?i)[\W_]wb[\W_]""")
+
+private val SPLIT_PART_CLEAN_REGEX = Regex("""[\s._-]*(?:part|pt)[\s._-]*\d+.*""", RegexOption.IGNORE_CASE)
+private val SPLIT_EXT_CLEAN_REGEX = Regex("""\.(mkv|mp4|avi|webm|ts|m4v)(\.\d{2,4})?$""", RegexOption.IGNORE_CASE)
+private val SPLIT_PART_DETECT_REGEX = Regex("""(?i)(?:part|pt|\.\d{2,4})""")
+
+private val EXACT_DUP_EXT_REGEX = Regex("""\.(mkv|mp4|avi|webm|ts|m4v)(\.\d{2,4})?$""", RegexOption.IGNORE_CASE)
+private val EXACT_DUP_SOURCE_REGEX = Regex("""[\(\[][^\)\]]*(?:momstealer|anipulse|toonworld|vegamovies|katmovie|4khdhub)[^\)\]]*[\)\]]""", RegexOption.IGNORE_CASE)
+private val EXACT_DUP_SPACE_REGEX = Regex("""[\s._-]+""")
+private val YEAR_EXTRACT_REGEX = Regex("""(?:^|[^0-9])((?:19|20)\d{2})(?:[^0-9]|$)""")
+
 data class ChannelInfo(
     val id: Long,
     val title: String,
@@ -206,21 +221,6 @@ enum class LibrarySortOrder(val label: String) {
     SIZE_ASC("Size (Smallest)"),
     RATING_DESC("Rating (Highest)")
 }
-
-// Precompiled regexes to eliminate regex compilation overhead in large media lists (10k-100k items)
-private val REGEX_4K_HDHUB = Regex("""(?i)4khdhub(\.com|\.org|\.net|\.in)?""")
-private val REGEX_4K_UHD = Regex("""(?i)\b(4k|uhd)\b""")
-private val REGEX_HBO = Regex("""(?i)[\W_](hbo|hmax|hbomax)[\W_]""")
-private val REGEX_WB = Regex("""(?i)[\W_]wb[\W_]""")
-
-private val SPLIT_PART_CLEAN_REGEX = Regex("""[\s._-]*(?:part|pt)[\s._-]*\d+.*""", RegexOption.IGNORE_CASE)
-private val SPLIT_EXT_CLEAN_REGEX = Regex("""\.(mkv|mp4|avi|webm|ts|m4v)(\.\d{2,4})?$""", RegexOption.IGNORE_CASE)
-private val SPLIT_PART_DETECT_REGEX = Regex("""(?i)(?:part|pt|\.\d{2,4})""")
-
-private val EXACT_DUP_EXT_REGEX = Regex("""\.(mkv|mp4|avi|webm|ts|m4v)(\.\d{2,4})?$""", RegexOption.IGNORE_CASE)
-private val EXACT_DUP_SOURCE_REGEX = Regex("""[\(\[][^\)\]]*(?:momstealer|anipulse|toonworld|vegamovies|katmovie|4khdhub)[^\)\]]*[\)\]]""", RegexOption.IGNORE_CASE)
-private val EXACT_DUP_SPACE_REGEX = Regex("""[\s._-]+""")
-private val YEAR_EXTRACT_REGEX = Regex("""(?:^|[^0-9])((?:19|20)\d{2})(?:[^0-9]|$)""")
 
 fun List<MediaItem>.toMediaGroups(): List<MediaGroup> {
     val allMedia = this

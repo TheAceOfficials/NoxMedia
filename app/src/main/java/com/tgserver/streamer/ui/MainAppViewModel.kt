@@ -103,6 +103,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     val media: StateFlow<List<MediaItem>> = tgClient.mediaState
 
     private val groupCacheFile = File(application.applicationContext.filesDir, "media_groups_cache.json")
+    private val gson = Gson()
 
     private fun loadCachedMediaGroups(): List<MediaGroup> {
         return try {
