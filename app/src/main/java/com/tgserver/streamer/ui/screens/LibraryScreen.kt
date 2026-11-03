@@ -4673,16 +4673,19 @@ private fun MediaVersionsSection(
             Surface(
                 shape = RoundedCornerShape(16.dp),
                 color = if (isVersionHidden) Color(0xFF131014) else Color(0xFF101117),
-                border = BorderStroke(
-                    1.dp,
-                    if (isVersionHidden) Color(0xFF4A1924)
-                    else Brush.horizontalGradient(
-                        colors = listOf(
-                            version.brandColor.copy(alpha = 0.5f),
-                            Color(0xFF1E212D)
+                border = if (isVersionHidden) {
+                    BorderStroke(1.dp, Color(0xFF4A1924))
+                } else {
+                    BorderStroke(
+                        1.dp,
+                        Brush.horizontalGradient(
+                            colors = listOf(
+                                version.brandColor.copy(alpha = 0.5f),
+                                Color(0xFF1E212D)
+                            )
                         )
                     )
-                ),
+                },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
