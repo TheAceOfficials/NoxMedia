@@ -2023,6 +2023,7 @@ private fun ContentDetailsScreen(
     onRefreshMetadata: () -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
+    val serverConfig by viewModel.config.collectAsState()
     val isSeries = group.type == "series" || group.type == "anime"
     var showRescanDialog by remember { mutableStateOf(false) }
     var showMergeDialog by remember { mutableStateOf(false) }
@@ -2084,6 +2085,7 @@ private fun ContentDetailsScreen(
     if (showManageDbDialog) {
         ManageDatabaseIdentifiersDialog(
             group = group,
+            config = serverConfig,
             onDismiss = { showManageDbDialog = false },
             onSave = { imdb, tmdb, tvdb, kitsu, priority, reSync ->
                 showManageDbDialog = false
@@ -3689,6 +3691,7 @@ private data class DbProviderCardInfo(
 @Composable
 private fun ManageDatabaseIdentifiersDialog(
     group: MediaGroup,
+    config: ServerConfig? = null,
     onDismiss: () -> Unit,
     onSave: (imdbId: String?, tmdbId: Int?, tvdbId: Int?, kitsuId: Int?, dbPriority: String?, reSync: Boolean) -> Unit
 ) {
@@ -3706,15 +3709,41 @@ private fun ManageDatabaseIdentifiersDialog(
     }
     var reSyncChecked by remember { mutableStateOf(true) }
 
-    val initialOrder = remember(group) {
+    // Strict alignment with App Settings metadata fallback chain
+    val initialOrder = remember(group, config) {
         val saved = group.dbPriority?.split(",")?.map { it.trim().lowercase() }?.filter { it in listOf("kitsu", "tmdb", "imdb", "tvdb") }
         if (!saved.isNullOrEmpty()) {
-            val remaining = listOf("tmdb", "imdb", "kitsu", "tvdb").filterNot { saved.contains(it) }
+            val remaining = listOf("tmdb", "imdb", "tvdb", "kitsu").filterNot { saved.contains(it) }
             saved + remaining
-        } else if (group.type == "anime" || group.items.any { (it.kitsuId ?: 0) > 0 }) {
-            listOf("kitsu", "tmdb", "imdb", "tvdb")
         } else {
-            listOf("tmdb", "imdb", "tvdb", "kitsu")
+            val isMovie = group.type == "movie"
+            val isAnime = group.type == "anime"
+            val hasTvdb = config?.tvdbApiKey?.isNotBlank() == true
+
+            when {
+                isMovie -> {
+                    // Movies Settings Fallback: TMDB -> Cinemeta (IMDb) -> TVDB -> Kitsu
+                    listOf("tmdb", "imdb", "tvdb", "kitsu")
+                }
+                isAnime -> {
+                    // Anime Settings Fallback: respects Anime Indexing Preference in Settings
+                    if (config?.animeMetadataPreference == "kitsu") {
+                        listOf("kitsu", "tvdb", "tmdb", "imdb")
+                    } else if (hasTvdb) {
+                        listOf("tvdb", "tmdb", "kitsu", "imdb")
+                    } else {
+                        listOf("tmdb", "tvdb", "kitsu", "imdb")
+                    }
+                }
+                else -> {
+                    // Series Settings Fallback: TVDB / TMDB -> Cinemeta (IMDb) -> Kitsu
+                    if (hasTvdb) {
+                        listOf("tvdb", "tmdb", "imdb", "kitsu")
+                    } else {
+                        listOf("tmdb", "tvdb", "imdb", "kitsu")
+                    }
+                }
+            }
         }
     }
     var providerOrder by remember { mutableStateOf(initialOrder) }
@@ -4021,16 +4050,17 @@ private fun ManageDatabaseIdentifiersDialog(
                             onSave(cleanImdb, cleanTmdb, cleanTvdb, cleanKitsu, priorityStr, reSyncChecked)
                         },
                         modifier = Modifier
-                            .weight(1.5f)
+                            .weight(1.3f)
                             .height(42.dp),
                         shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFA855F7))
                     ) {
                         Text(
-                            text = "Save & Cloud Sync",
+                            text = "Save & Sync",
                             color = Color.White,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 12.5.sp
+                            fontSize = 12.sp,
+                            maxLines = 1
                         )
                     }
                 }
