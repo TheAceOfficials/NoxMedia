@@ -3802,14 +3802,14 @@ private fun ManageDatabaseIdentifiersDialog(
                         )
                         "tmdb" -> DbProviderCardInfo(
                             key = "tmdb",
-                            name = "TMDb (The Movie Database)",
+                            name = "TMDb",
                             brandColor = Color(0xFF60A5FA),
                             bgColor = Color(0xFF121924),
                             placeholder = "e.g. 70881"
                         )
                         "imdb" -> DbProviderCardInfo(
                             key = "imdb",
-                            name = "IMDb (Cinemeta / Stremio)",
+                            name = "IMDb",
                             brandColor = Color(0xFFFBBF24),
                             bgColor = Color(0xFF1B1914),
                             placeholder = "e.g. tt6342474"
@@ -3904,20 +3904,26 @@ private fun ManageDatabaseIdentifiersDialog(
                                         text = info.name,
                                         color = info.brandColor,
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = 11.5.sp
+                                        fontSize = 12.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false)
                                     )
+                                    Spacer(modifier = Modifier.width(6.dp))
                                     Surface(
                                         shape = RoundedCornerShape(4.dp),
                                         color = if (isPrimary) Color(0xFF064E3B) else Color(0xFF222430),
                                         border = BorderStroke(0.5.dp, if (isPrimary) Color(0xFF10B981) else Color(0xFF3F4458))
                                     ) {
                                         Text(
-                                            text = if (isPrimary) "★ #1 PRIMARY" else "#${index + 1}",
+                                            text = if (isPrimary) "★ PRIMARY" else "#${index + 1}",
                                             color = if (isPrimary) Color(0xFF34D399) else Color(0xFF94A3B8),
                                             fontWeight = FontWeight.Bold,
                                             fontFamily = NdotFont,
                                             fontSize = 9.sp,
-                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                            maxLines = 1,
+                                            softWrap = false,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                         )
                                     }
                                 }
