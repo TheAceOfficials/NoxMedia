@@ -70,6 +70,8 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.painterResource
+import androidx.annotation.DrawableRes
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -3743,57 +3745,41 @@ private fun CandidateCard(
 }
 
 /**
- * Disney+ minimal aesthetic Dolby monogram logo.
- * 100% offline, zero external dependencies, crystal sharp on any display.
+ * Official vector/webp badge loaded directly from offline local app drawables.
+ * 100% independent, zero network requests, pixel-perfect rendering across all screen densities.
  */
 @Composable
-private fun DolbyEmblem(
+private fun LocalBadgeImage(
+    @DrawableRes resId: Int,
+    contentDescription: String,
     modifier: Modifier = Modifier,
-    color: Color = Color.White,
-    width: Dp = 15.dp,
-    height: Dp = 12.dp
+    height: Dp = 21.dp
 ) {
-    val dWidth = (width - 1.5.dp) / 2
-    Row(
-        modifier = modifier.size(width, height),
-        horizontalArrangement = Arrangement.spacedBy(1.5.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // Left D (curved on left, flat on right)
-        Box(
-            modifier = Modifier
-                .width(dWidth)
-                .fillMaxHeight()
-                .clip(RoundedCornerShape(topStart = 100.dp, bottomStart = 100.dp, topEnd = 0.dp, bottomEnd = 0.dp))
-                .background(color)
-        )
-        // Right D (flat on left, curved on right)
-        Box(
-            modifier = Modifier
-                .width(dWidth)
-                .fillMaxHeight()
-                .clip(RoundedCornerShape(topStart = 0.dp, bottomStart = 0.dp, topEnd = 100.dp, bottomEnd = 100.dp))
-                .background(color)
-        )
-    }
+    Image(
+        painter = painterResource(id = resId),
+        contentDescription = contentDescription,
+        modifier = modifier.height(height),
+        contentScale = ContentScale.FillHeight
+    )
 }
 
 @Composable
-private fun Disney4KBadge(modifier: Modifier = Modifier) {
+private fun DisneyLanguageBadge(code: String, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
+            .height(21.dp)
             .clip(RoundedCornerShape(4.5.dp))
-            .background(Color.White)
-            .padding(horizontal = 7.dp, vertical = 2.dp),
+            .background(Color(0xFF26272B))
+            .padding(horizontal = 7.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
-            text = "4K",
-            color = Color.Black,
-            fontSize = 11.5.sp,
-            fontWeight = FontWeight.Black,
-            letterSpacing = 0.3.sp,
-            lineHeight = 12.sp
+            text = code,
+            color = Color(0xFFEDEDED),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.5.sp,
+            lineHeight = 11.sp
         )
     }
 }
@@ -3802,175 +3788,19 @@ private fun Disney4KBadge(modifier: Modifier = Modifier) {
 private fun DisneyResolutionBadge(text: String, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
+            .height(21.dp)
             .clip(RoundedCornerShape(4.5.dp))
             .background(Color(0xFF26272B))
-            .padding(horizontal = 6.5.dp, vertical = 2.dp),
+            .padding(horizontal = 6.5.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = text,
             color = Color.White,
-            fontSize = 10.5.sp,
+            fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
             letterSpacing = 0.3.sp,
-            lineHeight = 12.sp
-        )
-    }
-}
-
-@Composable
-private fun DisneyDolbyVisionBadge(modifier: Modifier = Modifier) {
-    Row(
-        modifier = modifier,
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        DolbyEmblem(color = Color.White, width = 16.dp, height = 13.dp)
-        Column(verticalArrangement = Arrangement.Center) {
-            Text(
-                text = "Dolby",
-                color = Color.White,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                lineHeight = 11.sp
-            )
-            Text(
-                text = "VISION",
-                color = Color.White,
-                fontSize = 6.5.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 1.2.sp,
-                lineHeight = 7.sp
-            )
-        }
-    }
-}
-
-@Composable
-private fun DisneyImaxBadge(isEnhanced: Boolean = false, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text(
-            text = "IMAX",
-            color = Color.White,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Black,
-            letterSpacing = 1.2.sp,
-            lineHeight = 13.sp
-        )
-        if (isEnhanced) {
-            Text(
-                text = "ENHANCED",
-                color = Color.White,
-                fontSize = 5.5.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.2.sp,
-                lineHeight = 6.sp
-            )
-        }
-    }
-}
-
-@Composable
-private fun DisneyAudioBadge(audioTech: String, modifier: Modifier = Modifier) {
-    val isDolby = audioTech in listOf("ATMOS", "TRUEHD", "DIGITAL+", "5.1", "7.1")
-    if (isDolby) {
-        Row(
-            modifier = modifier,
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(2.5.dp))
-                    .background(Color.White)
-                    .padding(horizontal = 2.5.dp, vertical = 2.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                DolbyEmblem(color = Color.Black, width = 13.dp, height = 10.dp)
-            }
-            Column(verticalArrangement = Arrangement.Center) {
-                Text(
-                    text = "DOLBY",
-                    color = Color.White,
-                    fontSize = 8.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 0.5.sp,
-                    lineHeight = 8.5.sp
-                )
-                val subText = when (audioTech) {
-                    "ATMOS" -> "ATMOS"
-                    "TRUEHD" -> "TRUEHD"
-                    "DIGITAL+" -> "AUDIO"
-                    else -> audioTech
-                }
-                Text(
-                    text = subText,
-                    color = Color.White,
-                    fontSize = 7.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.5.sp,
-                    lineHeight = 7.5.sp
-                )
-            }
-        }
-    } else {
-        Box(
-            modifier = modifier
-                .clip(RoundedCornerShape(4.dp))
-                .background(Color(0xFF26272B))
-                .padding(horizontal = 6.dp, vertical = 2.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = audioTech,
-                color = Color.White,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 0.4.sp
-            )
-        }
-    }
-}
-
-@Composable
-private fun DisneyHdrBadge(text: String, modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(4.dp))
-            .border(BorderStroke(0.8.dp, Color(0x66FFFFFF)), RoundedCornerShape(4.dp))
-            .background(Color(0x18FFFFFF))
-            .padding(horizontal = 6.dp, vertical = 2.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = text,
-            color = Color.White,
-            fontSize = 9.5.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.4.sp
-        )
-    }
-}
-
-@Composable
-private fun DisneyLanguageBadge(code: String, modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(5.dp))
-            .background(Color(0xFF26272B))
-            .padding(horizontal = 7.dp, vertical = 3.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = code,
-            color = Color(0xFFEDEDED),
-            fontSize = 10.5.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.5.sp
+            lineHeight = 11.sp
         )
     }
 }
@@ -3983,34 +3813,52 @@ private fun DisneyBadgesRow(
 ) {
     FlowRow(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(9.dp),
-        verticalArrangement = Arrangement.spacedBy(7.dp)
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        // 1. Resolution: 4K (Solid white pill) or HD
+        // 1. Resolution Badge: 4K, 1080p, 720p
         if (visualSpecs.is4K) {
-            Disney4KBadge()
+            LocalBadgeImage(R.drawable.badge_r_4k, "4K")
+        } else if (visualSpecs.resolutionBadge == "1080p" || visualSpecs.resolutionBadge == "FHD") {
+            LocalBadgeImage(R.drawable.badge_r_1080, "1080p")
+        } else if (visualSpecs.resolutionBadge == "720p") {
+            LocalBadgeImage(R.drawable.badge_r_720, "720p")
         } else if (visualSpecs.resolutionBadge.isNotBlank() && visualSpecs.resolutionBadge != "SD") {
-            DisneyResolutionBadge(text = if (visualSpecs.resolutionBadge == "FHD") "HD" else visualSpecs.resolutionBadge)
+            DisneyResolutionBadge(text = visualSpecs.resolutionBadge)
         }
 
         // 2. Dolby Vision or HDR
         if (visualSpecs.isDolbyVision) {
-            DisneyDolbyVisionBadge()
+            LocalBadgeImage(R.drawable.badge_v_dv, "Dolby Vision")
         } else if (visualSpecs.isHdr10Plus) {
-            DisneyHdrBadge(text = "HDR10+")
+            LocalBadgeImage(R.drawable.badge_v_hdr10plus, "HDR10+")
         } else if (visualSpecs.isHdr) {
-            DisneyHdrBadge(text = "HDR")
+            LocalBadgeImage(R.drawable.badge_v_hdr, "HDR")
         }
 
         // 3. IMAX / IMAX Enhanced
-        if (visualSpecs.isImax) {
-            DisneyImaxBadge(isEnhanced = visualSpecs.isImaxEnhanced)
+        if (visualSpecs.isImaxEnhanced) {
+            LocalBadgeImage(R.drawable.badge_v_imax_enhanced, "IMAX Enhanced")
+        } else if (visualSpecs.isImax) {
+            LocalBadgeImage(R.drawable.badge_v_imax, "IMAX")
         }
 
-        // 4. Audio: Dolby Atmos, TrueHD, Digital+, DTS
-        val audio = visualSpecs.audioBadge
-        if (audio != null) {
-            DisneyAudioBadge(audioTech = audio)
+        // 4. Audio: Dolby Atmos, TrueHD, DTS:X, DTS-HD MA, DTS, Digital+, Digital, 7.1, 5.1
+        when (visualSpecs.audioBadge) {
+            "ATMOS" -> LocalBadgeImage(R.drawable.badge_a_atmos, "Dolby Atmos")
+            "TRUEHD" -> LocalBadgeImage(R.drawable.badge_a_truehd, "Dolby TrueHD")
+            "DTS:X", "DTS-X" -> LocalBadgeImage(R.drawable.badge_a_dtsx, "DTS:X")
+            "DTS-HD MA" -> LocalBadgeImage(R.drawable.badge_a_dtshdma, "DTS-HD MA")
+            "DTS-HD" -> LocalBadgeImage(R.drawable.badge_a_dtshd, "DTS-HD")
+            "DTS" -> LocalBadgeImage(R.drawable.badge_a_dts, "DTS")
+            "DIGITAL+", "DD+", "EAC3" -> LocalBadgeImage(R.drawable.badge_a_ddp, "Dolby Digital Plus")
+            "DD", "AC3" -> LocalBadgeImage(R.drawable.badge_a_dd, "Dolby Digital")
+            "7.1" -> LocalBadgeImage(R.drawable.badge_c_71, "7.1")
+            "5.1" -> LocalBadgeImage(R.drawable.badge_c_51, "5.1")
+            null -> {}
+            else -> {
+                DisneyResolutionBadge(text = visualSpecs.audioBadge)
+            }
         }
 
         // 5. Language Pills (e.g. HI, EN, JA, TA)
@@ -4634,23 +4482,39 @@ private fun MediaVersionsSection(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         if (version.resolutions.any { it.contains("4K", true) }) {
-                            Disney4KBadge()
-                        } else if (version.resolutions.isNotEmpty()) {
-                            DisneyResolutionBadge(text = version.resolutions.first())
+                            LocalBadgeImage(R.drawable.badge_r_4k, "4K")
+                        } else if (version.resolutions.any { it.contains("1080", true) || it.contains("FHD", true) }) {
+                            LocalBadgeImage(R.drawable.badge_r_1080, "1080p")
+                        } else if (version.resolutions.any { it.contains("720", true) }) {
+                            LocalBadgeImage(R.drawable.badge_r_720, "720p")
                         }
+
                         if (version.visualFeatures.any { it == "DV" || it.contains("VISION", true) }) {
-                            DisneyDolbyVisionBadge()
+                            LocalBadgeImage(R.drawable.badge_v_dv, "Dolby Vision")
+                        } else if (version.visualFeatures.any { it.contains("HDR10+", true) }) {
+                            LocalBadgeImage(R.drawable.badge_v_hdr10plus, "HDR10+")
                         } else if (version.visualFeatures.any { it.contains("HDR", true) }) {
-                            DisneyHdrBadge(text = "HDR")
+                            LocalBadgeImage(R.drawable.badge_v_hdr, "HDR")
                         }
-                        if (version.visualFeatures.any { it.contains("IMAX", true) }) {
-                            DisneyImaxBadge(isEnhanced = version.visualFeatures.any { it.contains("ENHANCED", true) })
+
+                        if (version.visualFeatures.any { it.contains("ENHANCED", true) }) {
+                            LocalBadgeImage(R.drawable.badge_v_imax_enhanced, "IMAX Enhanced")
+                        } else if (version.visualFeatures.any { it.contains("IMAX", true) }) {
+                            LocalBadgeImage(R.drawable.badge_v_imax, "IMAX")
                         }
+
                         if (version.visualFeatures.any { it.contains("ATMOS", true) }) {
-                            DisneyAudioBadge("ATMOS")
+                            LocalBadgeImage(R.drawable.badge_a_atmos, "Dolby Atmos")
+                        } else if (version.visualFeatures.any { it.contains("TRUEHD", true) }) {
+                            LocalBadgeImage(R.drawable.badge_a_truehd, "Dolby TrueHD")
+                        } else if (version.visualFeatures.any { it.contains("DTS", true) }) {
+                            LocalBadgeImage(R.drawable.badge_a_dts, "DTS")
+                        } else if (version.visualFeatures.any { it.contains("DD+", true) || it.contains("DIGITAL+", true) }) {
+                            LocalBadgeImage(R.drawable.badge_a_ddp, "Dolby Digital Plus")
                         } else if (version.visualFeatures.any { it.contains("5.1", true) }) {
-                            DisneyAudioBadge("5.1")
+                            LocalBadgeImage(R.drawable.badge_c_51, "5.1")
                         }
+
                         version.audioTracks.map { mapLanguageToCode(it) }.distinct().filter { it != "UNKNOWN" }.take(3).forEach { code ->
                             DisneyLanguageBadge(code = code)
                         }
