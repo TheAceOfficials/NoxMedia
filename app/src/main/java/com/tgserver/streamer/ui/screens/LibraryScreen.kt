@@ -2865,6 +2865,20 @@ private fun ContentDetailsScreen(
 
     // ==================== 7. FLOATING FROSTED GLASS ACTION BAR (Layer 3) ====================
     val navAlpha = (scrollState.value / 180f).coerceIn(0f, 1f)
+    val btnBg = Color.Black.copy(alpha = (0.55f * (1f - navAlpha)).coerceIn(0f, 0.55f))
+    val btnBorderAlpha = (0.2f * (1f - navAlpha)).coerceIn(0f, 0.2f)
+    val btnModifier = if (btnBorderAlpha > 0.02f) {
+        Modifier
+            .size(38.dp)
+            .clip(CircleShape)
+            .background(btnBg)
+            .border(BorderStroke(0.5.dp, Color.White.copy(alpha = btnBorderAlpha)), CircleShape)
+    } else {
+        Modifier
+            .size(38.dp)
+            .clip(CircleShape)
+    }
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -2889,11 +2903,7 @@ private fun ContentDetailsScreen(
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     onBack()
                 },
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.55f))
-                    .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.2f)), CircleShape)
+                modifier = btnModifier
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -2921,46 +2931,17 @@ private fun ContentDetailsScreen(
                 Spacer(modifier = Modifier.weight(1f))
             }
 
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically
+            // Refresh Metadata Button (Search icon removed as Fix Metadata Match button is already in hero area)
+            IconButton(
+                onClick = onRefreshMetadata,
+                modifier = btnModifier
             ) {
-                // Rescan Metadata Button
-                IconButton(
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        showRescanDialog = true
-                    },
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.55f))
-                        .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.2f)), CircleShape)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = "Rescan",
-                        tint = Color.White,
-                        modifier = Modifier.size(17.dp)
-                    )
-                }
-
-                // Refresh Metadata Button
-                IconButton(
-                    onClick = onRefreshMetadata,
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.55f))
-                        .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.2f)), CircleShape)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = "Refresh",
-                        tint = Color.White,
-                        modifier = Modifier.size(17.dp)
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = "Refresh",
+                    tint = Color.White,
+                    modifier = Modifier.size(19.dp)
+                )
             }
         }
     }
@@ -3042,9 +3023,16 @@ private fun EpisodeGroupAccordionRow(
         ) {
             // Netflix Trending Style: Episode number behind thumbnail, half revealed on the left
             val numStr = "$epNum"
+            val numFontSize = when {
+                numStr.length >= 4 -> 24.sp
+                numStr.length == 3 -> 30.sp
+                numStr.length == 2 -> 37.sp
+                else -> 44.sp
+            }
             val numStartOffset = when {
-                numStr.length >= 3 -> 26.dp
-                numStr.length == 2 -> 19.dp
+                numStr.length >= 4 -> 48.dp
+                numStr.length == 3 -> 40.dp
+                numStr.length == 2 -> 29.dp
                 else -> 14.dp
             }
 
@@ -3056,11 +3044,11 @@ private fun EpisodeGroupAccordionRow(
                 Text(
                     text = numStr,
                     color = Color(0xFF474C60),
-                    fontSize = if (numStr.length >= 3) 34.sp else if (numStr.length == 2) 40.sp else 46.sp,
+                    fontSize = numFontSize,
                     fontWeight = FontWeight.Black,
                     fontFamily = FontFamily.SansSerif,
-                    letterSpacing = (-1.5).sp,
-                    lineHeight = if (numStr.length >= 3) 34.sp else if (numStr.length == 2) 40.sp else 46.sp,
+                    letterSpacing = (-1).sp,
+                    lineHeight = numFontSize,
                     modifier = Modifier
                         .align(Alignment.CenterStart)
                         .offset(x = (-2).dp)
@@ -3070,7 +3058,7 @@ private fun EpisodeGroupAccordionRow(
                 Box(
                     modifier = Modifier
                         .padding(start = numStartOffset)
-                        .width(112.dp)
+                        .width(108.dp)
                         .aspectRatio(16f / 9f)
                         .clip(RoundedCornerShape(8.dp))
                         .background(Color(0xFF191B24))
