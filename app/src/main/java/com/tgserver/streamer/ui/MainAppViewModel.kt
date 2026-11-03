@@ -839,6 +839,13 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         return newState
     }
 
+    fun setMediaItemsHidden(itemIds: Collection<String>, hide: Boolean) {
+        tgClient.setMediaItemsHidden(itemIds, hide)
+        val action = if (hide) "hidden from Stremio" else "unhidden"
+        Toast.makeText(getApplication(), "✓ Version $action (${itemIds.size} files)", Toast.LENGTH_SHORT).show()
+        triggerAutoCloudBackupDebounced(0L)
+    }
+
     fun setGroupHidden(group: MediaGroup, hide: Boolean) {
         val ids = group.items.map { it.id }
         tgClient.setMediaItemsHidden(ids, hide)

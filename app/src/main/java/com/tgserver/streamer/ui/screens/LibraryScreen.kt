@@ -7,6 +7,7 @@ import android.graphics.BitmapFactory
 import java.io.File
 import android.net.Uri
 import android.util.LruCache
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -2460,7 +2461,10 @@ private fun ContentDetailsScreen(
         if (detectedVersions.isNotEmpty()) {
             MediaVersionsSection(
                 versions = detectedVersions,
-                isSeries = isSeries
+                isSeries = isSeries,
+                onToggleHideVersion = { items, hide ->
+                    viewModel.setMediaItemsHidden(items.map { it.id }, hide)
+                }
             )
             Spacer(modifier = Modifier.height(20.dp))
         }
@@ -2556,17 +2560,34 @@ private fun ContentDetailsScreen(
                     }
                 }
 
+                var isSeasonExpanded by remember(group.key, selectedSeason) { mutableStateOf(true) }
+
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { isSeasonExpanded = !isSeasonExpanded }
+                        .padding(vertical = 4.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "Season $selectedSeason",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "Season $selectedSeason",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp
+                        )
+                        Icon(
+                            imageVector = if (isSeasonExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                            contentDescription = if (isSeasonExpanded) "Collapse Season" else "Expand Season",
+                            tint = Color(0xFF94A3B8),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                     Text(
                         text = "${distinctEps.size} Episodes • $seasonTotalSize",
                         color = Color(0xFF8E909A),
@@ -2579,22 +2600,30 @@ private fun ContentDetailsScreen(
                     currentSeasonItems.groupBy { it.episode ?: 1 }.toSortedMap()
                 }
 
-                episodesGrouped.forEach { (epNum, epItems) ->
-                    EpisodeGroupAccordionRow(
-                        epNum = epNum,
-                        epItems = epItems,
-                        showTitle = group.title,
-                        groupImdbId = group.imdbId,
-                        groupBackdropUrl = group.backdropUrl,
-                        groupPosterUrl = group.posterUrl,
-                        onToggleHide = { item ->
-                            viewModel.toggleHideMedia(item.id)
-                        },
-                        onCopyStream = { streamUrl ->
-                            onCopyStream(streamUrl)
-                        },
-                        streamBaseUrl = streamBaseUrl
-                    )
+                AnimatedVisibility(
+                    visible = isSeasonExpanded,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        episodesGrouped.forEach { (epNum, epItems) ->
+                            EpisodeGroupAccordionRow(
+                                epNum = epNum,
+                                epItems = epItems,
+                                showTitle = group.title,
+                                groupImdbId = group.imdbId,
+                                groupBackdropUrl = group.backdropUrl,
+                                groupPosterUrl = group.posterUrl,
+                                onToggleHide = { item ->
+                                    viewModel.toggleHideMedia(item.id)
+                                },
+                                onCopyStream = { streamUrl ->
+                                    onCopyStream(streamUrl)
+                                },
+                                streamBaseUrl = streamBaseUrl
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -3011,55 +3040,65 @@ private fun EpisodeGroupAccordionRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 16:9 Episode Thumbnail Box
+            // Netflix Trending Style: Episode number behind thumbnail, half revealed on the left
+            val numStr = "$epNum"
+            val numStartOffset = when {
+                numStr.length >= 3 -> 26.dp
+                numStr.length == 2 -> 19.dp
+                else -> 14.dp
+            }
+
             Box(
-                modifier = Modifier
-                    .width(118.dp)
-                    .aspectRatio(16f / 9f)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFF191B24))
-                    .border(BorderStroke(0.5.dp, Color(0x28FFFFFF)), RoundedCornerShape(8.dp))
+                modifier = Modifier.wrapContentSize(),
+                contentAlignment = Alignment.CenterStart
             ) {
-                RemoteImage(
-                    url = epThumbUrl,
-                    contentDescription = epTitle,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
-                    isSeries = true
+                // Large stylized number partially peeking from behind the left edge of the thumbnail
+                Text(
+                    text = numStr,
+                    color = Color(0xFF474C60),
+                    fontSize = if (numStr.length >= 3) 34.sp else if (numStr.length == 2) 40.sp else 46.sp,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = FontFamily.SansSerif,
+                    letterSpacing = (-1.5).sp,
+                    lineHeight = if (numStr.length >= 3) 34.sp else if (numStr.length == 2) 40.sp else 46.sp,
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .offset(x = (-2).dp)
                 )
 
-                // Episode Number Pill Overlay (Top-Left)
-                Surface(
-                    shape = RoundedCornerShape(4.dp),
-                    color = Color.Black.copy(alpha = 0.75f),
-                    border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.25f)),
+                // 16:9 Episode Thumbnail Box (overlapping the right half of the number)
+                Box(
                     modifier = Modifier
-                        .padding(5.dp)
-                        .align(Alignment.TopStart)
+                        .padding(start = numStartOffset)
+                        .width(112.dp)
+                        .aspectRatio(16f / 9f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFF191B24))
+                        .border(BorderStroke(0.6.dp, Color(0x33FFFFFF)), RoundedCornerShape(8.dp))
                 ) {
-                    Text(
-                        text = "$epNum",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 10.5.sp,
-                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
+                    RemoteImage(
+                        url = epThumbUrl,
+                        contentDescription = epTitle,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                        isSeries = true
                     )
-                }
 
-                // If hidden, show red overlay
-                if (allHidden) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.65f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.VisibilityOff,
-                            contentDescription = "Hidden",
-                            tint = Color(0xFFEF4444),
-                            modifier = Modifier.size(18.dp)
-                        )
+                    // If hidden, show red overlay
+                    if (allHidden) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.65f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.VisibilityOff,
+                                contentDescription = "Hidden",
+                                tint = Color(0xFFEF4444),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -3267,6 +3306,7 @@ private fun MovieStreamItemRow(
     onToggleHide: (MediaItem) -> Unit,
     onCopy: () -> Unit
 ) {
+    var isExpanded by remember { mutableStateOf(false) }
     val isHidden = item.isHidden
     Box(
         modifier = Modifier
@@ -3274,9 +3314,10 @@ private fun MovieStreamItemRow(
             .clip(RoundedCornerShape(14.dp))
             .background(if (isHidden) Color(0xFF131014) else Color(0xFF0F1015))
             .border(
-                BorderStroke(0.8.dp, if (isHidden) Color(0xFF4A1924) else Color(0xFF1E202B)),
+                BorderStroke(0.8.dp, if (isHidden) Color(0xFF4A1924) else if (isExpanded) Color(0x55A855F7) else Color(0xFF1E202B)),
                 RoundedCornerShape(14.dp)
             )
+            .clickable { isExpanded = !isExpanded }
             .padding(12.dp)
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -3443,6 +3484,70 @@ private fun MovieStreamItemRow(
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold
                             )
+                        }
+                    }
+
+                    // Expand Chevron
+                    Icon(
+                        imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = if (isExpanded) "Collapse" else "Expand",
+                        tint = Color(0xFF94A3B8),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            // EXPANDED DETAILS (Full Telegram filename & specs like episode accordion)
+            AnimatedVisibility(
+                visible = isExpanded,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    HorizontalDivider(color = Color(0xFF222432), thickness = 0.8.dp)
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (isHidden) Color(0xFF131014) else Color(0xFF1A1C25))
+                            .border(
+                                1.dp,
+                                if (isHidden) Color(0xFF4A1924) else Color(0xFF2A2D3C),
+                                RoundedCornerShape(10.dp)
+                            )
+                            .padding(10.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "ORIGINAL TELEGRAM FILE",
+                                color = Color(0xFF38BDF8),
+                                fontFamily = NdotFont,
+                                fontSize = 10.sp,
+                                letterSpacing = 0.5.sp
+                            )
+                            Text(
+                                text = item.fileName.ifBlank { item.title },
+                                color = if (isHidden) Color(0xFF94A3B8).copy(alpha = 0.6f) else Color(0xFFE2E8F0),
+                                fontSize = 11.5.sp,
+                                fontFamily = FontFamily.Monospace,
+                                lineHeight = 15.5.sp
+                            )
+
+                            val rawBadge = item.qualityBadge.ifBlank { item.quality }
+                            if (rawBadge.isNotBlank()) {
+                                Text(
+                                    text = "Specs: $rawBadge",
+                                    color = Color(0xFFFBBF24),
+                                    fontSize = 10.5.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
                         }
                     }
                 }
@@ -4366,7 +4471,8 @@ private data class MediaVersionInfo(
     val resolutions: List<String>,
     val visualFeatures: List<String>,
     val audioTracks: List<String>,
-    val sampleFileName: String
+    val sampleFileName: String,
+    val items: List<MediaItem> = emptyList()
 ) {
     val formattedSize: String
         get() {
@@ -4515,7 +4621,8 @@ private fun detectMediaVersions(items: List<MediaItem>): List<MediaVersionInfo> 
             resolutions = resSet.toList(),
             visualFeatures = visualSet.toList(),
             audioTracks = audioSet,
-            sampleFileName = sampleItem.fileName
+            sampleFileName = sampleItem.fileName,
+            items = versionItems
         )
     }.sortedByDescending { it.totalSizeBytes }
 }
@@ -4527,8 +4634,10 @@ private fun detectMediaVersions(items: List<MediaItem>): List<MediaVersionInfo> 
 @Composable
 private fun MediaVersionsSection(
     versions: List<MediaVersionInfo>,
-    isSeries: Boolean
+    isSeries: Boolean,
+    onToggleHideVersion: ((List<MediaItem>, Boolean) -> Unit)? = null
 ) {
+    val context = LocalContext.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -4559,13 +4668,15 @@ private fun MediaVersionsSection(
         // Version Cards
         versions.forEach { version ->
             var isExpanded by remember { mutableStateOf(false) }
+            val isVersionHidden = version.items.isNotEmpty() && version.items.all { it.isHidden }
 
             Surface(
                 shape = RoundedCornerShape(16.dp),
-                color = Color(0xFF101117),
+                color = if (isVersionHidden) Color(0xFF131014) else Color(0xFF101117),
                 border = BorderStroke(
                     1.dp,
-                    Brush.horizontalGradient(
+                    if (isVersionHidden) Color(0xFF4A1924)
+                    else Brush.horizontalGradient(
                         colors = listOf(
                             version.brandColor.copy(alpha = 0.5f),
                             Color(0xFF1E212D)
@@ -4594,8 +4705,8 @@ private fun MediaVersionsSection(
                                     contentDescription = version.platformName,
                                     height = 18.dp
                                 )
-                            } else {
-                                // Brand badge with subtle glow
+                            } else if (version.qualityBadgeRes == null && version.platformName != "Standard Library") {
+                                // Brand badge with subtle glow only if there is NO quality badge either
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
                                     color = version.brandBgColor,
@@ -4629,8 +4740,8 @@ private fun MediaVersionsSection(
                                     contentDescription = version.releaseTag,
                                     height = 18.dp
                                 )
-                            } else {
-                                // Source Tag
+                            } else if (version.providerBadgeRes == null) {
+                                // Source Tag only if no provider badge either
                                 Text(
                                     text = version.releaseTag,
                                     color = Color(0xFF9CA3AF),
@@ -4641,39 +4752,87 @@ private fun MediaVersionsSection(
                             }
                         }
 
-                        // Right: Storage size in Nothing OS badge
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color(0xFF181A24),
-                            border = BorderStroke(0.5.dp, Color(0x33FFFFFF))
+                        // Right: Storage size in Nothing OS badge & Version Hide / Unhide Toggle
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFF181A24),
+                                border = BorderStroke(0.5.dp, Color(0x33FFFFFF))
                             ) {
-                                Text(
-                                    text = version.formattedSize,
-                                    color = Color.White,
-                                    fontFamily = NdotFont,
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = "•",
-                                    color = Color(0xFF6B7280),
-                                    fontSize = 10.sp
-                                )
-                                val countLabel = if (isSeries) {
-                                    if (version.fileCount == 1) "1 ep" else "${version.fileCount} eps"
-                                } else {
-                                    if (version.fileCount == 1) "1 file" else "${version.fileCount} files"
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                ) {
+                                    Text(
+                                        text = version.formattedSize,
+                                        color = Color.White,
+                                        fontFamily = NdotFont,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "•",
+                                        color = Color(0xFF6B7280),
+                                        fontSize = 10.sp
+                                    )
+                                    val countLabel = if (isSeries) {
+                                        if (version.fileCount == 1) "1 ep" else "${version.fileCount} eps"
+                                    } else {
+                                        if (version.fileCount == 1) "1 file" else "${version.fileCount} files"
+                                    }
+                                    Text(
+                                        text = countLabel,
+                                        color = Color(0xFFA1A1AA),
+                                        fontSize = 10.5.sp
+                                    )
                                 }
-                                Text(
-                                    text = countLabel,
-                                    color = Color(0xFFA1A1AA),
-                                    fontSize = 10.5.sp
-                                )
+                            }
+
+                            // Version Hide / Unhide Toggle (Only if multiple versions exist, min 1 must remain visible)
+                            if (versions.size > 1 && onToggleHideVersion != null) {
+                                val isAllHidden = version.items.isNotEmpty() && version.items.all { it.isHidden }
+                                val otherVisibleCount = versions.count { v -> v != version && v.items.any { !it.isHidden } }
+
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(7.dp))
+                                        .background(if (isAllHidden) Color(0xFF3F1318) else Color(0xFF232532))
+                                        .border(
+                                            1.dp,
+                                            if (isAllHidden) Color(0xFFDC2626) else Color(0xFF3E4358),
+                                            RoundedCornerShape(7.dp)
+                                        )
+                                        .clickable {
+                                            if (!isAllHidden && otherVisibleCount == 0) {
+                                                Toast.makeText(context, "At least one version must remain visible", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                onToggleHideVersion(version.items, !isAllHidden)
+                                            }
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isAllHidden) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                            contentDescription = if (isAllHidden) "Unhide Version" else "Hide Version",
+                                            tint = if (isAllHidden) Color(0xFFFCA5A5) else Color(0xFFCBD5E1),
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                        Text(
+                                            text = if (isAllHidden) "UNHIDE" else "HIDE",
+                                            color = if (isAllHidden) Color(0xFFFCA5A5) else Color(0xFFCBD5E1),
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
