@@ -494,8 +494,40 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
     }
 
     // Filter media groups by category, search & multi-filters, then sort (Asynchronously on Dispatchers.Default)
-    var filteredGroups by remember { mutableStateOf<List<MediaGroup>>(emptyList()) }
+    var filteredGroups by remember(mediaGroups) {
+        mutableStateOf(
+            if (searchQuery.isBlank() && selectedCategory == "all" && !activeFilters.hasActiveFilters) {
+                mediaGroups.filter { !it.isHidden }
+            } else emptyList()
+        )
+    }
     var isFiltering by remember { mutableStateOf(false) }
+
+    // Progressive windowed loading: render first 20 items instantly, expand as user scrolls
+    var displayedCount by remember { mutableIntStateOf(20) }
+
+    LaunchedEffect(searchQuery, selectedCategory, activeFilters) {
+        displayedCount = 20
+    }
+
+    val displayedGroups = remember(filteredGroups, displayedCount) {
+        filteredGroups.take(displayedCount)
+    }
+
+    // Scroll trigger: when user scrolls near the end of the loaded batch, seamlessly load more
+    val shouldLoadMore by remember {
+        derivedStateOf {
+            val totalItems = gridState.layoutInfo.totalItemsCount
+            val lastVisible = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            totalItems > 0 && lastVisible >= totalItems - 6 && displayedCount < filteredGroups.size
+        }
+    }
+
+    LaunchedEffect(shouldLoadMore) {
+        if (shouldLoadMore) {
+            displayedCount = (displayedCount + 20).coerceAtMost(filteredGroups.size)
+        }
+    }
 
     LaunchedEffect(mediaGroups, searchQuery, selectedCategory, activeFilters) {
         if (searchQuery.isNotBlank()) {
@@ -961,7 +993,7 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                                 .padding(horizontal = 20.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            if (isFiltering && mediaGroups.isNotEmpty()) {
+                            if (isFiltering || allMedia.isNotEmpty()) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(28.dp),
                                     color = Color(0xFFA855F7),
@@ -1004,7 +1036,7 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                                 modifier = Modifier.fillMaxSize(),
                                 contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 100.dp)
                             ) {
-                                items(filteredGroups, key = { it.key }) { group ->
+                                items(displayedGroups, key = { it.key }) { group ->
                                     val isSelected = group.key in selectedGroupKeys
                                     PosterCard(
                                         group = group,
@@ -1028,6 +1060,24 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                                         }
                                     )
                                 }
+
+                                if (displayedCount < filteredGroups.size) {
+                                    item(span = { GridItemSpan(2) }) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 14.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(20.dp),
+                                                color = Color(0xFFA855F7),
+                                                strokeWidth = 2.dp
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                             }
 
                             // Smooth Top Fader Effect (Soft Gradient Fade-out for Posters on Scroll)

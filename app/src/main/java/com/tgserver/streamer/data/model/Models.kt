@@ -156,9 +156,9 @@ data class MediaGroup(
     // Pre-computed filter tags so opening filters and applying filters is instant (0ms freeze)
     val has4K: Boolean = items.any {
         val q = it.quality.lowercase()
-        val fnClean = it.fileName.lowercase().replace(Regex("""(?i)4khdhub(\.com|\.org|\.net|\.in)?"""), "")
-        q.contains("2160") || Regex("""(?i)\b(4k|uhd)\b""").containsMatchIn(q) ||
-        fnClean.contains("2160p") || Regex("""(?i)\b(4k|uhd)\b""").containsMatchIn(fnClean)
+        val fnClean = it.fileName.lowercase().replace(REGEX_4K_HDHUB, "")
+        q.contains("2160") || REGEX_4K_UHD.containsMatchIn(q) ||
+        fnClean.contains("2160p") || REGEX_4K_UHD.containsMatchIn(fnClean)
     }
     val has1080p: Boolean = items.any { it.quality.contains("1080", true) || it.quality.contains("FHD", true) || it.fileName.contains("1080p", true) }
     val has720p: Boolean = items.any { it.quality.contains("720", true) || it.quality.contains("HD", true) || it.fileName.contains("720p", true) }
@@ -174,14 +174,14 @@ data class MediaGroup(
     val hasNetflix: Boolean = items.any { it.fileName.contains("netflix", true) || it.fileName.contains(".nf.", true) || it.fileName.contains("-nf", true) }
     val hasHbo: Boolean = items.any {
         val fn = it.fileName.lowercase()
-        fn.contains(Regex("""(?i)[\W_](hbo|hmax|hbomax)[\W_]""")) ||
+        REGEX_HBO.containsMatchIn(fn) ||
         fn.startsWith("hbo", ignoreCase = true) ||
         fn.contains(".hbo.", ignoreCase = true) ||
         fn.contains("-hbo", ignoreCase = true)
     }
     val hasWarnerBros: Boolean = items.any {
         val fn = it.fileName.lowercase()
-        fn.contains("warner", ignoreCase = true) || fn.contains(Regex("""(?i)[\W_]wb[\W_]"""))
+        fn.contains("warner", ignoreCase = true) || REGEX_WB.containsMatchIn(fn)
     }
     val hasCrunchyroll: Boolean = items.any { it.fileName.contains("crunchyroll", true) || it.fileName.contains(".cr.", true) }
     val hasPrimeVideo: Boolean = items.any { it.fileName.contains("amazon", true) || it.fileName.contains("prime", true) || it.fileName.contains(".amzn.", true) }
@@ -208,12 +208,24 @@ enum class LibrarySortOrder(val label: String) {
 }
 
 // Precompiled regexes to eliminate regex compilation overhead in large media lists (10k-100k items)
+private val REGEX_4K_HDHUB = Regex("""(?i)4khdhub(\.com|\.org|\.net|\.in)?""")
+private val REGEX_4K_UHD = Regex("""(?i)\b(4k|uhd)\b""")
+private val REGEX_HBO = Regex("""(?i)[\W_](hbo|hmax|hbomax)[\W_]""")
+private val REGEX_WB = Regex("""(?i)[\W_]wb[\W_]""")
+
 private val SPLIT_PART_CLEAN_REGEX = Regex("""[\s._-]*(?:part|pt)[\s._-]*\d+.*""", RegexOption.IGNORE_CASE)
 private val SPLIT_EXT_CLEAN_REGEX = Regex("""\.(mkv|mp4|avi|webm|ts|m4v)(\.\d{2,4})?$""", RegexOption.IGNORE_CASE)
 private val SPLIT_PART_DETECT_REGEX = Regex("""(?i)(?:part|pt|\.\d{2,4})""")
 
+private val EXACT_DUP_EXT_REGEX = Regex("""\.(mkv|mp4|avi|webm|ts|m4v)(\.\d{2,4})?$""", RegexOption.IGNORE_CASE)
+private val EXACT_DUP_SOURCE_REGEX = Regex("""[\(\[][^\)\]]*(?:momstealer|anipulse|toonworld|vegamovies|katmovie|4khdhub)[^\)\]]*[\)\]]""", RegexOption.IGNORE_CASE)
+private val EXACT_DUP_SPACE_REGEX = Regex("""[\s._-]+""")
+private val YEAR_EXTRACT_REGEX = Regex("""(?:^|[^0-9])((?:19|20)\d{2})(?:[^0-9]|$)""")
+
 fun List<MediaItem>.toMediaGroups(): List<MediaGroup> {
     val allMedia = this
+    if (allMedia.isEmpty()) return emptyList()
+
     val splitItems = allMedia.filter { it.isSplit }
     val effectiveMedia = if (splitItems.isEmpty()) {
         allMedia
@@ -226,6 +238,13 @@ fun List<MediaItem>.toMediaGroups(): List<MediaGroup> {
                 .trim()
         }.toSet()
 
+        // Fast O(1) indexed lookup for split items
+        val splitLookup = HashMap<String, MediaItem>(splitItems.size * 2)
+        for (si in splitItems) {
+            splitLookup["${si.channelId}_s${si.season ?: 0}_e${si.episode ?: 0}"] = si
+            splitLookup["0_s${si.season ?: 0}_e${si.episode ?: 0}"] = si
+        }
+
         allMedia.filter { item ->
             if (item.isSplit) return@filter true
             if (splitPartMsgIds.contains(item.messageId)) return@filter false
@@ -237,10 +256,9 @@ fun List<MediaItem>.toMediaGroups(): List<MediaGroup> {
                 if (item.fileName.contains(SPLIT_PART_DETECT_REGEX)) {
                     return@filter false
                 }
-                val splitMatch = splitItems.find {
-                    (it.channelId == item.channelId || it.channelId == 0L || item.channelId == 0L) &&
-                    it.season == item.season && it.episode == item.episode
-                }
+                val s = item.season ?: 0
+                val e = item.episode ?: 0
+                val splitMatch = splitLookup["${item.channelId}_s${s}_e${e}"] ?: splitLookup["0_s${s}_e${e}"]
                 if (splitMatch != null && item.sizeBytes < splitMatch.sizeBytes) {
                     return@filter false
                 }
@@ -251,8 +269,8 @@ fun List<MediaItem>.toMediaGroups(): List<MediaGroup> {
 
     val skipExact = com.tgserver.streamer.service.StreamerForegroundService.activeConfig.skipExactDuplicates
     val finalMedia = if (skipExact) {
-        val seenSizeKeys = mutableSetOf<String>()
-        val seenNameKeys = mutableSetOf<String>()
+        val seenSizeKeys = HashSet<String>(effectiveMedia.size)
+        val seenNameKeys = HashSet<String>(effectiveMedia.size)
         val sorted = effectiveMedia.sortedWith(
             compareByDescending<MediaItem> { it.isManuallyMatched }
                 .thenByDescending<MediaItem> { it.isSplit }
@@ -281,9 +299,9 @@ fun List<MediaItem>.toMediaGroups(): List<MediaGroup> {
             } else null
 
             val cleanFn = item.fileName.lowercase()
-                .replace(Regex("""\.(mkv|mp4|avi|webm|ts|m4v)(\.\d{2,4})?$""", RegexOption.IGNORE_CASE), "")
-                .replace(Regex("""[\(\[][^\)\]]*(?:momstealer|anipulse|toonworld|vegamovies|katmovie|4khdhub)[^\)\]]*[\)\]]""", RegexOption.IGNORE_CASE), "")
-                .replace(Regex("""[\s._-]+"""), " ")
+                .replace(EXACT_DUP_EXT_REGEX, "")
+                .replace(EXACT_DUP_SOURCE_REGEX, "")
+                .replace(EXACT_DUP_SPACE_REGEX, " ")
                 .trim()
             val nameKey = if (cleanFn.length >= 8) {
                 if (isSeries) "s${s}_e${e}_$cleanFn" else "movie_$cleanFn"
@@ -304,7 +322,7 @@ fun List<MediaItem>.toMediaGroups(): List<MediaGroup> {
 
     return finalMedia.groupBy { item ->
         val cleanTitle = item.title.trim().lowercase()
-        val cleanYear = Regex("(?:^|[^0-9])((?:19|20)\\d{2})(?:[^0-9]|$)").find(item.year ?: "")?.groupValues?.get(1)
+        val cleanYear = YEAR_EXTRACT_REGEX.find(item.year ?: "")?.groupValues?.get(1)
         when {
             item.tmdbId != null && item.tmdbId!! > 0 -> "tmdb_${item.type}_${item.tmdbId}"
             !item.imdbId.isNullOrBlank() -> "imdb_${item.imdbId}"

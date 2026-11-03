@@ -102,36 +102,53 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     val channels: StateFlow<List<ChannelInfo>> = tgClient.channelsState
     val media: StateFlow<List<MediaItem>> = tgClient.mediaState
 
-    /**
-     * Enterprise / Netflix scale: Grouping raw media into distinct movie/series titles
-     * is precalculated completely on Dispatchers.Default (background thread pool).
-     * The Main UI looper / composition thread is NEVER blocked!
-     */
-    val mediaGroups: StateFlow<List<MediaGroup>> = media
-        .map { list -> list.toMediaGroups() }
-        .flowOn(Dispatchers.Default)
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.Eagerly,
-            initialValue = emptyList()
-        )
+    private val groupCacheFile = File(application.applicationContext.filesDir, "media_groups_cache.json")
+
+    private fun loadCachedMediaGroups(): List<MediaGroup> {
+        return try {
+            if (groupCacheFile.exists()) {
+                val json = groupCacheFile.readText()
+                if (json.isNotBlank()) {
+                    val type = object : TypeToken<List<MediaGroup>>() {}.type
+                    gson.fromJson<List<MediaGroup>>(json, type) ?: emptyList()
+                } else emptyList()
+            } else emptyList()
+        } catch (e: Exception) {
+            Log.e("MainAppViewModel", "Failed to load cached media groups: ${e.message}")
+            emptyList()
+        }
+    }
+
+    private fun saveCachedMediaGroups(groups: List<MediaGroup>) {
+        try {
+            val json = gson.toJson(groups)
+            groupCacheFile.writeText(json)
+        } catch (e: Exception) {
+            Log.e("MainAppViewModel", "Failed to save cached media groups: ${e.message}")
+        }
+    }
+
+    private fun computeRecentlyAdded(groups: List<MediaGroup>): List<MediaGroup> {
+        return groups.sortedByDescending { group ->
+            val date = group.dateAdded.takeIf { it > 0L }
+            date ?: (group.items.maxOfOrNull { it.messageId }?.toLong() ?: 0L)
+        }.take(15)
+    }
+
+    private val initialCachedGroups = loadCachedMediaGroups()
 
     /**
-     * Precomputed 15 newest titles for HomeScreen, eliminating heavy sorting on startup.
+     * Instant Load: mediaGroups is immediately initialized from on-disk cache (media_groups_cache.json).
+     * On app launch, 0ms delay! HomeScreen & LibraryScreen have content on the very first frame!
      */
-    val recentlyAddedGroups: StateFlow<List<MediaGroup>> = mediaGroups
-        .map { groups ->
-            groups.sortedByDescending { group ->
-                val date = group.dateAdded.takeIf { it > 0L }
-                date ?: (group.items.maxOfOrNull { it.messageId }?.toLong() ?: 0L)
-            }.take(15)
-        }
-        .flowOn(Dispatchers.Default)
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.Eagerly,
-            initialValue = emptyList()
-        )
+    private val _mediaGroups = MutableStateFlow<List<MediaGroup>>(initialCachedGroups)
+    val mediaGroups: StateFlow<List<MediaGroup>> = _mediaGroups.asStateFlow()
+
+    /**
+     * Precomputed 15 newest titles for HomeScreen, available instantly from cache on frame 1.
+     */
+    private val _recentlyAddedGroups = MutableStateFlow<List<MediaGroup>>(computeRecentlyAdded(initialCachedGroups))
+    val recentlyAddedGroups: StateFlow<List<MediaGroup>> = _recentlyAddedGroups.asStateFlow()
 
     val unmatchedMedia: StateFlow<List<com.tgserver.streamer.data.model.UnmatchedItem>> = tgClient.unmatchedState
     val scanProgress: StateFlow<Map<Long, com.tgserver.streamer.data.model.ScanProgressState>> = tgClient.scanProgress
@@ -303,7 +320,37 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         _config.value = loaded
         StreamerForegroundService.activeConfig = loaded
         tgClient.setBackupJsonProvider { exportBackupJson() }
+
+        // Progressive media processing: fast initial preview + full background grouping with caching
+        viewModelScope.launch(Dispatchers.Default) {
+            media.collect { list ->
+                if (list.isEmpty()) return@collect
+
+                // Fast preview fallback: if _mediaGroups has 0 items (first install),
+                // group the top 40 items in 1ms so HomeScreen & Library show content instantly!
+                if (_mediaGroups.value.isEmpty()) {
+                    val previewItems = list.takeLast(40)
+                    val previewGroups = previewItems.toMediaGroups()
+                    if (previewGroups.isNotEmpty() && _mediaGroups.value.isEmpty()) {
+                        _mediaGroups.value = previewGroups
+                        _recentlyAddedGroups.value = computeRecentlyAdded(previewGroups)
+                    }
+                }
+
+                // Compute the complete group list in background thread pool
+                val fullGroups = list.toMediaGroups()
+                _mediaGroups.value = fullGroups
+                _recentlyAddedGroups.value = computeRecentlyAdded(fullGroups)
+
+                // Persist cache to disk asynchronously on IO dispatcher
+                withContext(Dispatchers.IO) {
+                    saveCachedMediaGroups(fullGroups)
+                }
+            }
+        }
+
         viewModelScope.launch(Dispatchers.IO) {
+            delay(2000L) // Defer background cleanup so startup and initial UI render remain 100% instant
             if (loaded.skipExactDuplicates) {
                 tgClient.cleanupExactDuplicates()
             } else {
