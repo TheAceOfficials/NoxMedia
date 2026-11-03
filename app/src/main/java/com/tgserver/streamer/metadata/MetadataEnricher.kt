@@ -28,7 +28,8 @@ data class EnrichedMetadata(
     val runtimeMinutes: Int? = null,
     val rating: Double? = null,
     val episodeThumbnailUrl: String? = null,
-    val tvdbId: Int? = null
+    val tvdbId: Int? = null,
+    val dbPriority: String? = null
 )
 
 data class EpisodeMetadata(
@@ -368,8 +369,9 @@ class MetadataEnricher {
             }
         }
 
-        // 3. Kitsu: If Kitsu ID is available (anime fallback/supplement)
+        // 3. Kitsu: If Kitsu ID is available (anime fallback/supplement or primary if prioritized)
         val kitsuId = resultMeta.kitsuId ?: meta.kitsuId
+        val isKitsuPriority = meta.dbPriority?.split(",")?.firstOrNull()?.trim()?.lowercase() == "kitsu"
         if (kitsuId != null && kitsuId > 0) {
             try {
                 val animeUrl = "https://kitsu.io/api/edge/anime/$kitsuId"
@@ -392,11 +394,11 @@ class MetadataEnricher {
                                 val bg = coverObj?.get("original")?.asString ?: coverObj?.get("large")?.asString
 
                                 resultMeta = resultMeta.copy(
-                                    title = resultMeta.title ?: cTitle,
-                                    year = cleanYear ?: resultMeta.year,
-                                    overview = if (resultMeta.overview.isNullOrBlank()) synopsis else resultMeta.overview,
-                                    posterUrl = resultMeta.posterUrl ?: poster,
-                                    backdropUrl = resultMeta.backdropUrl ?: bg,
+                                    title = if (isKitsuPriority && !cTitle.isNullOrBlank()) cTitle else (resultMeta.title ?: cTitle),
+                                    year = if (isKitsuPriority && !cleanYear.isNullOrBlank()) cleanYear else (resultMeta.year ?: cleanYear),
+                                    overview = if (isKitsuPriority && !synopsis.isNullOrBlank()) synopsis else (if (resultMeta.overview.isNullOrBlank()) synopsis else resultMeta.overview),
+                                    posterUrl = if (isKitsuPriority && !poster.isNullOrBlank()) poster else (resultMeta.posterUrl ?: poster),
+                                    backdropUrl = if (isKitsuPriority && !bg.isNullOrBlank()) bg else (resultMeta.backdropUrl ?: bg),
                                     kitsuId = kitsuId
                                 )
                             }
@@ -432,10 +434,10 @@ class MetadataEnricher {
                                         ?: thumbObj?.get("large")?.asString
                                         ?: thumbObj?.get("medium")?.asString
                                     if (epNum != null) {
-                                        if (!epTitle.isNullOrBlank() && !episodeMap.containsKey(Pair(seasonNum, epNum))) {
+                                        if (!epTitle.isNullOrBlank() && (isKitsuPriority || !episodeMap.containsKey(Pair(seasonNum, epNum)))) {
                                             episodeMap[Pair(seasonNum, epNum)] = epTitle
                                         }
-                                        if (!thumb.isNullOrBlank() && !episodeThumbMap.containsKey(Pair(seasonNum, epNum))) {
+                                        if (!thumb.isNullOrBlank() && (isKitsuPriority || !episodeThumbMap.containsKey(Pair(seasonNum, epNum)))) {
                                             episodeThumbMap[Pair(seasonNum, epNum)] = thumb
                                         }
                                     }

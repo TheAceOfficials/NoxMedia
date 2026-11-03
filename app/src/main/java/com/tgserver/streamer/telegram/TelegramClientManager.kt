@@ -2038,6 +2038,7 @@ class TelegramClientManager(private val context: Context) {
     fun updateMediaItems(items: List<MediaItem>) {
         items.forEach { mediaIndex[it.id] = it }
         saveMediaIndex()
+        _mediaState.value = mediaIndex.values.toList()
     }
 
     fun removeMediaItems(itemIds: Collection<String>) {

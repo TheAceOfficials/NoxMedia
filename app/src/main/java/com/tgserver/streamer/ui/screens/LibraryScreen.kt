@@ -2026,6 +2026,7 @@ private fun ContentDetailsScreen(
     val isSeries = group.type == "series" || group.type == "anime"
     var showRescanDialog by remember { mutableStateOf(false) }
     var showMergeDialog by remember { mutableStateOf(false) }
+    var showManageDbDialog by remember { mutableStateOf(false) }
     var showPosterZoomDialog by remember { mutableStateOf(false) }
     var isOverviewExpanded by remember { mutableStateOf(false) }
 
@@ -2076,6 +2077,25 @@ private fun ContentDetailsScreen(
             onMerge = { target ->
                 showMergeDialog = false
                 viewModel.mergeMediaGroups(sourceGroup = group, targetGroup = target)
+            }
+        )
+    }
+
+    if (showManageDbDialog) {
+        ManageDatabaseIdentifiersDialog(
+            group = group,
+            onDismiss = { showManageDbDialog = false },
+            onSave = { imdb, tmdb, tvdb, kitsu, priority, reSync ->
+                showManageDbDialog = false
+                viewModel.updateGroupDatabaseIdentifiers(
+                    group = group,
+                    imdbId = imdb,
+                    tmdbId = tmdb,
+                    tvdbId = tvdb,
+                    kitsuId = kitsu,
+                    dbPriority = priority,
+                    reSync = reSync
+                )
             }
         )
     }
@@ -2666,15 +2686,56 @@ private fun ContentDetailsScreen(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    // Block 1: Identifiers / Databases (IMDb, TMDb, Kitsu)
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(
-                            text = "DATABASE IDENTIFIERS",
-                            color = Color(0xFF717482),
-                            fontFamily = NdotFont,
-                            fontSize = 9.5.sp,
-                            letterSpacing = 0.5.sp
-                        )
+                    // Block 1: Identifiers / Databases (IMDb, TMDb, Kitsu, TVDB)
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "DATABASE IDENTIFIERS",
+                                color = Color(0xFF717482),
+                                fontFamily = NdotFont,
+                                fontSize = 9.5.sp,
+                                letterSpacing = 0.5.sp
+                            )
+
+                            // Manage IDs & Priority Button
+                            Surface(
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    showManageDbDialog = true
+                                },
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color(0xFF1E212D),
+                                border = BorderStroke(0.6.dp, Color(0x44FFFFFF))
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Tune,
+                                        contentDescription = "Manage IDs",
+                                        tint = Color(0xFF38BDF8),
+                                        modifier = Modifier.size(11.dp)
+                                    )
+                                    Text(
+                                        text = "MANAGE",
+                                        color = Color(0xFF38BDF8),
+                                        fontSize = 9.sp,
+                                        fontFamily = NdotFont,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 0.4.sp
+                                    )
+                                }
+                            }
+                        }
+
+                        val primaryProvider = group.dbPriority?.split(",")?.firstOrNull()?.trim()?.lowercase()
+
                         FlowRow(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -2682,9 +2743,10 @@ private fun ContentDetailsScreen(
                         ) {
                             // IMDb ID pill
                             Surface(
+                                onClick = { showManageDbDialog = true },
                                 shape = RoundedCornerShape(8.dp),
                                 color = Color(0xFF1B1914),
-                                border = BorderStroke(1.dp, Color(0x66FBBF24))
+                                border = BorderStroke(1.dp, if (primaryProvider == "imdb") Color(0xFFFBBF24) else Color(0x66FBBF24))
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
@@ -2701,15 +2763,23 @@ private fun ContentDetailsScreen(
                                         maxLines = 1,
                                         softWrap = false
                                     )
+                                    if (primaryProvider == "imdb") {
+                                        Text(
+                                            text = "★",
+                                            color = Color(0xFFFBBF24),
+                                            fontSize = 9.sp
+                                        )
+                                    }
                                 }
                             }
 
                             // TMDb ID pill
                             if (group.tmdbId != null && group.tmdbId > 0) {
                                 Surface(
+                                    onClick = { showManageDbDialog = true },
                                     shape = RoundedCornerShape(8.dp),
                                     color = Color(0xFF121924),
-                                    border = BorderStroke(1.dp, Color(0x6660A5FA))
+                                    border = BorderStroke(1.dp, if (primaryProvider == "tmdb") Color(0xFF60A5FA) else Color(0x6660A5FA))
                                 ) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
@@ -2726,17 +2796,25 @@ private fun ContentDetailsScreen(
                                             maxLines = 1,
                                             softWrap = false
                                         )
+                                        if (primaryProvider == "tmdb") {
+                                            Text(
+                                                text = "★",
+                                                color = Color(0xFF60A5FA),
+                                                fontSize = 9.sp
+                                            )
+                                        }
                                     }
                                 }
                             }
 
-                            // Kitsu Anime ID pill (if present on anime item!)
-                            val kitsuId = group.items.firstOrNull { (it.kitsuId ?: 0) > 0 }?.kitsuId
-                            if (kitsuId != null) {
+                            // Kitsu Anime ID pill
+                            val kitsuId = group.kitsuId ?: group.items.firstOrNull { (it.kitsuId ?: 0) > 0 }?.kitsuId
+                            if (kitsuId != null && kitsuId > 0) {
                                 Surface(
+                                    onClick = { showManageDbDialog = true },
                                     shape = RoundedCornerShape(8.dp),
                                     color = Color(0xFF221612),
-                                    border = BorderStroke(1.dp, Color(0x66FF7A00))
+                                    border = BorderStroke(1.dp, if (primaryProvider == "kitsu") Color(0xFFFF7A00) else Color(0x66FF7A00))
                                 ) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
@@ -2753,6 +2831,48 @@ private fun ContentDetailsScreen(
                                             maxLines = 1,
                                             softWrap = false
                                         )
+                                        if (primaryProvider == "kitsu") {
+                                            Text(
+                                                text = "★",
+                                                color = Color(0xFFFF7A00),
+                                                fontSize = 9.sp
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // TVDB ID pill
+                            val tvdbId = group.tvdbId ?: group.items.firstOrNull { (it.tvdbId ?: 0) > 0 }?.tvdbId
+                            if (tvdbId != null && tvdbId > 0) {
+                                Surface(
+                                    onClick = { showManageDbDialog = true },
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFF14201A),
+                                    border = BorderStroke(1.dp, if (primaryProvider == "tvdb") Color(0xFF34D399) else Color(0x6634D399))
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                                    ) {
+                                        Text("TVDB", color = Color(0xFF34D399), fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                                        Text(
+                                            text = tvdbId.toString(),
+                                            color = Color.White,
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontFamily = FontFamily.Monospace,
+                                            maxLines = 1,
+                                            softWrap = false
+                                        )
+                                        if (primaryProvider == "tvdb") {
+                                            Text(
+                                                text = "★",
+                                                color = Color(0xFF34D399),
+                                                fontSize = 9.sp
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -3551,6 +3671,374 @@ private fun MovieStreamItemRow(
             }
         }
     }
+}
+
+private data class DbProviderCardInfo(
+    val key: String,
+    val name: String,
+    val brandColor: Color,
+    val bgColor: Color,
+    val placeholder: String
+)
+
+/**
+ * Interactive Dialog to manage database identifiers (IMDb, TMDb, Kitsu, TheTVDB)
+ * Allows customizing IDs, wiping incorrect ones, and shifting provider priority order (Up/Down)
+ * with instant True Cloud Sync.
+ */
+@Composable
+private fun ManageDatabaseIdentifiersDialog(
+    group: MediaGroup,
+    onDismiss: () -> Unit,
+    onSave: (imdbId: String?, tmdbId: Int?, tvdbId: Int?, kitsuId: Int?, dbPriority: String?, reSync: Boolean) -> Unit
+) {
+    var imdbInput by remember { mutableStateOf(group.imdbId ?: "") }
+    var tmdbInput by remember { mutableStateOf(group.tmdbId?.toString() ?: "") }
+    var tvdbInput by remember {
+        mutableStateOf(
+            group.tvdbId?.toString() ?: (group.items.firstOrNull { (it.tvdbId ?: 0) > 0 }?.tvdbId?.toString() ?: "")
+        )
+    }
+    var kitsuInput by remember {
+        mutableStateOf(
+            group.kitsuId?.toString() ?: (group.items.firstOrNull { (it.kitsuId ?: 0) > 0 }?.kitsuId?.toString() ?: "")
+        )
+    }
+    var reSyncChecked by remember { mutableStateOf(true) }
+
+    val initialOrder = remember(group) {
+        val saved = group.dbPriority?.split(",")?.map { it.trim().lowercase() }?.filter { it in listOf("kitsu", "tmdb", "imdb", "tvdb") }
+        if (!saved.isNullOrEmpty()) {
+            val remaining = listOf("tmdb", "imdb", "kitsu", "tvdb").filterNot { saved.contains(it) }
+            saved + remaining
+        } else if (group.type == "anime" || group.items.any { (it.kitsuId ?: 0) > 0 }) {
+            listOf("kitsu", "tmdb", "imdb", "tvdb")
+        } else {
+            listOf("tmdb", "imdb", "tvdb", "kitsu")
+        }
+    }
+    var providerOrder by remember { mutableStateOf(initialOrder) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF13141B),
+        titleContentColor = Color.White,
+        shape = RoundedCornerShape(18.dp),
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = "Database Identifiers",
+                        color = Color.White,
+                        fontFamily = NdotFont,
+                        fontSize = 17.sp,
+                        letterSpacing = 0.5.sp
+                    )
+                    Text(
+                        text = "Set IDs & use [▲] [▼] to change provider priority",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 11.sp
+                    )
+                }
+                IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close",
+                        tint = Color(0xFF888B98),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                providerOrder.forEachIndexed { index, providerKey ->
+                    val isPrimary = index == 0
+                    val info = when (providerKey) {
+                        "kitsu" -> DbProviderCardInfo(
+                            key = "kitsu",
+                            name = "Kitsu Anime",
+                            brandColor = Color(0xFFFF7A00),
+                            bgColor = Color(0xFF221612),
+                            placeholder = "e.g. 13589"
+                        )
+                        "tmdb" -> DbProviderCardInfo(
+                            key = "tmdb",
+                            name = "TMDb (The Movie Database)",
+                            brandColor = Color(0xFF60A5FA),
+                            bgColor = Color(0xFF121924),
+                            placeholder = "e.g. 70881"
+                        )
+                        "imdb" -> DbProviderCardInfo(
+                            key = "imdb",
+                            name = "IMDb (Cinemeta / Stremio)",
+                            brandColor = Color(0xFFFBBF24),
+                            bgColor = Color(0xFF1B1914),
+                            placeholder = "e.g. tt6342474"
+                        )
+                        else -> DbProviderCardInfo(
+                            key = "tvdb",
+                            name = "TheTVDB",
+                            brandColor = Color(0xFF34D399),
+                            bgColor = Color(0xFF14201A),
+                            placeholder = "e.g. 321287"
+                        )
+                    }
+
+                    val currentVal = when (providerKey) {
+                        "kitsu" -> kitsuInput
+                        "tmdb" -> tmdbInput
+                        "imdb" -> imdbInput
+                        else -> tvdbInput
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isPrimary) info.bgColor else Color(0xFF181A24),
+                        border = BorderStroke(1.dp, if (isPrimary) info.brandColor.copy(alpha = 0.8f) else Color(0xFF2A2D3C)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Up / Down Reorder Arrows
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                IconButton(
+                                    onClick = {
+                                        if (index > 0) {
+                                            val list = providerOrder.toMutableList()
+                                            val t = list[index]
+                                            list[index] = list[index - 1]
+                                            list[index - 1] = t
+                                            providerOrder = list
+                                        }
+                                    },
+                                    enabled = index > 0,
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.KeyboardArrowUp,
+                                        contentDescription = "Move Up",
+                                        tint = if (index > 0) Color.White else Color(0xFF474C60),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                IconButton(
+                                    onClick = {
+                                        if (index < providerOrder.size - 1) {
+                                            val list = providerOrder.toMutableList()
+                                            val t = list[index]
+                                            list[index] = list[index + 1]
+                                            list[index + 1] = t
+                                            providerOrder = list
+                                        }
+                                    },
+                                    enabled = index < providerOrder.size - 1,
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.KeyboardArrowDown,
+                                        contentDescription = "Move Down",
+                                        tint = if (index < providerOrder.size - 1) Color.White else Color(0xFF474C60),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+
+                            // Provider Info & Editable ID Input
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = info.name,
+                                        color = info.brandColor,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 11.5.sp
+                                    )
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = if (isPrimary) Color(0xFF064E3B) else Color(0xFF222430),
+                                        border = BorderStroke(0.5.dp, if (isPrimary) Color(0xFF10B981) else Color(0xFF3F4458))
+                                    ) {
+                                        Text(
+                                            text = if (isPrimary) "★ #1 PRIMARY" else "#${index + 1}",
+                                            color = if (isPrimary) Color(0xFF34D399) else Color(0xFF94A3B8),
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = NdotFont,
+                                            fontSize = 9.sp,
+                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+
+                                // ID Input Box
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(0xFF0F1015))
+                                        .border(BorderStroke(0.6.dp, Color(0xFF2E3244)), RoundedCornerShape(8.dp))
+                                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        BasicTextField(
+                                            value = currentVal,
+                                            onValueChange = { newVal ->
+                                                when (providerKey) {
+                                                    "kitsu" -> kitsuInput = newVal.trim()
+                                                    "tmdb" -> tmdbInput = newVal.trim()
+                                                    "imdb" -> imdbInput = newVal.trim()
+                                                    else -> tvdbInput = newVal.trim()
+                                                }
+                                            },
+                                            textStyle = TextStyle(
+                                                color = Color.White,
+                                                fontSize = 12.5.sp,
+                                                fontFamily = FontFamily.Monospace,
+                                                fontWeight = FontWeight.Medium
+                                            ),
+                                            singleLine = true,
+                                            modifier = Modifier.weight(1f),
+                                            decorationBox = { innerTextField ->
+                                                if (currentVal.isBlank()) {
+                                                    Text(
+                                                        text = info.placeholder,
+                                                        color = Color(0xFF4B5563),
+                                                        fontSize = 11.5.sp,
+                                                        fontFamily = FontFamily.Monospace
+                                                    )
+                                                }
+                                                innerTextField()
+                                            }
+                                        )
+
+                                        if (currentVal.isNotBlank()) {
+                                            IconButton(
+                                                onClick = {
+                                                    when (providerKey) {
+                                                        "kitsu" -> kitsuInput = ""
+                                                        "tmdb" -> tmdbInput = ""
+                                                        "imdb" -> imdbInput = ""
+                                                        else -> tvdbInput = ""
+                                                    }
+                                                },
+                                                modifier = Modifier.size(20.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Close,
+                                                    contentDescription = "Clear",
+                                                    tint = Color(0xFFEF4444),
+                                                    modifier = Modifier.size(13.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // Re-sync Checkbox
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { reSyncChecked = !reSyncChecked }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Checkbox(
+                        checked = reSyncChecked,
+                        onCheckedChange = { reSyncChecked = it },
+                        colors = CheckboxDefaults.colors(
+                            checkedColor = Color(0xFFA855F7),
+                            checkmarkColor = Color.White
+                        )
+                    )
+                    Text(
+                        text = "Re-fetch & sync metadata using new priority order",
+                        color = Color(0xFFD4D4D8),
+                        fontSize = 11.5.sp,
+                        lineHeight = 15.sp
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Action Buttons: Cancel and Save & True Cloud Sync
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(42.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, Color(0xFF33384A))
+                    ) {
+                        Text("Cancel", color = Color(0xFF94A3B8), fontSize = 12.5.sp)
+                    }
+
+                    Button(
+                        onClick = {
+                            val cleanImdb = imdbInput.trim().ifBlank { null }
+                            val cleanTmdb = tmdbInput.toIntOrNull()
+                            val cleanTvdb = tvdbInput.toIntOrNull()
+                            val cleanKitsu = kitsuInput.toIntOrNull()
+                            val priorityStr = providerOrder.joinToString(",")
+                            onSave(cleanImdb, cleanTmdb, cleanTvdb, cleanKitsu, priorityStr, reSyncChecked)
+                        },
+                        modifier = Modifier
+                            .weight(1.5f)
+                            .height(42.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFA855F7))
+                    ) {
+                        Text(
+                            text = "Save & Cloud Sync",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.5.sp
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {}
+    )
 }
 
 /**

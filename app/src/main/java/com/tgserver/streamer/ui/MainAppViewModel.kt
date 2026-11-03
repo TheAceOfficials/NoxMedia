@@ -862,6 +862,114 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         triggerAutoCloudBackupDebounced(0L)
     }
 
+    fun updateGroupDatabaseIdentifiers(
+        group: MediaGroup,
+        imdbId: String?,
+        tmdbId: Int?,
+        tvdbId: Int?,
+        kitsuId: Int?,
+        dbPriority: String?,
+        reSync: Boolean
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val now = System.currentTimeMillis()
+            val cleanImdb = imdbId?.trim()?.ifBlank { null }
+            val cleanTmdb = if (tmdbId != null && tmdbId > 0) tmdbId else null
+            val cleanTvdb = if (tvdbId != null && tvdbId > 0) tvdbId else null
+            val cleanKitsu = if (kitsuId != null && kitsuId > 0) kitsuId else null
+            val cleanPriority = dbPriority?.trim()?.ifBlank { null }
+
+            // 1. Immediately update items with the new user IDs and priority
+            val updatedInitial = group.items.map { item ->
+                item.copy(
+                    imdbId = cleanImdb,
+                    tmdbId = cleanTmdb,
+                    tvdbId = cleanTvdb,
+                    kitsuId = cleanKitsu,
+                    dbPriority = cleanPriority,
+                    isManuallyMatched = true,
+                    lastModified = now
+                )
+            }
+            tgClient.updateMediaItems(updatedInitial)
+
+            // 2. If reSync is enabled, re-fetch metadata respecting the new IDs and custom priority
+            if (reSync) {
+                val tmdbKey = prefs.getString("tmdb_api_key", "") ?: ""
+                val tvdbKey = prefs.getString("tvdb_api_key", "") ?: ""
+                val primaryProvider = cleanPriority?.split(",")?.firstOrNull()?.trim()?.lowercase() ?: "tmdb"
+                val effectiveType = if (primaryProvider == "kitsu" || (cleanKitsu != null && (group.type == "anime" || primaryProvider == "kitsu"))) {
+                    "series"
+                } else {
+                    group.type
+                }
+
+                val queryMeta = com.tgserver.streamer.metadata.EnrichedMetadata(
+                    title = group.title,
+                    type = effectiveType,
+                    year = group.year,
+                    imdbId = cleanImdb,
+                    tmdbId = cleanTmdb,
+                    tvdbId = cleanTvdb,
+                    kitsuId = cleanKitsu,
+                    dbPriority = cleanPriority
+                )
+
+                val (enriched, episodeMap, episodeThumbMap) = com.tgserver.streamer.metadata.MetadataEnricher.fetchFullMetadataDetails(queryMeta, tmdbKey, tvdbKey)
+
+                val fullyUpdated = updatedInitial.mapIndexed { index, item ->
+                    val s = if (effectiveType == "series") (item.season ?: 1) else null
+                    val e = if (effectiveType == "series") (item.episode ?: (index + 1)) else null
+
+                    val newEpTitle = if (s != null && e != null) {
+                        episodeMap[Pair(s, e)] ?: item.episodeTitle ?: "Episode $e"
+                    } else null
+
+                    val newEpThumb = if (s != null && e != null) {
+                        episodeThumbMap[Pair(s, e)] ?: item.episodeThumbnailUrl
+                    } else item.episodeThumbnailUrl
+
+                    item.copy(
+                        title = enriched.title ?: item.title,
+                        type = effectiveType,
+                        year = enriched.year ?: item.year,
+                        season = s,
+                        episode = e,
+                        overview = enriched.overview ?: item.overview,
+                        posterUrl = enriched.posterUrl ?: item.posterUrl,
+                        backdropUrl = enriched.backdropUrl ?: item.backdropUrl,
+                        episodeTitle = newEpTitle,
+                        episodeThumbnailUrl = newEpThumb,
+                        imdbId = cleanImdb ?: enriched.imdbId,
+                        tmdbId = cleanTmdb ?: enriched.tmdbId,
+                        tvdbId = cleanTvdb ?: enriched.tvdbId,
+                        kitsuId = cleanKitsu ?: enriched.kitsuId,
+                        dbPriority = cleanPriority,
+                        isManuallyMatched = true,
+                        lastModified = System.currentTimeMillis()
+                    )
+                }
+
+                tgClient.updateMediaItems(fullyUpdated)
+            }
+
+            // Invalidate caches
+            com.tgserver.streamer.metadata.MetadataEnricher.invalidateTitle(group.title)
+            com.tgserver.streamer.service.StreamerForegroundService.activeServer?.clearTitleCache()
+
+            // 3. True Cloud Sync: Trigger instant Telegram Cloud Backup (0L delay = immediate)
+            triggerAutoCloudBackupDebounced(0L)
+
+            withContext(Dispatchers.Main) {
+                Toast.makeText(
+                    getApplication(),
+                    "✓ Database Identifiers & Priority updated (True Cloud Synced)",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
     suspend fun searchMetadataCandidates(query: String, type: String): List<EnrichedMetadata> = withContext(Dispatchers.IO) {
         val tmdbKey = prefs.getString("tmdb_api_key", "") ?: ""
         MetadataEnricher.searchCandidates(query, type, tmdbKey)

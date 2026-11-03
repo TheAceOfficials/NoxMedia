@@ -81,7 +81,8 @@ data class MediaItem(
     var dateAdded: Long = 0L,
     var rating: Double = 0.0,
     var isManuallyMatched: Boolean = false,
-    var lastModified: Long = 0L
+    var lastModified: Long = 0L,
+    var dbPriority: String? = null
 ) {
     val formattedSize: String
         get() {
@@ -143,7 +144,8 @@ data class MediaGroup(
     val dateAdded: Long = 0L,
     val rating: Double = 0.0,
     val tvdbId: Int? = null,
-    val kitsuId: Int? = null
+    val kitsuId: Int? = null,
+    val dbPriority: String? = null
 ) {
     val distinctEpisodeCount: Int
         get() = items.map { Pair(it.season ?: 1, it.episode ?: 1) }.distinct().size
@@ -348,6 +350,7 @@ fun List<MediaItem>.toMediaGroups(): List<MediaGroup> {
         val bestTmdb = items.firstOrNull { it.tmdbId != null && it.tmdbId!! > 0 }?.tmdbId ?: primary.tmdbId
         val bestTvdb = items.firstOrNull { it.tvdbId != null && it.tvdbId!! > 0 }?.tvdbId ?: primary.tvdbId
         val bestKitsu = items.firstOrNull { it.kitsuId != null && it.kitsuId!! > 0 }?.kitsuId ?: primary.kitsuId
+        val bestDbPriority = items.firstOrNull { !it.dbPriority.isNullOrBlank() }?.dbPriority ?: primary.dbPriority
         val bestQuality = items.maxByOrNull {
             when {
                 it.quality.contains("4K", ignoreCase = true) || it.quality.contains("2160", ignoreCase = true) -> 4
@@ -371,6 +374,7 @@ fun List<MediaItem>.toMediaGroups(): List<MediaGroup> {
             tmdbId = bestTmdb,
             tvdbId = bestTvdb,
             kitsuId = bestKitsu,
+            dbPriority = bestDbPriority,
             qualityBadge = formatShortBadge(bestQuality),
             items = items.sortedWith(compareBy({ it.season ?: 1 }, { it.episode ?: 1 })),
             dateAdded = maxDateAdded,
