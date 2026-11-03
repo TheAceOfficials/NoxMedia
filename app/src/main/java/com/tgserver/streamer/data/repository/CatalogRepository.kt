@@ -13,8 +13,10 @@ import com.tgserver.streamer.data.model.TmdbPersonItem
 import com.tgserver.streamer.data.model.getDefaultStarterCatalogs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
@@ -130,12 +132,203 @@ class CatalogRepository(
         return current
     }
 
+    private var tvdbToken: String? = null
+    private var tvdbTokenExpiry: Long = 0L
+
+    private fun getTvdbToken(apiKey: String): String? {
+        val now = System.currentTimeMillis()
+        if (!tvdbToken.isNullOrBlank() && now < tvdbTokenExpiry) return tvdbToken
+        if (apiKey.isBlank()) return null
+        return try {
+            val jsonBody = """{"apikey":"$apiKey"}"""
+            val body = jsonBody.toRequestBody("application/json".toMediaType())
+            val req = Request.Builder()
+                .url("https://api4.thetvdb.com/v4/login")
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
+                .header("Accept", "application/json")
+                .post(body)
+                .build()
+            httpClient.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val respStr = resp.body?.string().orEmpty()
+                    val root = JSONObject(respStr)
+                    val token = root.optJSONObject("data")?.optString("token")
+                    if (!token.isNullOrBlank()) {
+                        tvdbToken = token
+                        tvdbTokenExpiry = now + 24 * 3600 * 1000L
+                        token
+                    } else null
+                } else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun searchTvdbPeople(query: String, apiKey: String): List<TmdbPersonItem> {
+        val token = getTvdbToken(apiKey) ?: return emptyList()
+        return try {
+            val encoded = URLEncoder.encode(query.trim(), "UTF-8")
+            val url = "https://api4.thetvdb.com/v4/search?query=$encoded&type=people"
+            val req = Request.Builder()
+                .url(url)
+                .header("Authorization", "Bearer $token")
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
+                .header("Accept", "application/json")
+                .get()
+                .build()
+            httpClient.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string().orEmpty()
+                    val root = JSONObject(body)
+                    val data = root.optJSONArray("data") ?: return emptyList()
+                    val list = mutableListOf<TmdbPersonItem>()
+                    for (i in 0 until minOf(data.length(), 6)) {
+                        val obj = data.getJSONObject(i)
+                        val name = obj.optString("name")
+                        val idStr = obj.optString("id").removePrefix("people-").removePrefix("person-")
+                        val id = idStr.toIntOrNull() ?: (i + 1)
+                        val img = obj.optString("image_url").takeIf { it.isNotBlank() }
+                        if (name.isNotBlank()) {
+                            list.add(TmdbPersonItem(id = id, name = name, department = "Cast / Crew", profilePath = img))
+                        }
+                    }
+                    list
+                } else emptyList()
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun searchTvdbCompanies(query: String, apiKey: String): List<TmdbCompanyItem> {
+        val token = getTvdbToken(apiKey) ?: return emptyList()
+        return try {
+            val encoded = URLEncoder.encode(query.trim(), "UTF-8")
+            val url = "https://api4.thetvdb.com/v4/search?query=$encoded&type=company"
+            val req = Request.Builder()
+                .url(url)
+                .header("Authorization", "Bearer $token")
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
+                .header("Accept", "application/json")
+                .get()
+                .build()
+            httpClient.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string().orEmpty()
+                    val root = JSONObject(body)
+                    val data = root.optJSONArray("data") ?: return emptyList()
+                    val list = mutableListOf<TmdbCompanyItem>()
+                    for (i in 0 until minOf(data.length(), 6)) {
+                        val obj = data.getJSONObject(i)
+                        val name = obj.optString("name")
+                        val idStr = obj.optString("id").removePrefix("company-")
+                        val id = idStr.toIntOrNull() ?: (i + 1)
+                        if (name.isNotBlank()) {
+                            list.add(TmdbCompanyItem(id = id, name = name, logoPath = null))
+                        }
+                    }
+                    list
+                } else emptyList()
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun searchPeople(query: String, tmdbKey: String, tvdbKey: String): List<TmdbPersonItem> = withContext(Dispatchers.IO) {
+        val clean = query.trim()
+        if (clean.isBlank()) return@withContext emptyList()
+        val results = mutableListOf<TmdbPersonItem>()
+        val seenNames = mutableSetOf<String>()
+
+        // 1. Search TMDb if key is present
+        if (tmdbKey.isNotBlank()) {
+            val tmdbItems = searchTmdbPeople(clean, tmdbKey)
+            tmdbItems.forEach {
+                if (seenNames.add(it.name.lowercase())) {
+                    results.add(it)
+                }
+            }
+        }
+
+        // 2. Search TVDb if key is present and results < 6
+        if (tvdbKey.isNotBlank() && results.size < 6) {
+            val tvdbItems = searchTvdbPeople(clean, tvdbKey)
+            tvdbItems.forEach {
+                if (seenNames.add(it.name.lowercase())) {
+                    results.add(it)
+                }
+            }
+        }
+
+        // 3. Match curated directors & actors (works even offline/without key)
+        CURATED_PEOPLE.filter { it.name.contains(clean, ignoreCase = true) }.forEach {
+            if (seenNames.add(it.name.lowercase())) {
+                results.add(it)
+            }
+        }
+
+        // 4. Always provide an option to tag exact query if not already exactly matched
+        if (clean.length >= 2 && seenNames.none { it.equals(clean.lowercase(), true) }) {
+            results.add(TmdbPersonItem(id = -1, name = clean, department = "Custom Person"))
+        }
+
+        results
+    }
+
+    suspend fun searchCompanies(query: String, tmdbKey: String, tvdbKey: String): List<TmdbCompanyItem> = withContext(Dispatchers.IO) {
+        val clean = query.trim()
+        if (clean.isBlank()) return@withContext emptyList()
+        val results = mutableListOf<TmdbCompanyItem>()
+        val seenNames = mutableSetOf<String>()
+
+        // 1. Search TMDb if key is present
+        if (tmdbKey.isNotBlank()) {
+            val tmdbItems = searchTmdbCompanies(clean, tmdbKey)
+            tmdbItems.forEach {
+                if (seenNames.add(it.name.lowercase())) {
+                    results.add(it)
+                }
+            }
+        }
+
+        // 2. Search TVDb if key is present and results < 6
+        if (tvdbKey.isNotBlank() && results.size < 6) {
+            val tvdbItems = searchTvdbCompanies(clean, tvdbKey)
+            tvdbItems.forEach {
+                if (seenNames.add(it.name.lowercase())) {
+                    results.add(it)
+                }
+            }
+        }
+
+        // 3. Match curated studios & networks (works even offline/without key)
+        CURATED_STUDIOS.filter { it.name.contains(clean, ignoreCase = true) }.forEach {
+            if (seenNames.add(it.name.lowercase())) {
+                results.add(it)
+            }
+        }
+
+        // 4. Always provide an option to tag exact query if not already exactly matched
+        if (clean.length >= 2 && seenNames.none { it.equals(clean.lowercase(), true) }) {
+            results.add(TmdbCompanyItem(id = -1, name = clean, logoPath = null))
+        }
+
+        results
+    }
+
     suspend fun searchTmdbPeople(query: String, apiKey: String): List<TmdbPersonItem> = withContext(Dispatchers.IO) {
         if (query.isBlank() || apiKey.isBlank()) return@withContext emptyList()
         try {
             val encoded = URLEncoder.encode(query.trim(), "UTF-8")
             val url = "https://api.themoviedb.org/3/search/person?api_key=$apiKey&query=$encoded&language=en-US&include_adult=false"
-            val request = Request.Builder().url(url).get().build()
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
+                .header("Accept", "application/json")
+                .get()
+                .build()
             val response = httpClient.newCall(request).execute()
             if (!response.isSuccessful) return@withContext emptyList()
 
@@ -203,7 +396,12 @@ class CatalogRepository(
         try {
             val encoded = URLEncoder.encode(query.trim(), "UTF-8")
             val url = "https://api.themoviedb.org/3/search/company?api_key=$apiKey&query=$encoded"
-            val request = Request.Builder().url(url).get().build()
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
+                .header("Accept", "application/json")
+                .get()
+                .build()
             val response = httpClient.newCall(request).execute()
             if (!response.isSuccessful) return@withContext emptyList()
 
@@ -370,8 +568,9 @@ class CatalogRepository(
             }
 
             // Audio / Language match
-            if (languagesLower.isNotEmpty()) {
-                val hasLang = languagesLower.any { lang ->
+            val effectiveLanguages = languagesLower.filter { it != "any" }
+            if (effectiveLanguages.isNotEmpty()) {
+                val hasLang = effectiveLanguages.any { lang ->
                     when {
                         lang.contains("hindi") -> group.hasHindi
                         lang.contains("english") -> group.hasEnglish
@@ -384,16 +583,26 @@ class CatalogRepository(
                 if (!hasLang) return@filter false
             }
 
-            // Genres match (check overview or title or anime type)
+            // Genres match (multi-select combo: item must match all selected genres)
             if (genresLower.isNotEmpty()) {
                 val overviewLower = group.overview?.lowercase().orEmpty()
                 val titleLower = group.title.lowercase()
-                val hasGenre = genresLower.any { g ->
-                    overviewLower.contains(g) || titleLower.contains(g) ||
-                    (g.contains("anime") && group.type == "anime") ||
-                    (g.contains("animation") && (group.type == "anime" || overviewLower.contains("animation") || overviewLower.contains("animated")))
+                val hasAllGenres = genresLower.all { g ->
+                    val cleanG = g.trim().lowercase()
+                    when {
+                        cleanG == "anime" -> group.type == "anime" || overviewLower.contains("anime") || group.items.any { it.fileName.contains("anime", true) }
+                        cleanG in listOf("animation", "animated") -> group.type == "anime" || overviewLower.contains("animation") || overviewLower.contains("animated")
+                        cleanG in listOf("science fiction", "sci-fi", "scifi") -> overviewLower.contains("sci-fi") || overviewLower.contains("science fiction") || titleLower.contains("sci-fi")
+                        cleanG in listOf("time travel") -> overviewLower.contains("time travel") || titleLower.contains("time travel") || group.items.any { it.fileName.contains("time travel", true) }
+                        cleanG in listOf("mystery") -> overviewLower.contains("mystery") || titleLower.contains("mystery") || group.items.any { it.fileName.contains("mystery", true) }
+                        cleanG in listOf("murder") -> overviewLower.contains("murder") || titleLower.contains("murder") || group.items.any { it.fileName.contains("murder", true) }
+                        cleanG in listOf("horror") -> overviewLower.contains("horror") || titleLower.contains("horror") || group.items.any { it.fileName.contains("horror", true) }
+                        cleanG in listOf("thriller") -> overviewLower.contains("thriller") || titleLower.contains("thriller") || group.items.any { it.fileName.contains("thriller", true) }
+                        cleanG in listOf("crime") -> overviewLower.contains("crime") || titleLower.contains("crime") || group.items.any { it.fileName.contains("crime", true) }
+                        else -> overviewLower.contains(cleanG) || titleLower.contains(cleanG) || group.items.any { it.fileName.contains(cleanG, ignoreCase = true) }
+                    }
                 }
-                if (!hasGenre) return@filter false
+                if (!hasAllGenres) return@filter false
             }
 
             // Keywords / Semantic match (e.g. 4k, cyberpunk, time travel)
@@ -424,3 +633,46 @@ class CatalogRepository(
         }
     }
 }
+
+private val CURATED_PEOPLE = listOf(
+    TmdbPersonItem(15217, "Zack Snyder", "Directing", "/en46a8D99o2B99n9j33tZ27bM81.jpg"),
+    TmdbPersonItem(525, "Christopher Nolan", "Directing", "/xuAIuYSmsUzKlUMBFGVZaWsY3Z5.jpg"),
+    TmdbPersonItem(138, "Quentin Tarantino", "Directing", "/9O9GgV0jK0U4Z4Lw9f5lZ0o2B1P.jpg"),
+    TmdbPersonItem(137427, "Denis Villeneuve", "Directing", "/k9F6gE86qN6t620vO6oA1yK4M3z.jpg"),
+    TmdbPersonItem(1032, "Martin Scorsese", "Directing", "/9U9Y5G0jK0U4Z4Lw9f5lZ0o2B1P.jpg"),
+    TmdbPersonItem(488, "Steven Spielberg", "Directing", null),
+    TmdbPersonItem(2710, "James Cameron", "Directing", null),
+    TmdbPersonItem(7467, "David Fincher", "Directing", null),
+    TmdbPersonItem(578, "Ridley Scott", "Directing", null),
+    TmdbPersonItem(608, "Hayao Miyazaki", "Directing", null),
+    TmdbPersonItem(12519, "Makoto Shinkai", "Directing", null),
+    TmdbPersonItem(6193, "Leonardo DiCaprio", "Acting", null),
+    TmdbPersonItem(500, "Tom Cruise", "Acting", null),
+    TmdbPersonItem(6384, "Keanu Reeves", "Acting", null),
+    TmdbPersonItem(3894, "Christian Bale", "Acting", null),
+    TmdbPersonItem(3223, "Robert Downey Jr.", "Acting", null),
+    TmdbPersonItem(2037, "Cillian Murphy", "Acting", null),
+    TmdbPersonItem(287, "Brad Pitt", "Acting", null),
+    TmdbPersonItem(30614, "Ryan Gosling", "Acting", null),
+    TmdbPersonItem(31, "Tom Hanks", "Acting", null)
+)
+
+private val CURATED_STUDIOS = listOf(
+    TmdbCompanyItem(174, "Warner Bros.", "/ky0xOc5maQswTVI8VOYEN0mX094.png"),
+    TmdbCompanyItem(3268, "HBO", "/tuomPhY2UtuPTqqFnKMVHvSb724.png"),
+    TmdbCompanyItem(1782, "Netflix", "/wwemzKWzjKYJFfCeiB57q3r4Bcm.png"),
+    TmdbCompanyItem(20580, "Prime Video", "/ifhbNuuVnlwYy5oXA05XaM5Xi7P.png"),
+    TmdbCompanyItem(2739, "Disney+", "/gJ8VX6JSu3ci4ewTuRztJiq9CuB.png"),
+    TmdbCompanyItem(2552, "Apple TV+", "/4KAy34EHvRM25Ih8Mz8Bm9VOtwP.png"),
+    TmdbCompanyItem(10342, "Studio Ghibli", "/7rwSXluNWZAlKL2qi0GtIPJuqih.png"),
+    TmdbCompanyItem(420, "Marvel Studios", "/hUzeosd33nzE5MCNsZxCGEKTXaQ.png"),
+    TmdbCompanyItem(41077, "A24", "/1ZXVjXYUsCU99Yjh6CiPVYEx3BK.png"),
+    TmdbCompanyItem(33, "Universal Pictures", "/8lvHyhjr8oUKOOy2dKXoALWKdp0.png"),
+    TmdbCompanyItem(4, "Paramount Pictures", null),
+    TmdbCompanyItem(34, "Sony Pictures", null),
+    TmdbCompanyItem(1632, "Lionsgate", null),
+    TmdbCompanyItem(13589, "MAPPA", null),
+    TmdbCompanyItem(12693, "Ufotable", null),
+    TmdbCompanyItem(5542, "Toei Animation", null),
+    TmdbCompanyItem(11111, "Crunchyroll", null)
+)

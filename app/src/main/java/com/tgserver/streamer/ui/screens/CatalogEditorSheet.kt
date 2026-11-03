@@ -45,31 +45,10 @@ import kotlinx.coroutines.launch
 private val NdotFont = FontFamily(Font(R.font.ndot))
 
 private val STANDARD_GENRES = listOf(
-    "Action", "Adventure", "Animation", "Comedy", "Crime",
-    "Drama", "Fantasy", "Horror", "Mystery", "Romance",
-    "Science Fiction", "Thriller", "War"
-)
-
-data class StandardStudioInfo(
-    val name: String,
-    val tmdbId: Int,
-    val logoPath: String
-)
-
-private val STANDARD_STUDIOS = listOf(
-    StandardStudioInfo("HBO", 3268, "/tuomPhY2UtuPTqqFnKMVHvSb724.png"),
-    StandardStudioInfo("Netflix", 1782, "/wwemzKWzjKYJFfCeiB57q3r4Bcm.png"),
-    StandardStudioInfo("Prime Video", 20580, "/ifhbNuuVnlwYy5oXA05XaM5Xi7P.png"),
-    StandardStudioInfo("Disney+", 2739, "/gJ8VX6JSu3ci4ewTuRztJiq9CuB.png"),
-    StandardStudioInfo("Apple TV+", 2552, "/4KAy34EHvRM25Ih8Mz8Bm9VOtwP.png"),
-    StandardStudioInfo("Studio Ghibli", 10342, "/7rwSXluNWZAlKL2qi0GtIPJuqih.png"),
-    StandardStudioInfo("Warner Bros", 174, "/ky0xOc5maQswTVI8VOYEN0mX094.png"),
-    StandardStudioInfo("Marvel", 420, "/hUzeosd33nzE5MCNsZxCGEKTXaQ.png"),
-    StandardStudioInfo("A24", 41077, "/1ZXVjXYUsCU99Yjh6CiPVYEx3BK.png")
-)
-
-private val STANDARD_LANGUAGES = listOf(
-    "English", "Hindi", "Japanese", "Korean", "Dual Audio", "Multi Audio"
+    "Action", "Adventure", "Animation", "Anime", "Comedy", "Crime",
+    "Documentary", "Drama", "Family", "Fantasy", "History", "Horror",
+    "Music", "Mystery", "Murder", "Romance", "Science Fiction", "Thriller",
+    "Time Travel", "War", "Western"
 )
 
 private val AI_PROMPT_INSPIRATIONS = listOf(
@@ -136,16 +115,48 @@ fun CatalogEditorSheet(
     var aiErrorMessage by remember { mutableStateOf<String?>(null) }
     var showApiKeyPromptDialog by remember { mutableStateOf(false) }
 
+    // Dynamic library languages
+    val dynamicLanguages = remember(mediaGroups) {
+        val langs = mutableSetOf<String>()
+        mediaGroups.forEach { g ->
+            if (g.hasHindi) langs.add("Hindi")
+            if (g.hasEnglish) langs.add("English")
+            if (g.hasJapanese) langs.add("Japanese")
+            if (g.hasDualAudio) langs.add("Dual Audio")
+            if (g.hasMultiAudio) langs.add("Multi Dub")
+
+            g.items.take(8).forEach { item ->
+                val fn = item.fileName.lowercase()
+                if (fn.contains("tamil") || fn.contains(".tam.")) langs.add("Tamil")
+                if (fn.contains("telugu") || fn.contains(".tel.")) langs.add("Telugu")
+                if (fn.contains("malayalam") || fn.contains(".mal.")) langs.add("Malayalam")
+                if (fn.contains("kannada") || fn.contains(".kan.")) langs.add("Kannada")
+                if (fn.contains("bengali") || fn.contains(".ben.")) langs.add("Bengali")
+                if (fn.contains("marathi") || fn.contains(".mar.")) langs.add("Marathi")
+                if (fn.contains("korean") || fn.contains(".kor.")) langs.add("Korean")
+                if (fn.contains("spanish") || fn.contains(".spa.")) langs.add("Spanish")
+                if (fn.contains("french") || fn.contains(".fre.")) langs.add("French")
+                if (fn.contains("german") || fn.contains(".ger.")) langs.add("German")
+                if (fn.contains("italian") || fn.contains(".ita.")) langs.add("Italian")
+                if (fn.contains("russian") || fn.contains(".rus.")) langs.add("Russian")
+                if (fn.contains("chinese") || fn.contains(".chi.")) langs.add("Chinese")
+            }
+        }
+        val sortedLangs = langs.toList().sorted()
+        listOf("Any") + (if (sortedLangs.isNotEmpty()) sortedLangs else listOf("Hindi", "English", "Japanese", "Multi Dub", "Dual Audio"))
+    }
+
     // Person search results
     var personSearchResults by remember { mutableStateOf<List<TmdbPersonItem>>(emptyList()) }
     var isSearchingPeople by remember { mutableStateOf(false) }
 
-    // Debounced TMDB Person Search
+    // Debounced TMDB / TVDB / Curated Person Search
     LaunchedEffect(personQuery) {
-        if (personQuery.length >= 3 && selectedPersonId == null && config.tmdbApiKey.isNotBlank()) {
-            delay(350)
+        val q = personQuery.trim()
+        if (q.length >= 2 && selectedPersonName != q) {
+            delay(250)
             isSearchingPeople = true
-            personSearchResults = viewModel.searchTmdbPeople(personQuery)
+            personSearchResults = viewModel.searchPeople(q)
             isSearchingPeople = false
         } else {
             personSearchResults = emptyList()
@@ -167,12 +178,13 @@ fun CatalogEditorSheet(
     var studioSearchResults by remember { mutableStateOf<List<TmdbCompanyItem>>(emptyList()) }
     var isSearchingStudio by remember { mutableStateOf(false) }
 
-    // Debounced TMDB Studio Search
+    // Debounced TMDB / TVDB / Curated Studio Search
     LaunchedEffect(studioQuery) {
-        if (studioQuery.length >= 2 && selectedStudioId == null && config.tmdbApiKey.isNotBlank()) {
-            delay(350)
+        val q = studioQuery.trim()
+        if (q.length >= 2 && selectedStudioName != q) {
+            delay(250)
             isSearchingStudio = true
-            studioSearchResults = viewModel.searchTmdbCompanies(studioQuery)
+            studioSearchResults = viewModel.searchCompanies(q)
             isSearchingStudio = false
         } else {
             studioSearchResults = emptyList()
@@ -199,6 +211,7 @@ fun CatalogEditorSheet(
         yearFilterEnabled, minYear, maxYear,
         sortBy, sortAscending, semanticKeywords
     ) {
+        val effectiveLangs = if (selectedLanguages.contains("Any")) emptyList() else selectedLanguages.toList()
         val tempFilter = CatalogFilterCriteria(
             mediaType = mediaType,
             personQuery = selectedPersonName,
@@ -208,7 +221,7 @@ fun CatalogEditorSheet(
             studioTmdbId = selectedStudioId,
             studioLogoPath = selectedStudioLogoPath,
             genres = selectedGenres.toList(),
-            languages = selectedLanguages.toList(),
+            languages = effectiveLangs,
             ratingFilterEnabled = ratingFilterEnabled,
             minRating = minRating,
             maxRating = maxRating,
@@ -283,9 +296,10 @@ fun CatalogEditorSheet(
                             val finalName = catalogName.trim().ifBlank {
                                 if (selectedPersonName.isNotBlank()) "Films by $selectedPersonName"
                                 else if (selectedStudioName.isNotBlank()) "$selectedStudioName Collection"
-                                else if (selectedGenres.isNotEmpty()) "${selectedGenres.first()} Spotlight"
+                                else if (selectedGenres.isNotEmpty()) "${selectedGenres.joinToString(" + ")} Spotlight"
                                 else "Custom Catalog"
                             }
+                            val effectiveLangs = if (selectedLanguages.contains("Any")) emptyList() else selectedLanguages.toList()
                             val finalFilter = CatalogFilterCriteria(
                                 mediaType = mediaType,
                                 personQuery = selectedPersonName.trim(),
@@ -295,7 +309,7 @@ fun CatalogEditorSheet(
                                 studioTmdbId = selectedStudioId,
                                 studioLogoPath = selectedStudioLogoPath,
                                 genres = selectedGenres.toList(),
-                                languages = selectedLanguages.toList(),
+                                languages = effectiveLangs,
                                 ratingFilterEnabled = ratingFilterEnabled,
                                 minRating = minRating,
                                 maxRating = maxRating,
@@ -857,7 +871,14 @@ fun CatalogEditorSheet(
                                             // Search Input
                                             OutlinedTextField(
                                                 value = personQuery,
-                                                onValueChange = { personQuery = it },
+                                                onValueChange = {
+                                                    personQuery = it
+                                                    if (selectedPersonName.isNotBlank() && it != selectedPersonName) {
+                                                        selectedPersonName = ""
+                                                        selectedPersonId = null
+                                                        selectedPersonProfilePath = null
+                                                    }
+                                                },
                                                 placeholder = { Text("Search actor/director (e.g. Christopher Nolan)", color = Color(0xFF6B7280), fontSize = 12.sp) },
                                                 singleLine = true,
                                                 modifier = Modifier.fillMaxWidth(),
@@ -1040,7 +1061,14 @@ fun CatalogEditorSheet(
                                             // Search Input
                                             OutlinedTextField(
                                                 value = studioQuery,
-                                                onValueChange = { studioQuery = it },
+                                                onValueChange = {
+                                                    studioQuery = it
+                                                    if (selectedStudioName.isNotBlank() && it != selectedStudioName) {
+                                                        selectedStudioName = ""
+                                                        selectedStudioId = null
+                                                        selectedStudioLogoPath = null
+                                                    }
+                                                },
                                                 placeholder = { Text("Search studio (e.g. HBO, Warner Bros, A24, Ghibli)", color = Color(0xFF6B7280), fontSize = 12.sp) },
                                                 singleLine = true,
                                                 modifier = Modifier.fillMaxWidth(),
@@ -1134,42 +1162,6 @@ fun CatalogEditorSheet(
                                                     }
                                                 }
                                             }
-
-                                            // Quick studio chips
-                                            FlowRow(
-                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                                verticalArrangement = Arrangement.spacedBy(6.dp),
-                                                modifier = Modifier.fillMaxWidth()
-                                            ) {
-                                                STANDARD_STUDIOS.forEach { std ->
-                                                    val isSel = selectedStudioName.equals(std.name, ignoreCase = true)
-                                                    FilterChip(
-                                                        selected = isSel,
-                                                        onClick = {
-                                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                                            if (isSel) {
-                                                                selectedStudioName = ""
-                                                                selectedStudioId = null
-                                                                selectedStudioLogoPath = null
-                                                                studioQuery = ""
-                                                            } else {
-                                                                selectedStudioName = std.name
-                                                                selectedStudioId = std.tmdbId
-                                                                selectedStudioLogoPath = std.logoPath
-                                                                studioQuery = std.name
-                                                                studioSearchResults = emptyList()
-                                                            }
-                                                        },
-                                                        label = { Text(std.name, fontSize = 11.sp) },
-                                                        colors = FilterChipDefaults.filterChipColors(
-                                                            selectedContainerColor = Color(0xFFA855F7),
-                                                            selectedLabelColor = Color.White,
-                                                            containerColor = Color(0xFF1F2027),
-                                                            labelColor = Color(0xFFD1D5DB)
-                                                        )
-                                                    )
-                                                }
-                                            }
                                         }
                                     }
 
@@ -1221,13 +1213,23 @@ fun CatalogEditorSheet(
                                         verticalArrangement = Arrangement.spacedBy(6.dp),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        STANDARD_LANGUAGES.forEach { lang ->
-                                            val isSel = selectedLanguages.contains(lang)
+                                        val isAnySelected = selectedLanguages.isEmpty() || selectedLanguages.contains("Any")
+                                        dynamicLanguages.forEach { lang ->
+                                            val isSel = if (lang == "Any") isAnySelected else (!isAnySelected && selectedLanguages.contains(lang))
                                             FilterChip(
                                                 selected = isSel,
                                                 onClick = {
                                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                                    selectedLanguages = if (isSel) selectedLanguages - lang else selectedLanguages + lang
+                                                    if (lang == "Any") {
+                                                        selectedLanguages = emptySet()
+                                                    } else {
+                                                        if (selectedLanguages.contains(lang)) {
+                                                            val updated = selectedLanguages - lang
+                                                            selectedLanguages = updated
+                                                        } else {
+                                                            selectedLanguages = (selectedLanguages - "Any") + lang
+                                                        }
+                                                    }
                                                 },
                                                 label = { Text(lang, fontSize = 11.sp) },
                                                 colors = FilterChipDefaults.filterChipColors(

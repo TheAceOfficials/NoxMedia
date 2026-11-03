@@ -89,8 +89,8 @@ private data class NavItemData(
 
 private val NAV_TABS = listOf(
     NavItemData(AppTab.HOME, Icons.Filled.Home, Icons.Outlined.Home),
-    NavItemData(AppTab.CATALOGS, Icons.Filled.CollectionsBookmark, Icons.Outlined.CollectionsBookmark),
     NavItemData(AppTab.LIBRARY, Icons.Filled.VideoLibrary, Icons.Outlined.VideoLibrary),
+    NavItemData(AppTab.CATALOGS, Icons.Filled.CollectionsBookmark, Icons.Outlined.CollectionsBookmark),
     NavItemData(AppTab.CHANNELS, Icons.Filled.Hub, Icons.Outlined.Hub),
     NavItemData(AppTab.SETTINGS, Icons.Filled.Settings, Icons.Outlined.Settings)
 )

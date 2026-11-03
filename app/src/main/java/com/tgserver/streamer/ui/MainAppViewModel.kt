@@ -1553,15 +1553,21 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         triggerAutoCloudBackupDebounced(1500L)
     }
 
-    suspend fun searchTmdbPeople(query: String): List<TmdbPersonItem> {
-        val key = _config.value.tmdbApiKey
-        return catalogRepo.searchTmdbPeople(query, key)
+    suspend fun searchPeople(query: String): List<TmdbPersonItem> {
+        val tmdbKey = _config.value.tmdbApiKey
+        val tvdbKey = _config.value.tvdbApiKey
+        return catalogRepo.searchPeople(query, tmdbKey, tvdbKey)
     }
 
-    suspend fun searchTmdbCompanies(query: String): List<TmdbCompanyItem> {
-        val key = _config.value.tmdbApiKey
-        return catalogRepo.searchTmdbCompanies(query, key)
+    suspend fun searchCompanies(query: String): List<TmdbCompanyItem> {
+        val tmdbKey = _config.value.tmdbApiKey
+        val tvdbKey = _config.value.tvdbApiKey
+        return catalogRepo.searchCompanies(query, tmdbKey, tvdbKey)
     }
+
+    suspend fun searchTmdbPeople(query: String): List<TmdbPersonItem> = searchPeople(query)
+
+    suspend fun searchTmdbCompanies(query: String): List<TmdbCompanyItem> = searchCompanies(query)
 
     suspend fun getPersonFilmographyIds(personId: Int): Set<Int> {
         val key = _config.value.tmdbApiKey
