@@ -6,7 +6,6 @@ import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.tgserver.streamer.data.model.CatalogDefinition
-import com.tgserver.streamer.data.model.CatalogFilterCriteria
 import com.tgserver.streamer.data.model.CatalogSortBy
 import com.tgserver.streamer.data.model.MediaGroup
 import com.tgserver.streamer.data.model.TmdbCompanyItem
@@ -43,25 +42,6 @@ class CatalogRepository(
     // In-memory cache of Company TMDB ID -> Set of TMDB Media IDs
     private val companyFilmographyCache = ConcurrentHashMap<Int, Set<Int>>()
 
-    fun sanitizeCatalog(cat: CatalogDefinition): CatalogDefinition {
-        val f = cat.filter
-        val safeFilter = f.copy(
-            personQuery = f.personQuery.ifEmpty { "" },
-            studioQuery = f.studioQuery.ifEmpty { "" },
-            personTmdbId = f.personTmdbId,
-            studioTmdbId = f.studioTmdbId,
-            genres = f.genres,
-            languages = f.languages,
-            keywords = f.keywords,
-            mediaType = f.mediaType.ifEmpty { "all" }
-        )
-        return cat.copy(
-            name = cat.name.ifBlank { "Catalog" },
-            filter = safeFilter,
-            sortOrder = cat.sortOrder
-        )
-    }
-
     fun getCatalogs(): List<CatalogDefinition> {
         val rawJson = prefs.getString(PREF_KEY_CATALOGS, null)
         if (rawJson.isNullOrBlank()) {
@@ -71,8 +51,8 @@ class CatalogRepository(
         return try {
             val type = object : TypeToken<List<CatalogDefinition>>() {}.type
             val list: List<CatalogDefinition> = gson.fromJson(rawJson, type) ?: emptyList()
-            // Clean up any legacy starter catalogs if present and sanitize fields safely
-            val cleaned = list.filterNotNull().filter { !it.id.startsWith("starter_") }.map { sanitizeCatalog(it) }
+            // Clean up any legacy starter catalogs if present
+            val cleaned = list.filter { !it.id.startsWith("starter_") }
             if (cleaned.size != list.size) {
                 saveCatalogs(cleaned)
             }
