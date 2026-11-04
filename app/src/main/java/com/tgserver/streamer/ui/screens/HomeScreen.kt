@@ -672,12 +672,16 @@ fun HomeScreen(viewModel: MainAppViewModel) {
 
         // PINNED CATALOGS SHELVES
         val pinnedCatalogs = remember(catalogs) {
-            catalogs.filter { it.pinToHome && !it.isHidden }
+            catalogs.filterNotNull().filter { it.pinToHome && !it.isHidden }
         }
 
         pinnedCatalogs.forEach { catalog ->
             val matchedGroups = remember(catalog, mediaGroups) {
-                viewModel.filterMediaForCatalog(catalog).take(15)
+                try {
+                    viewModel.filterMediaForCatalog(catalog).take(15)
+                } catch (e: Exception) {
+                    emptyList()
+                }
             }
 
             if (matchedGroups.isNotEmpty()) {

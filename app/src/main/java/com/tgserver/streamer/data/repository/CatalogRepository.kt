@@ -6,6 +6,7 @@ import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.tgserver.streamer.data.model.CatalogDefinition
+import com.tgserver.streamer.data.model.CatalogFilterCriteria
 import com.tgserver.streamer.data.model.CatalogSortBy
 import com.tgserver.streamer.data.model.MediaGroup
 import com.tgserver.streamer.data.model.TmdbCompanyItem
@@ -42,6 +43,44 @@ class CatalogRepository(
     // In-memory cache of Company TMDB ID -> Set of TMDB Media IDs
     private val companyFilmographyCache = ConcurrentHashMap<Int, Set<Int>>()
 
+    fun sanitizeCatalog(cat: CatalogDefinition?): CatalogDefinition {
+        if (cat == null) return CatalogDefinition(name = "Catalog")
+        val safeId = if (cat.id.isNullOrBlank()) java.util.UUID.randomUUID().toString() else cat.id
+        val safeName = if (cat.name.isNullOrBlank()) "Catalog" else cat.name
+        val f = cat.filter
+        val safeFilter = if (f == null) {
+            CatalogFilterCriteria()
+        } else {
+            f.copy(
+                personQuery = f.personQuery ?: "",
+                studioQuery = f.studioQuery ?: "",
+                personTmdbId = f.personTmdbId,
+                personRole = f.personRole,
+                personProfilePath = f.personProfilePath,
+                studioTmdbId = f.studioTmdbId,
+                studioLogoPath = f.studioLogoPath,
+                genres = f.genres ?: emptyList(),
+                languages = f.languages ?: emptyList(),
+                ratingFilterEnabled = f.ratingFilterEnabled,
+                minRating = f.minRating,
+                maxRating = f.maxRating,
+                yearFilterEnabled = f.yearFilterEnabled,
+                minYear = f.minYear,
+                maxYear = f.maxYear,
+                sortBy = f.sortBy ?: CatalogSortBy.RECENT,
+                sortAscending = f.sortAscending,
+                keywords = f.keywords ?: emptyList(),
+                mediaType = f.mediaType ?: "all"
+            )
+        }
+        return cat.copy(
+            id = safeId,
+            name = safeName,
+            filter = safeFilter,
+            sortOrder = cat.sortOrder
+        )
+    }
+
     fun getCatalogs(): List<CatalogDefinition> {
         val rawJson = prefs.getString(PREF_KEY_CATALOGS, null)
         if (rawJson.isNullOrBlank()) {
@@ -50,9 +89,12 @@ class CatalogRepository(
 
         return try {
             val type = object : TypeToken<List<CatalogDefinition>>() {}.type
-            val list: List<CatalogDefinition> = gson.fromJson(rawJson, type) ?: emptyList()
-            // Clean up any legacy starter catalogs if present
-            val cleaned = list.filter { !it.id.startsWith("starter_") }
+            val list: List<CatalogDefinition>? = gson.fromJson(rawJson, type)
+            if (list == null) return emptyList()
+            // Clean up any legacy starter catalogs if present and sanitize fields safely
+            val cleaned = list.filterNotNull()
+                .filter { !it.id.isNullOrBlank() && !it.id.startsWith("starter_") }
+                .map { sanitizeCatalog(it) }
             if (cleaned.size != list.size) {
                 saveCatalogs(cleaned)
             }
@@ -632,12 +674,13 @@ class CatalogRepository(
         personTmdbIds: Set<Int> = emptySet(),
         studioTmdbIds: Set<Int> = emptySet()
     ): List<MediaGroup> {
-        val f = catalog.filter
-        val cleanPersonQuery = f.personQuery.trim().lowercase()
-        val cleanStudioQuery = f.studioQuery.trim().lowercase()
-        val genresLower = f.genres.map { it.lowercase() }
-        val keywordsLower = f.keywords.map { it.lowercase() }
-        val languagesLower = f.languages.map { it.lowercase() }
+        val safeCatalog = sanitizeCatalog(catalog)
+        val f = safeCatalog.filter
+        val cleanPersonQuery = (f.personQuery ?: "").trim().lowercase()
+        val cleanStudioQuery = (f.studioQuery ?: "").trim().lowercase()
+        val genresLower = (f.genres ?: emptyList()).map { it.lowercase() }
+        val keywordsLower = (f.keywords ?: emptyList()).map { it.lowercase() }
+        val languagesLower = (f.languages ?: emptyList()).map { it.lowercase() }
 
         val filtered = mediaGroups.filter { group ->
             // Exclude hidden groups

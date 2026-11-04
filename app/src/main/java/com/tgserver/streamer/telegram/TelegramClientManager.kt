@@ -355,7 +355,7 @@ class TelegramClientManager(private val context: Context) {
         if (!json.isNullOrBlank()) {
             val type = object : TypeToken<List<ChannelInfo>>() {}.type
             val list: List<ChannelInfo> = gson.fromJson(json, type) ?: emptyList()
-            list.forEach { ch ->
+            list.filterNotNull().forEach { ch ->
                 val localAvatar = File(context.filesDir, "channel_${ch.id}.jpg")
                 val effectiveAvatar = if (!ch.avatarUrl.isNullOrBlank() && File(ch.avatarUrl).exists()) {
                     ch.avatarUrl
@@ -410,10 +410,12 @@ class TelegramClientManager(private val context: Context) {
         if (!json.isNullOrBlank()) {
             val type = object : TypeToken<List<MediaItem>>() {}.type
             val list: List<MediaItem> = gson.fromJson(json, type) ?: emptyList()
-            list.forEach {
-                if (!deletedMediaIds.contains(it.id)) {
-                    it.title = MetadataEnricher.cleanCandidateTitle(it.title)
-                    mediaIndex[it.id] = it
+            list.filterNotNull().forEach { item ->
+                val safeId = item.id
+                if (!safeId.isNullOrBlank() && !deletedMediaIds.contains(safeId)) {
+                    val rawTitle = item.title ?: ""
+                    item.title = MetadataEnricher.cleanCandidateTitle(rawTitle)
+                    mediaIndex[safeId] = item
                 }
             }
         }

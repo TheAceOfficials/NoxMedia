@@ -1,5 +1,6 @@
 package com.tgserver.streamer.data.model
 
+import com.google.gson.annotations.SerializedName
 import java.util.UUID
 
 /**
@@ -50,7 +51,8 @@ data class CatalogFilterCriteria(
  */
 data class CatalogDefinition(
     val id: String = UUID.randomUUID().toString(),
-    var name: String,
+    @SerializedName(value = "name", alternate = ["title"])
+    var name: String = "Catalog",
     var isAiPowered: Boolean = false,
     var aiPrompt: String? = null,
     var isHidden: Boolean = false,

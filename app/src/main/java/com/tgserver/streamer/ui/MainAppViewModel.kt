@@ -111,11 +111,13 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                 val json = groupCacheFile.readText()
                 if (json.isNotBlank()) {
                     val type = object : TypeToken<List<MediaGroup>>() {}.type
-                    gson.fromJson<List<MediaGroup>>(json, type) ?: emptyList()
+                    val list: List<MediaGroup>? = gson.fromJson(json, type)
+                    list?.filterNotNull()?.filter { it.key != null && it.items != null } ?: emptyList()
                 } else emptyList()
             } else emptyList()
         } catch (e: Exception) {
             Log.e("MainAppViewModel", "Failed to load cached media groups: ${e.message}")
+            try { groupCacheFile.delete() } catch (_: Exception) {}
             emptyList()
         }
     }
@@ -129,10 +131,11 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private fun computeRecentlyAdded(groups: List<MediaGroup>): List<MediaGroup> {
-        return groups.sortedByDescending { group ->
+    private fun computeRecentlyAdded(groups: List<MediaGroup>?): List<MediaGroup> {
+        if (groups.isNullOrEmpty()) return emptyList()
+        return groups.filterNotNull().sortedByDescending { group ->
             val date = group.dateAdded.takeIf { it > 0L }
-            date ?: (group.items.maxOfOrNull { it.messageId }?.toLong() ?: 0L)
+            date ?: (group.items?.maxOfOrNull { it.messageId }?.toLong() ?: 0L)
         }.take(15)
     }
 
@@ -1924,9 +1927,10 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                     val catArr = root.getJSONArray("catalogs")
                     val type = object : TypeToken<List<CatalogDefinition>>() {}.type
                     val list: List<CatalogDefinition> = Gson().fromJson(catArr.toString(), type) ?: emptyList()
-                    if (list.isNotEmpty()) {
-                        catalogRepo.saveCatalogs(list)
-                        _catalogs.value = list
+                    val sanitized = list.filterNotNull().map { catalogRepo.sanitizeCatalog(it) }
+                    if (sanitized.isNotEmpty()) {
+                        catalogRepo.saveCatalogs(sanitized)
+                        _catalogs.value = sanitized
                     }
                 } catch (e: Exception) {
                     Log.e("MainAppViewModel", "Failed to restore catalogs: ${e.message}")
