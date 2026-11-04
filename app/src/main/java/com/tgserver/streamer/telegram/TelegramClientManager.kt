@@ -97,6 +97,7 @@ class TelegramClientManager(private val context: Context) {
     private val unmatchedIndex = ConcurrentHashMap<String, UnmatchedItem>()
     private val activeScanJobs = ConcurrentHashMap<Long, Job>()
     private val detectedDeadIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val deletedMediaIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val managerScope = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
     private var autoScanJob: Job? = null
     // Android playback stream tracking (isolated)
@@ -197,6 +198,7 @@ class TelegramClientManager(private val context: Context) {
         loadSession()
         loadChannels()
         CoroutineScope(Dispatchers.IO).launch {
+            loadDeletedMediaIds()
             loadMediaIndex()
             loadUnmatchedIndex()
         }
@@ -291,6 +293,9 @@ class TelegramClientManager(private val context: Context) {
                                     Log.i(TAG, "Scheduled auto-backup to Telegram succeeded")
                                 } else {
                                     Log.w(TAG, "Scheduled auto-backup failed: ${res.exceptionOrNull()?.message}")
+                                }
+                                if (dest != "me") {
+                                    try { uploadBackupToTelegram(json, "me") } catch (_: Exception) {}
                                 }
                             }
                         } catch (e: Exception) {
@@ -406,8 +411,10 @@ class TelegramClientManager(private val context: Context) {
             val type = object : TypeToken<List<MediaItem>>() {}.type
             val list: List<MediaItem> = gson.fromJson(json, type) ?: emptyList()
             list.forEach {
-                it.title = MetadataEnricher.cleanCandidateTitle(it.title)
-                mediaIndex[it.id] = it
+                if (!deletedMediaIds.contains(it.id)) {
+                    it.title = MetadataEnricher.cleanCandidateTitle(it.title)
+                    mediaIndex[it.id] = it
+                }
             }
         }
 
@@ -479,6 +486,7 @@ class TelegramClientManager(private val context: Context) {
         }
 
         if (toRemove.isNotEmpty()) {
+            recordDeletedMediaIds(toRemove.map { it.id })
             toRemove.forEach { mediaIndex.remove(it.id) }
             removedCount += toRemove.size
         }
@@ -531,6 +539,7 @@ class TelegramClientManager(private val context: Context) {
                     parts = computedParts
                 )
 
+                recordDeletedMediaIds(group.map { it.id })
                 group.forEach { mediaIndex.remove(it.id) }
                 mediaIndex[splitId] = mergedItem
                 removedCount += group.size
@@ -594,6 +603,7 @@ class TelegramClientManager(private val context: Context) {
         }
 
         if (toRemove.isNotEmpty()) {
+            recordDeletedMediaIds(toRemove.map { it.id })
             toRemove.forEach { mediaIndex.remove(it.id) }
             removedCount += toRemove.size
             saveMediaIndex()
@@ -648,6 +658,7 @@ class TelegramClientManager(private val context: Context) {
 
     fun deleteDuplicates(): Int {
         var removed = cleanupSplitDuplicates()
+        val removedIds = mutableListOf<String>()
 
         // 1. Remove exact identical file duplicates (same channel, fileName, sizeBytes)
         val duplicatesByNameAndSize = mediaIndex.values.filter { !it.isSplit }
@@ -660,7 +671,10 @@ class TelegramClientManager(private val context: Context) {
                         .thenByDescending { it.messageId }
                 )
                 val toRemove = sorted.drop(1)
-                toRemove.forEach { mediaIndex.remove(it.id) }
+                toRemove.forEach { 
+                    mediaIndex.remove(it.id)
+                    removedIds.add(it.id)
+                }
                 removed += toRemove.size
             }
         }
@@ -677,9 +691,16 @@ class TelegramClientManager(private val context: Context) {
                         .thenByDescending { it.messageId }
                 )
                 val toRemove = sorted.drop(1)
-                toRemove.forEach { mediaIndex.remove(it.id) }
+                toRemove.forEach { 
+                    mediaIndex.remove(it.id)
+                    removedIds.add(it.id)
+                }
                 removed += toRemove.size
             }
+        }
+
+        if (removedIds.isNotEmpty()) {
+            recordDeletedMediaIds(removedIds)
         }
 
         if (removed > 0) {
@@ -801,6 +822,8 @@ class TelegramClientManager(private val context: Context) {
             itIsInvalidMessage(it)
         }
         if (deadItems.isNotEmpty()) {
+            val deadIds = deadItems.map { it.id }
+            recordDeletedMediaIds(deadIds)
             deadItems.forEach {
                 mediaIndex.remove(it.id)
                 detectedDeadIds.remove(it.id)
@@ -875,6 +898,10 @@ class TelegramClientManager(private val context: Context) {
             }
 
             // Purge any dead files from mediaIndex
+            val toPurge = groupItems.filter { groupDeadIds.contains(it.id) || it.sizeBytes <= 0 || itIsInvalidMessage(it) }
+            if (toPurge.isNotEmpty()) {
+                recordDeletedMediaIds(toPurge.map { it.id })
+            }
             for (item in groupItems) {
                 if (groupDeadIds.contains(item.id) || item.sizeBytes <= 0 || itIsInvalidMessage(item)) {
                     mediaIndex.remove(item.id)
@@ -884,6 +911,10 @@ class TelegramClientManager(private val context: Context) {
                 }
             }
         } else {
+            val toPurge = groupItems.filter { it.sizeBytes <= 0 || it.fileName.isBlank() || itIsInvalidMessage(it) }
+            if (toPurge.isNotEmpty()) {
+                recordDeletedMediaIds(toPurge.map { it.id })
+            }
             for (item in groupItems) {
                 if (item.sizeBytes <= 0 || item.fileName.isBlank() || itIsInvalidMessage(item)) {
                     mediaIndex.remove(item.id)
@@ -1184,6 +1215,70 @@ class TelegramClientManager(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "Error saving unmatched media index: ${e.message}")
         }
+    }
+
+    private fun loadDeletedMediaIds() {
+        try {
+            val file = File(context.filesDir, "deleted_media_ids.json")
+            val json = if (file.exists()) {
+                try { file.readText() } catch (_: Exception) { prefs.getString("deleted_media_ids", null) }
+            } else {
+                prefs.getString("deleted_media_ids", null)
+            }
+            deletedMediaIds.clear()
+            if (!json.isNullOrBlank()) {
+                val type = object : TypeToken<List<String>>() {}.type
+                val list: List<String> = gson.fromJson(json, type) ?: emptyList()
+                deletedMediaIds.addAll(list)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading deleted media ids: ${e.message}")
+        }
+    }
+
+    private fun saveDeletedMediaIds() {
+        try {
+            val snapshot = deletedMediaIds.toList()
+            val toSave = if (snapshot.size > 5000) snapshot.takeLast(5000) else snapshot
+            val json = gson.toJson(toSave)
+            try {
+                val file = File(context.filesDir, "deleted_media_ids.json")
+                file.writeText(json)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error saving deleted_media_ids.json: ${e.message}")
+            }
+            if (json.length < 500_000) {
+                prefs.edit().putString("deleted_media_ids", json).apply()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error saving deleted media ids: ${e.message}")
+        }
+    }
+
+    fun getDeletedMediaIds(): Set<String> {
+        return HashSet(deletedMediaIds)
+    }
+
+    fun recordDeletedMediaIds(ids: Collection<String>) {
+        if (ids.isEmpty()) return
+        deletedMediaIds.addAll(ids)
+        saveDeletedMediaIds()
+    }
+
+    fun recordAndRemoveDeletedItems(ids: Collection<String>): Int {
+        if (ids.isEmpty()) return 0
+        recordDeletedMediaIds(ids)
+        var removed = 0
+        ids.forEach { id ->
+            if (mediaIndex.remove(id) != null) {
+                removed++
+            }
+        }
+        if (removed > 0) {
+            saveMediaIndex()
+            _mediaState.value = mediaIndex.values.toList()
+        }
+        return removed
     }
 
     // --- Authentication Engine (Session String) ---
@@ -2043,6 +2138,7 @@ class TelegramClientManager(private val context: Context) {
 
     fun removeMediaItems(itemIds: Collection<String>) {
         if (itemIds.isEmpty()) return
+        recordDeletedMediaIds(itemIds)
         itemIds.forEach { mediaIndex.remove(it) }
         saveMediaIndex()
         _mediaState.value = mediaIndex.values.toList()
@@ -2055,6 +2151,9 @@ class TelegramClientManager(private val context: Context) {
     fun mergeMediaItems(incoming: List<MediaItem>): Int {
         var updatedCount = 0
         incoming.forEach { item ->
+            if (deletedMediaIds.contains(item.id)) {
+                return@forEach
+            }
             val existing = mediaIndex[item.id]
             if (existing == null) {
                 mediaIndex[item.id] = item

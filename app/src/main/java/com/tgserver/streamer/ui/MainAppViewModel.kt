@@ -299,6 +299,17 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                     if (cfg.cloudSyncLibrary) {
                         postSyncProgress(isSyncing = false, isSuccess = true, message = "Cloud library up to date", autoDismissMs = 2500L)
                     }
+                    if (dest != "me") {
+                        try {
+                            tgClient.uploadBackupToTelegram(
+                                backupJson = backupJson,
+                                destination = "me",
+                                channelCount = chCount,
+                                mediaCount = medCount,
+                                originDevice = syncDeviceName
+                            )
+                        } catch (_: Exception) {}
+                    }
                 } else {
                     Log.w("MainAppViewModel", "Auto-backup push failed: ${res.exceptionOrNull()?.message}")
                     if (cfg.cloudSyncLibrary) {
@@ -1638,6 +1649,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         )
         saveStoredConfig(updated)
         prefs.edit().putString("backup_destination", destination).apply()
+        triggerAutoCloudBackupDebounced(1000L)
         if (enabled) {
             tgClient.startAutoBackupLoop { exportBackupJson() }
             val targetName = if (destination.isNotBlank()) destination else "Saved Messages"
@@ -1687,6 +1699,9 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     fun deleteDuplicates(): Int {
         val res = tgClient.deleteDuplicates()
         _duplicateScanCount.value = 0
+        if (res > 0) {
+            triggerAutoCloudBackupDebounced(1000L)
+        }
         return res
     }
 
@@ -1720,6 +1735,9 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     fun purgeDeadFiles(): Int {
         val res = tgClient.purgeDeadFiles()
         _deadFilesScanCount.value = 0
+        if (res > 0) {
+            triggerAutoCloudBackupDebounced(1000L)
+        }
         return res
     }
 
@@ -1807,6 +1825,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             put("autoBackupIntervalHours", cfg.autoBackupIntervalHours)
             put("animeMetadataPreference", cfg.animeMetadataPreference)
             put("cloudSyncLibrary", cfg.cloudSyncLibrary)
+            put("backupDestination", cfg.backupDestination)
             put("aiProvider", cfg.aiProvider)
             put("geminiApiKey", cfg.geminiApiKey)
             put("openRouterApiKey", cfg.openRouterApiKey)
@@ -1814,12 +1833,14 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
 
         val mediaList = tgClient.getAllMediaItems()
         val catalogList = _catalogs.value
+        val deletedIdsList = tgClient.getDeletedMediaIds().toList()
         val root = JSONObject().apply {
             put("version", 3)
             put("appName", "NoxMedia")
             put("deviceId", syncDeviceId)
             put("deviceName", syncDeviceName)
             put("timestamp", System.currentTimeMillis())
+            put("backupDestination", cfg.backupDestination)
             put("settings", settingsObj)
             put("channels", channelsJsonArray)
             put("mediaCount", mediaList.size)
@@ -1828,6 +1849,9 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             }
             if (catalogList.isNotEmpty()) {
                 put("catalogs", JSONArray(Gson().toJson(catalogList)))
+            }
+            if (deletedIdsList.isNotEmpty()) {
+                put("deletedMediaIds", JSONArray(deletedIdsList))
             }
         }
 
@@ -1849,6 +1873,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
 
             if (settingsObj != null) {
                 val cur = _config.value
+                val rawDest = settingsObj.optString("backupDestination", root.optString("backupDestination", cur.backupDestination))
                 val updated = cur.copy(
                     preferredQuality = settingsObj.optString("preferredQuality", cur.preferredQuality),
                     hideCamTs = settingsObj.optBoolean("hideCamTs", cur.hideCamTs),
@@ -1863,14 +1888,35 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                     autoBackupEnabled = settingsObj.optBoolean("autoBackupEnabled", cur.autoBackupEnabled),
                     autoBackupIntervalHours = settingsObj.optInt("autoBackupIntervalHours", cur.autoBackupIntervalHours),
                     animeMetadataPreference = settingsObj.optString("animeMetadataPreference", cur.animeMetadataPreference),
-                    backupDestination = settingsObj.optString("backupDestination", cur.backupDestination),
+                    backupDestination = rawDest,
                     cloudSyncLibrary = settingsObj.optBoolean("cloudSyncLibrary", cur.cloudSyncLibrary),
                     aiProvider = settingsObj.optString("aiProvider", cur.aiProvider),
                     geminiApiKey = settingsObj.optString("geminiApiKey", cur.geminiApiKey),
                     openRouterApiKey = settingsObj.optString("openRouterApiKey", cur.openRouterApiKey)
                 )
                 saveStoredConfig(updated)
+                if (rawDest.isNotBlank()) {
+                    prefs.edit().putString("backup_destination", rawDest).apply()
+                }
                 settingsRestored = true
+            }
+
+            if (root.has("deletedMediaIds")) {
+                try {
+                    val delArr = root.getJSONArray("deletedMediaIds")
+                    val delIds = mutableListOf<String>()
+                    for (i in 0 until delArr.length()) {
+                        val id = delArr.optString(i)
+                        if (!id.isNullOrBlank()) {
+                            delIds.add(id)
+                        }
+                    }
+                    if (delIds.isNotEmpty()) {
+                        tgClient.recordAndRemoveDeletedItems(delIds)
+                    }
+                } catch (e: Exception) {
+                    Log.e("MainAppViewModel", "Failed to restore deletedMediaIds: ${e.message}")
+                }
             }
 
             if (root.has("catalogs")) {
@@ -1971,6 +2017,17 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                 mediaCount = medCount,
                 originDevice = syncDeviceName
             )
+            if (target != "me") {
+                try {
+                    tgClient.uploadBackupToTelegram(
+                        backupJson = backupJson,
+                        destination = "me",
+                        channelCount = chCount,
+                        mediaCount = medCount,
+                        originDevice = syncDeviceName
+                    )
+                } catch (_: Exception) {}
+            }
             _isBackingUpToCloud.value = false
             if (res.isSuccess) {
                 val now = System.currentTimeMillis()
@@ -2008,7 +2065,13 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             }
             val target = _config.value.backupDestination.ifBlank { "me" }
             val lastSyncTs = prefs.getLong("last_cloud_sync_timestamp", 0L)
-            val res = tgClient.fetchLatestBackupFromTelegram(target, if (silent) lastSyncTs else 0L)
+            var res = tgClient.fetchLatestBackupFromTelegram(target, if (silent) lastSyncTs else 0L)
+            if ((!res.isSuccess || res.getOrNull().isNullOrBlank()) && target != "me") {
+                val fallbackRes = tgClient.fetchLatestBackupFromTelegram("me", if (silent) lastSyncTs else 0L)
+                if (fallbackRes.isSuccess && !fallbackRes.getOrNull().isNullOrBlank()) {
+                    res = fallbackRes
+                }
+            }
             if (!silent) {
                 withContext(Dispatchers.Main) { _isRestoringFromCloud.value = false }
             }
