@@ -6,6 +6,7 @@ import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.tgserver.streamer.data.model.CatalogDefinition
+import com.tgserver.streamer.data.model.CatalogFilterCriteria
 import com.tgserver.streamer.data.model.CatalogSortBy
 import com.tgserver.streamer.data.model.MediaGroup
 import com.tgserver.streamer.data.model.TmdbCompanyItem
@@ -43,16 +44,16 @@ class CatalogRepository(
     private val companyFilmographyCache = ConcurrentHashMap<Int, Set<Int>>()
 
     fun sanitizeCatalog(cat: CatalogDefinition): CatalogDefinition {
-        val f = cat.filter ?: CatalogFilterCriteria()
+        val f = cat.filter
         val safeFilter = f.copy(
-            personQuery = f.personQuery ?: "",
-            studioQuery = f.studioQuery ?: "",
+            personQuery = f.personQuery.ifEmpty { "" },
+            studioQuery = f.studioQuery.ifEmpty { "" },
             personTmdbId = f.personTmdbId,
             studioTmdbId = f.studioTmdbId,
-            genres = f.genres ?: emptyList(),
-            languages = f.languages ?: emptyList(),
-            keywords = f.keywords ?: emptyList(),
-            mediaType = f.mediaType ?: "all"
+            genres = f.genres,
+            languages = f.languages,
+            keywords = f.keywords,
+            mediaType = f.mediaType.ifEmpty { "all" }
         )
         return cat.copy(
             name = cat.name.ifBlank { "Catalog" },

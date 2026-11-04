@@ -115,10 +115,10 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                         gson.fromJson<List<MediaGroup>>(json, type)
                     } catch (e: Exception) {
                         Log.e("MainAppViewModel", "Corrupted media groups cache: ${e.message}")
-                        groupCacheFile.delete()
+                        try { groupCacheFile.delete() } catch (_: Exception) {}
                         null
                     }
-                    list?.filterNotNull()?.filter { it.title != null } ?: emptyList()
+                    list?.filterNotNull() ?: emptyList()
                 } else emptyList()
             } else emptyList()
         } catch (e: Exception) {
@@ -146,7 +146,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         return try {
             groups.filterNotNull().sortedByDescending { group ->
                 val date = group.dateAdded.takeIf { it > 0L }
-                date ?: (group.items?.maxOfOrNull { it.messageId }?.toLong() ?: 0L)
+                date ?: (group.items.maxOfOrNull { it.messageId }?.toLong() ?: 0L)
             }.take(15)
         } catch (e: Exception) {
             Log.e("MainAppViewModel", "Error computing recently added: ${e.message}")

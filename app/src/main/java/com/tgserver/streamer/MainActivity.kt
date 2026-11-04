@@ -41,17 +41,17 @@ class MainActivity : ComponentActivity() {
 
         // 2. Global Uncaught Exception Crash Guard: log crash and auto-heal corrupt caches
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
-        Thread.setDefaultUncaughtExceptionHandler(object : Thread.UncaughtExceptionHandler {
-            override fun uncaughtException(thread: Thread, throwable: Throwable) {
-                try {
-                    android.util.Log.e("CrashGuard", "FATAL uncaught exception on thread ${thread.name}: ${throwable.message}", throwable)
-                    com.tgserver.streamer.server.StreamLog.e("CrashGuard", "FATAL on thread ${thread.name}: ${throwable.message}\n${android.util.Log.getStackTraceString(throwable)}")
-                    val groupCache = java.io.File(filesDir, "media_groups_cache.json")
-                    if (groupCache.exists()) groupCache.delete()
-                } catch (e: Exception) {}
-                defaultHandler?.uncaughtException(thread, throwable)
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            try {
+                android.util.Log.e("CrashGuard", "FATAL uncaught exception on thread ${thread.name}: ${throwable.message}", throwable)
+                com.tgserver.streamer.server.StreamLog.e("CrashGuard", "FATAL on thread ${thread.name}: ${throwable.message}\n${android.util.Log.getStackTraceString(throwable)}")
+                val groupCache = java.io.File(filesDir, "media_groups_cache.json")
+                if (groupCache.exists()) groupCache.delete()
+            } catch (e: Exception) {}
+            if (defaultHandler != null) {
+                defaultHandler.uncaughtException(thread, throwable)
             }
-        })
+        }
 
         // 3. Startup crash recovery: if consecutive startup crashes detected, auto-heal caches without wiping user session/login
         try {
