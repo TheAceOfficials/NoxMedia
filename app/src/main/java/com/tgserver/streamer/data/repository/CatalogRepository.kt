@@ -55,7 +55,7 @@ class CatalogRepository(
             mediaType = f.mediaType ?: "all"
         )
         return cat.copy(
-            title = cat.title ?: "Catalog",
+            name = cat.name.ifBlank { "Catalog" },
             filter = safeFilter,
             sortOrder = cat.sortOrder
         )
