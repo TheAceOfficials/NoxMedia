@@ -111,15 +111,11 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                 val json = groupCacheFile.readText()
                 if (json.isNotBlank()) {
                     val type = object : TypeToken<List<MediaGroup>>() {}.type
-                    val list: List<MediaGroup>? = gson.fromJson<List<MediaGroup>>(json, type)
-                    list?.filterNotNull()?.filter { group ->
-                        group.key != null && group.title != null && group.items != null && group.items.isNotEmpty()
-                    } ?: emptyList()
+                    gson.fromJson<List<MediaGroup>>(json, type) ?: emptyList()
                 } else emptyList()
             } else emptyList()
-        } catch (t: Throwable) {
-            Log.e("MainAppViewModel", "Failed to load cached media groups: ${t.message}")
-            try { groupCacheFile.delete() } catch (e: Exception) {}
+        } catch (e: Exception) {
+            Log.e("MainAppViewModel", "Failed to load cached media groups: ${e.message}")
             emptyList()
         }
     }
@@ -127,27 +123,17 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     private fun saveCachedMediaGroups(groups: List<MediaGroup>) {
         try {
             val json = gson.toJson(groups)
-            val tmpFile = File(groupCacheFile.parentFile, "${groupCacheFile.name}.tmp")
-            tmpFile.writeText(json)
-            if (tmpFile.exists() && tmpFile.length() > 0) {
-                if (groupCacheFile.exists()) groupCacheFile.delete()
-                tmpFile.renameTo(groupCacheFile)
-            }
-        } catch (t: Throwable) {
-            Log.e("MainAppViewModel", "Failed to save cached media groups: ${t.message}")
+            groupCacheFile.writeText(json)
+        } catch (e: Exception) {
+            Log.e("MainAppViewModel", "Failed to save cached media groups: ${e.message}")
         }
     }
 
     private fun computeRecentlyAdded(groups: List<MediaGroup>): List<MediaGroup> {
-        return try {
-            groups.filter { it.items != null && it.items.isNotEmpty() }.sortedByDescending { group ->
-                val date = group.dateAdded.takeIf { it > 0L }
-                date ?: (group.items.mapNotNull { it.messageId }.maxOrNull()?.toLong() ?: 0L)
-            }.take(15)
-        } catch (t: Throwable) {
-            Log.w("MainAppViewModel", "Failed to compute recently added: ${t.message}")
-            emptyList()
-        }
+        return groups.sortedByDescending { group ->
+            val date = group.dateAdded.takeIf { it > 0L }
+            date ?: (group.items.maxOfOrNull { it.messageId }?.toLong() ?: 0L)
+        }.take(15)
     }
 
     private val initialCachedGroups = loadCachedMediaGroups()
@@ -1701,9 +1687,6 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     fun deleteDuplicates(): Int {
         val res = tgClient.deleteDuplicates()
         _duplicateScanCount.value = 0
-        if (res > 0) {
-            triggerAutoCloudBackupDebounced(0L)
-        }
         return res
     }
 
@@ -1737,9 +1720,6 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     fun purgeDeadFiles(): Int {
         val res = tgClient.purgeDeadFiles()
         _deadFilesScanCount.value = 0
-        if (res > 0) {
-            triggerAutoCloudBackupDebounced(0L)
-        }
         return res
     }
 
@@ -1826,7 +1806,6 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             put("autoBackupEnabled", cfg.autoBackupEnabled)
             put("autoBackupIntervalHours", cfg.autoBackupIntervalHours)
             put("animeMetadataPreference", cfg.animeMetadataPreference)
-            put("backupDestination", cfg.backupDestination)
             put("cloudSyncLibrary", cfg.cloudSyncLibrary)
             put("aiProvider", cfg.aiProvider)
             put("geminiApiKey", cfg.geminiApiKey)
@@ -1835,22 +1814,15 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
 
         val mediaList = tgClient.getAllMediaItems()
         val catalogList = _catalogs.value
-        val deletedIds = tgClient.getDeletedMediaIds().toList()
         val root = JSONObject().apply {
             put("version", 3)
             put("appName", "NoxMedia")
             put("deviceId", syncDeviceId)
             put("deviceName", syncDeviceName)
             put("timestamp", System.currentTimeMillis())
-            put("backupDestination", cfg.backupDestination)
             put("settings", settingsObj)
             put("channels", channelsJsonArray)
             put("mediaCount", mediaList.size)
-            if (deletedIds.isNotEmpty()) {
-                val delArray = JSONArray()
-                deletedIds.forEach { delArray.put(it) }
-                put("deletedMediaIds", delArray)
-            }
             if (mediaList.isNotEmpty()) {
                 put("mediaItems", JSONArray(Gson().toJson(mediaList)))
             }
@@ -1877,7 +1849,6 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
 
             if (settingsObj != null) {
                 val cur = _config.value
-                val rawDest = settingsObj.optString("backupDestination", root.optString("backupDestination", cur.backupDestination))
                 val updated = cur.copy(
                     preferredQuality = settingsObj.optString("preferredQuality", cur.preferredQuality),
                     hideCamTs = settingsObj.optBoolean("hideCamTs", cur.hideCamTs),
@@ -1892,28 +1863,14 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                     autoBackupEnabled = settingsObj.optBoolean("autoBackupEnabled", cur.autoBackupEnabled),
                     autoBackupIntervalHours = settingsObj.optInt("autoBackupIntervalHours", cur.autoBackupIntervalHours),
                     animeMetadataPreference = settingsObj.optString("animeMetadataPreference", cur.animeMetadataPreference),
-                    backupDestination = rawDest,
+                    backupDestination = settingsObj.optString("backupDestination", cur.backupDestination),
                     cloudSyncLibrary = settingsObj.optBoolean("cloudSyncLibrary", cur.cloudSyncLibrary),
                     aiProvider = settingsObj.optString("aiProvider", cur.aiProvider),
                     geminiApiKey = settingsObj.optString("geminiApiKey", cur.geminiApiKey),
                     openRouterApiKey = settingsObj.optString("openRouterApiKey", cur.openRouterApiKey)
                 )
                 saveStoredConfig(updated)
-                if (rawDest.isNotBlank()) {
-                    prefs.edit().putString("backup_destination", rawDest).apply()
-                }
                 settingsRestored = true
-            }
-
-            if (root.has("deletedMediaIds")) {
-                try {
-                    val arr = root.getJSONArray("deletedMediaIds")
-                    val ids = mutableListOf<String>()
-                    for (i in 0 until arr.length()) {
-                        ids.add(arr.getString(i))
-                    }
-                    tgClient.recordDeletedMediaIds(ids)
-                } catch (e: Exception) {}
             }
 
             if (root.has("catalogs")) {
@@ -1921,10 +1878,9 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                     val catArr = root.getJSONArray("catalogs")
                     val type = object : TypeToken<List<CatalogDefinition>>() {}.type
                     val list: List<CatalogDefinition> = Gson().fromJson(catArr.toString(), type) ?: emptyList()
-                    val sanitized = list.filterNotNull().map { catalogRepo.sanitizeCatalog(it) }
-                    if (sanitized.isNotEmpty()) {
-                        catalogRepo.saveCatalogs(sanitized)
-                        _catalogs.value = sanitized
+                    if (list.isNotEmpty()) {
+                        catalogRepo.saveCatalogs(list)
+                        _catalogs.value = list
                     }
                 } catch (e: Exception) {
                     Log.e("MainAppViewModel", "Failed to restore catalogs: ${e.message}")

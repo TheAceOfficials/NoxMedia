@@ -42,22 +42,6 @@ class CatalogRepository(
     // In-memory cache of Company TMDB ID -> Set of TMDB Media IDs
     private val companyFilmographyCache = ConcurrentHashMap<Int, Set<Int>>()
 
-    fun sanitizeCatalog(cat: CatalogDefinition): CatalogDefinition {
-        val f = cat.filter ?: CatalogFilterCriteria()
-        val safeFilter = f.copy(
-            personQuery = f.personQuery ?: "",
-            studioQuery = f.studioQuery ?: "",
-            genres = (f.genres ?: emptyList()).filterNotNull(),
-            languages = (f.languages ?: emptyList()).filterNotNull(),
-            keywords = (f.keywords ?: emptyList()).filterNotNull(),
-            mediaType = f.mediaType ?: "all"
-        )
-        return cat.copy(
-            name = if (cat.name.isNullOrBlank()) "Untitled" else cat.name,
-            filter = safeFilter
-        )
-    }
-
     fun getCatalogs(): List<CatalogDefinition> {
         val rawJson = prefs.getString(PREF_KEY_CATALOGS, null)
         if (rawJson.isNullOrBlank()) {
@@ -67,9 +51,8 @@ class CatalogRepository(
         return try {
             val type = object : TypeToken<List<CatalogDefinition>>() {}.type
             val list: List<CatalogDefinition> = gson.fromJson(rawJson, type) ?: emptyList()
-            val sanitized = list.filterNotNull().map { sanitizeCatalog(it) }
             // Clean up any legacy starter catalogs if present
-            val cleaned = sanitized.filter { !it.id.startsWith("starter_") }
+            val cleaned = list.filter { !it.id.startsWith("starter_") }
             if (cleaned.size != list.size) {
                 saveCatalogs(cleaned)
             }
@@ -649,13 +632,12 @@ class CatalogRepository(
         personTmdbIds: Set<Int> = emptySet(),
         studioTmdbIds: Set<Int> = emptySet()
     ): List<MediaGroup> {
-        return try {
-            val f = catalog.filter ?: CatalogFilterCriteria()
-            val cleanPersonQuery = (f.personQuery ?: "").trim().lowercase()
-            val cleanStudioQuery = (f.studioQuery ?: "").trim().lowercase()
-            val genresLower = (f.genres ?: emptyList()).filterNotNull().map { it.lowercase() }
-            val keywordsLower = (f.keywords ?: emptyList()).filterNotNull().map { it.lowercase() }
-            val languagesLower = (f.languages ?: emptyList()).filterNotNull().map { it.lowercase() }
+        val f = catalog.filter
+        val cleanPersonQuery = f.personQuery.trim().lowercase()
+        val cleanStudioQuery = f.studioQuery.trim().lowercase()
+        val genresLower = f.genres.map { it.lowercase() }
+        val keywordsLower = f.keywords.map { it.lowercase() }
+        val languagesLower = f.languages.map { it.lowercase() }
 
         val filtered = mediaGroups.filter { group ->
             // Exclude hidden groups
@@ -779,16 +761,12 @@ class CatalogRepository(
             true
         }
 
-            // Sort items
-            when (f.sortBy ?: CatalogSortBy.RECENT) {
-                CatalogSortBy.RECENT -> if (f.sortAscending) filtered.sortedBy { it.dateAdded } else filtered.sortedByDescending { it.dateAdded }
-                CatalogSortBy.RATING -> if (f.sortAscending) filtered.sortedBy { it.rating } else filtered.sortedByDescending { it.rating }
-                CatalogSortBy.YEAR -> if (f.sortAscending) filtered.sortedBy { it.year?.toIntOrNull() ?: 0 } else filtered.sortedByDescending { it.year?.toIntOrNull() ?: 0 }
-                CatalogSortBy.TITLE -> if (f.sortAscending) filtered.sortedBy { it.title.lowercase() } else filtered.sortedByDescending { it.title.lowercase() }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error filtering media for catalog: ${e.message}", e)
-            emptyList()
+        // Sort items
+        return when (f.sortBy) {
+            CatalogSortBy.RECENT -> if (f.sortAscending) filtered.sortedBy { it.dateAdded } else filtered.sortedByDescending { it.dateAdded }
+            CatalogSortBy.RATING -> if (f.sortAscending) filtered.sortedBy { it.rating } else filtered.sortedByDescending { it.rating }
+            CatalogSortBy.YEAR -> if (f.sortAscending) filtered.sortedBy { it.year?.toIntOrNull() ?: 0 } else filtered.sortedByDescending { it.year?.toIntOrNull() ?: 0 }
+            CatalogSortBy.TITLE -> if (f.sortAscending) filtered.sortedBy { it.title.lowercase() } else filtered.sortedByDescending { it.title.lowercase() }
         }
     }
 }

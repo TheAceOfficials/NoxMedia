@@ -97,7 +97,6 @@ class TelegramClientManager(private val context: Context) {
     private val unmatchedIndex = ConcurrentHashMap<String, UnmatchedItem>()
     private val activeScanJobs = ConcurrentHashMap<Long, Job>()
     private val detectedDeadIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
-    private val deletedMediaIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val managerScope = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
     private var autoScanJob: Job? = null
     // Android playback stream tracking (isolated)
@@ -197,10 +196,6 @@ class TelegramClientManager(private val context: Context) {
         StreamLog.init(context)
         loadSession()
         loadChannels()
-        try {
-            val savedDeleted = prefs.getStringSet("deleted_media_ids", emptySet()) ?: emptySet()
-            deletedMediaIds.addAll(savedDeleted)
-        } catch (e: Exception) {}
         CoroutineScope(Dispatchers.IO).launch {
             loadMediaIndex()
             loadUnmatchedIndex()
@@ -410,13 +405,9 @@ class TelegramClientManager(private val context: Context) {
         if (!json.isNullOrBlank()) {
             val type = object : TypeToken<List<MediaItem>>() {}.type
             val list: List<MediaItem> = gson.fromJson(json, type) ?: emptyList()
-            list.filterNotNull().filter { it.id != null && it.title != null }.forEach {
-                if (!deletedMediaIds.contains(it.id)) {
-                    it.title = MetadataEnricher.cleanCandidateTitle(it.title ?: "")
-                    it.fileName = it.fileName ?: ""
-                    it.quality = it.quality ?: ""
-                    mediaIndex[it.id] = it
-                }
+            list.forEach {
+                it.title = MetadataEnricher.cleanCandidateTitle(it.title)
+                mediaIndex[it.id] = it
             }
         }
 
@@ -657,7 +648,6 @@ class TelegramClientManager(private val context: Context) {
 
     fun deleteDuplicates(): Int {
         var removed = cleanupSplitDuplicates()
-        val removedIds = mutableListOf<String>()
 
         // 1. Remove exact identical file duplicates (same channel, fileName, sizeBytes)
         val duplicatesByNameAndSize = mediaIndex.values.filter { !it.isSplit }
@@ -670,10 +660,7 @@ class TelegramClientManager(private val context: Context) {
                         .thenByDescending { it.messageId }
                 )
                 val toRemove = sorted.drop(1)
-                toRemove.forEach {
-                    mediaIndex.remove(it.id)
-                    removedIds.add(it.id)
-                }
+                toRemove.forEach { mediaIndex.remove(it.id) }
                 removed += toRemove.size
             }
         }
@@ -690,19 +677,9 @@ class TelegramClientManager(private val context: Context) {
                         .thenByDescending { it.messageId }
                 )
                 val toRemove = sorted.drop(1)
-                toRemove.forEach {
-                    mediaIndex.remove(it.id)
-                    removedIds.add(it.id)
-                }
+                toRemove.forEach { mediaIndex.remove(it.id) }
                 removed += toRemove.size
             }
-        }
-
-        if (removedIds.isNotEmpty()) {
-            deletedMediaIds.addAll(removedIds)
-            try {
-                prefs.edit().putStringSet("deleted_media_ids", deletedMediaIds.toSet()).apply()
-            } catch (e: Exception) {}
         }
 
         if (removed > 0) {
@@ -824,16 +801,10 @@ class TelegramClientManager(private val context: Context) {
             itIsInvalidMessage(it)
         }
         if (deadItems.isNotEmpty()) {
-            val purgedIds = mutableListOf<String>()
             deadItems.forEach {
                 mediaIndex.remove(it.id)
                 detectedDeadIds.remove(it.id)
-                purgedIds.add(it.id)
             }
-            deletedMediaIds.addAll(purgedIds)
-            try {
-                prefs.edit().putStringSet("deleted_media_ids", deletedMediaIds.toSet()).apply()
-            } catch (e: Exception) {}
             saveMediaIndex()
             _mediaState.value = mediaIndex.values.toList()
         }
@@ -1168,12 +1139,7 @@ class TelegramClientManager(private val context: Context) {
         val json = gson.toJson(list)
         try {
             val file = File(context.filesDir, "media_index.json")
-            val tmpFile = File(context.filesDir, "media_index.json.tmp")
-            tmpFile.writeText(json)
-            if (tmpFile.exists() && tmpFile.length() > 0) {
-                if (file.exists()) file.delete()
-                tmpFile.renameTo(file)
-            }
+            file.writeText(json)
         } catch (e: Exception) {
             Log.e(TAG, "Error saving media_index.json: ${e.message}")
         }
@@ -2075,33 +2041,8 @@ class TelegramClientManager(private val context: Context) {
         _mediaState.value = mediaIndex.values.toList()
     }
 
-    fun recordDeletedMediaIds(ids: Collection<String>) {
-        if (ids.isEmpty()) return
-        deletedMediaIds.addAll(ids)
-        try {
-            prefs.edit().putStringSet("deleted_media_ids", deletedMediaIds.toSet()).apply()
-        } catch (e: Exception) {}
-
-        var changed = false
-        ids.forEach { id ->
-            if (mediaIndex.remove(id) != null) {
-                changed = true
-            }
-        }
-        if (changed) {
-            saveMediaIndex()
-            _mediaState.value = mediaIndex.values.toList()
-        }
-    }
-
-    fun getDeletedMediaIds(): Set<String> = deletedMediaIds.toSet()
-
     fun removeMediaItems(itemIds: Collection<String>) {
         if (itemIds.isEmpty()) return
-        deletedMediaIds.addAll(itemIds)
-        try {
-            prefs.edit().putStringSet("deleted_media_ids", deletedMediaIds.toSet()).apply()
-        } catch (e: Exception) {}
         itemIds.forEach { mediaIndex.remove(it) }
         saveMediaIndex()
         _mediaState.value = mediaIndex.values.toList()
@@ -2114,7 +2055,6 @@ class TelegramClientManager(private val context: Context) {
     fun mergeMediaItems(incoming: List<MediaItem>): Int {
         var updatedCount = 0
         incoming.forEach { item ->
-            if (item.id == null || deletedMediaIds.contains(item.id)) return@forEach
             val existing = mediaIndex[item.id]
             if (existing == null) {
                 mediaIndex[item.id] = item

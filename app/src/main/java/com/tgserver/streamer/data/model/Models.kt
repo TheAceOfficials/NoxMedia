@@ -225,7 +225,7 @@ enum class LibrarySortOrder(val label: String) {
 }
 
 fun List<MediaItem>.toMediaGroups(): List<MediaGroup> {
-    val allMedia = this.filterNotNull().filter { it.title != null && it.fileName != null }
+    val allMedia = this
     if (allMedia.isEmpty()) return emptyList()
 
     val splitItems = allMedia.filter { it.isSplit }
