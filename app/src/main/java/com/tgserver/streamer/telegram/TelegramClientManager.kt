@@ -105,7 +105,7 @@ class TelegramClientManager(private val context: Context) {
         try {
             val current = prefs.getStringSet("deleted_media_ids", emptySet())?.toMutableSet() ?: mutableSetOf()
             current.addAll(ids)
-            val pruned = if (current.size > 5000) current.takeLast(5000).toSet() else current
+            val pruned = if (current.size > 5000) current.toList().takeLast(5000).toSet() else current
             prefs.edit().putStringSet("deleted_media_ids", pruned).apply()
         } catch (e: Exception) {
             Log.e(TAG, "Error recording deleted media ids: ${e.message}")
