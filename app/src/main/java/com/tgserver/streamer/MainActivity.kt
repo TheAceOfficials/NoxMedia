@@ -33,6 +33,41 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // 1. Initialize custom disk logger early
+        try {
+            com.tgserver.streamer.server.StreamLog.init(applicationContext)
+        } catch (e: Exception) {}
+
+        // 2. Global Uncaught Exception Crash Guard: log crash and auto-heal corrupt caches
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            try {
+                android.util.Log.e("CrashGuard", "FATAL uncaught exception on thread ${thread.name}: ${throwable.message}", throwable)
+                com.tgserver.streamer.server.StreamLog.e("CrashGuard", "FATAL on thread ${thread.name}: ${throwable.message}\n${android.util.Log.getStackTraceString(throwable)}")
+                val groupCache = java.io.File(filesDir, "media_groups_cache.json")
+                if (groupCache.exists()) groupCache.delete()
+            } catch (e: Exception) {}
+            if (defaultHandler != null) {
+                defaultHandler.uncaughtException(thread, throwable)
+            }
+        }
+
+        // 3. Startup crash recovery: if consecutive startup crashes detected, auto-heal caches without wiping user session/login
+        try {
+            val prefs = getSharedPreferences("tg_server_prefs", android.content.Context.MODE_PRIVATE)
+            val crashes = prefs.getInt("startup_crash_count", 0)
+            if (crashes >= 2) {
+                val groupCache = java.io.File(filesDir, "media_groups_cache.json")
+                if (groupCache.exists()) groupCache.delete()
+                filesDir.listFiles()?.filter { it.name.endsWith(".tmp") }?.forEach { it.delete() }
+                prefs.edit().putInt("startup_crash_count", 0).apply()
+                android.util.Log.w("MainActivity", "Auto-healed startup caches after repeated startup crashes.")
+            } else {
+                prefs.edit().putInt("startup_crash_count", crashes + 1).apply()
+            }
+        } catch (e: Exception) {}
+
         enableEdgeToEdge()
 
         // Request notification permission on Android 13+ for foreground service notifications.
@@ -63,5 +98,16 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Reset startup crash counter once UI is safely up and resumed
+        try {
+            getSharedPreferences("tg_server_prefs", android.content.Context.MODE_PRIVATE)
+                .edit()
+                .putInt("startup_crash_count", 0)
+                .apply()
+        } catch (e: Exception) {}
     }
 }
