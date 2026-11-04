@@ -42,6 +42,25 @@ class CatalogRepository(
     // In-memory cache of Company TMDB ID -> Set of TMDB Media IDs
     private val companyFilmographyCache = ConcurrentHashMap<Int, Set<Int>>()
 
+    fun sanitizeCatalog(cat: CatalogDefinition): CatalogDefinition {
+        val f = cat.filter ?: CatalogFilterCriteria()
+        val safeFilter = f.copy(
+            personQuery = f.personQuery ?: "",
+            studioQuery = f.studioQuery ?: "",
+            personTmdbId = f.personTmdbId,
+            studioTmdbId = f.studioTmdbId,
+            genres = f.genres ?: emptyList(),
+            languages = f.languages ?: emptyList(),
+            keywords = f.keywords ?: emptyList(),
+            mediaType = f.mediaType ?: "all"
+        )
+        return cat.copy(
+            title = cat.title ?: "Catalog",
+            filter = safeFilter,
+            sortOrder = cat.sortOrder
+        )
+    }
+
     fun getCatalogs(): List<CatalogDefinition> {
         val rawJson = prefs.getString(PREF_KEY_CATALOGS, null)
         if (rawJson.isNullOrBlank()) {
@@ -51,8 +70,8 @@ class CatalogRepository(
         return try {
             val type = object : TypeToken<List<CatalogDefinition>>() {}.type
             val list: List<CatalogDefinition> = gson.fromJson(rawJson, type) ?: emptyList()
-            // Clean up any legacy starter catalogs if present
-            val cleaned = list.filter { !it.id.startsWith("starter_") }
+            // Clean up any legacy starter catalogs if present and sanitize fields safely
+            val cleaned = list.filterNotNull().filter { !it.id.startsWith("starter_") }.map { sanitizeCatalog(it) }
             if (cleaned.size != list.size) {
                 saveCatalogs(cleaned)
             }
