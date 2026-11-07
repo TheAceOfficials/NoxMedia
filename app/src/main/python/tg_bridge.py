@@ -449,22 +449,6 @@ async def _get_connected_stream_client(api_id: int, api_hash: str, session_str: 
     except Exception as e:
         print(f"Pre-caching dialogs notice: {e}", flush=True)
 
-    # Pre-warm media sessions on common DCs (1, 2, 4, 5) in background for instant 0ms playback start
-    async def _prewarm_media_dcs(cl):
-        try:
-            curr_dc = await cl.storage.dc_id()
-            for dc in [1, 2, 4, 5]:
-                if dc == curr_dc:
-                    continue
-                try:
-                    await _get_media_session(cl, dc)
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-    asyncio.create_task(_prewarm_media_dcs(_stream_client))
-
     return _stream_client
 
 def fetch_user_profile(api_id: int, api_hash: str, session_str: str, target_avatar_path: str = "") -> str:
@@ -1481,7 +1465,7 @@ class VirtualStreamSession:
         total_tasks = len(self.tasks)
 
         try:
-            # Pre-resolve part 1 message file_id cleanly so chunk 0 begins downloading with 0ms delay
+            # 1. Netflix-style FAST-START: Fetch Chunk 0 with 100% dedicated network priority
             if self.tasks:
                 first_msg_id = self.tasks[0]["msg_id"]
                 try:
@@ -1489,13 +1473,23 @@ class VirtualStreamSession:
                 except Exception:
                     pass
 
-            # High-performance sliding window concurrency: 6 to 10 in-flight chunks based on buffer_mb
-            max_parallel = min(10, max(6, _buffer_pipeline_mb // 3))
-            max_buffered_slices = max_parallel * 2
+                slice0 = await self._fetch_task_slice(self.tasks[0])
+                if slice0 is not None and len(slice0) > 0:
+                    _log_stream(f"Stream[{self.stream_id[:8]}]: FAST-START: Chunk 0 fetched ({len(slice0)} bytes) - delivering immediately!")
+                    await self.queue.put(slice0)
+                    next_to_schedule = 1
+                    next_to_put = 1
+                else:
+                    next_to_schedule = 0
+                    next_to_put = 0
 
-            # Launch initial burst of parallel tasks
-            initial = min(total_tasks, max_parallel)
-            for _ in range(initial):
+            # Safe, high-throughput parallelism: 4 in-flight chunks to avoid Telegram single-session throttling
+            max_parallel = min(5, max(3, _buffer_pipeline_mb // 5))
+            max_buffered_slices = max_parallel * 3
+
+            # Launch initial burst of parallel tasks starting from next_to_schedule
+            initial = min(total_tasks, next_to_schedule + max_parallel)
+            while next_to_schedule < initial and not self._closed:
                 t_idx = next_to_schedule
                 t_info = self.tasks[t_idx]
                 task = asyncio.create_task(self._fetch_task_slice_with_retries(t_idx, t_info))
@@ -1550,17 +1544,15 @@ class VirtualStreamSession:
                         if slice_bytes is not None:
                             results_buffer[seq_idx] = slice_bytes
                         else:
-                            print(f"[VirtualStreamSession] Task {completed_seq} failed after retries, stopping prefetch", flush=True)
-                            self._closed = True
-                            break
+                            # Resilient: do not terminate stream on single task hiccup
+                            print(f"[VirtualStreamSession] Warning: Task {completed_seq} returned None, skipping slice", flush=True)
+                            results_buffer[seq_idx] = b""
 
                 # Deliver ready sequential chunks into the FIFO queue
                 while next_to_put in results_buffer and not self._closed:
                     chunk_bytes = results_buffer.pop(next_to_put)
                     if len(chunk_bytes) > 0:
-                        if next_to_put == 0:
-                            _log_stream(f"Stream[{self.stream_id[:8]}]: First chunk fetched from TG ({len(chunk_bytes)} bytes)")
-                        elif (next_to_put + 1) % 10 == 0 or (next_to_put + 1) == total_tasks:
+                        if (next_to_put + 1) % 10 == 0 or (next_to_put + 1) == total_tasks:
                             _log_stream(f"Stream[{self.stream_id[:8]}]: Prefetched task {next_to_put+1}/{total_tasks} (queue size={self.queue.qsize()})")
                         await self.queue.put(chunk_bytes)
                     next_to_put += 1
