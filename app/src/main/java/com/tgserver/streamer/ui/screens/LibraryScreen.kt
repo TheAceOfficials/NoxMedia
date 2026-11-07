@@ -407,6 +407,9 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
     val currentPlaceholderTitle = searchPlaceholders.getOrElse(placeholderIndex) { "Naruto" }
 
     var selectedGroupKey by remember(navGroupKey) { mutableStateOf(navGroupKey) }
+    LaunchedEffect(navGroupKey) {
+        selectedGroupKey = navGroupKey
+    }
     val selectedGroup = mediaGroups.find { it.key == selectedGroupKey }
 
     var activeFilters by remember { mutableStateOf(ActiveFilters()) }
@@ -1054,6 +1057,7 @@ fun LibraryScreen(viewModel: MainAppViewModel) {
                                             } else {
                                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                                 selectedGroupKey = group.key
+                                                viewModel.openMediaDetails(group.key)
                                             }
                                         },
                                         onLongClick = {
@@ -3509,27 +3513,46 @@ private fun MovieStreamItemRow(
                         detectAudioTracks(listOf(item.qualityBadge + " " + item.fileName))
                             .map { mapLanguageToCode(it) }
                             .filter { it != "UNKNOWN" }
-                            .take(3)
+                            .distinct()
+                            .take(6)
                     }
 
                     if (streamBadges.isNotEmpty() || streamLangs.isNotEmpty()) {
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(5.dp),
-                            verticalArrangement = Arrangement.spacedBy(3.dp),
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
                             modifier = Modifier.padding(top = 2.dp)
                         ) {
-                            streamBadges.forEach { badge ->
-                                LocalBadgeImage(
-                                    resId = badge.resId,
-                                    contentDescription = badge.title,
-                                    height = 13.dp
-                                )
+                            // Row 1: Quality, Visual (HDR/DV), Source (BluRay/WEB-DL), Audio & Channels (Max 6)
+                            if (streamBadges.isNotEmpty()) {
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                                    maxItemsInEachRow = 6
+                                ) {
+                                    streamBadges.take(6).forEach { badge ->
+                                        LocalBadgeImage(
+                                            resId = badge.resId,
+                                            contentDescription = badge.title,
+                                            height = 13.dp
+                                        )
+                                    }
+                                }
                             }
-                            streamLangs.forEach { langCode ->
-                                DisneyLanguageBadge(
-                                    code = langCode,
-                                    height = 13.dp
-                                )
+
+                            // Row 2: ONLY Language Tracks (Max 6)
+                            if (streamLangs.isNotEmpty()) {
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                                    maxItemsInEachRow = 6
+                                ) {
+                                    streamLangs.take(6).forEach { langCode ->
+                                        DisneyLanguageBadge(
+                                            code = langCode,
+                                            height = 13.dp
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -3649,7 +3672,16 @@ private fun MovieStreamItemRow(
                                 lineHeight = 15.5.sp
                             )
 
-                            val rawBadge = item.qualityBadge.ifBlank { item.quality }
+                            val rawBadge = remember(item.qualityBadge, item.quality, item.fileName) {
+                                var b = item.qualityBadge.ifBlank { item.quality }
+                                val itemRes = detectItemResolution(item)
+                                if (itemRes == "FHD" && b.contains("4K", ignoreCase = true)) {
+                                    b = b.replace(Regex("""(?i)\b(4K\s*2160p|4K|2160p)\b"""), "1080p")
+                                } else if (itemRes == "HD" && b.contains("4K", ignoreCase = true)) {
+                                    b = b.replace(Regex("""(?i)\b(4K\s*2160p|4K|2160p)\b"""), "720p")
+                                }
+                                b
+                            }
                             if (rawBadge.isNotBlank()) {
                                 Text(
                                     text = "Specs: $rawBadge",
@@ -4645,24 +4677,40 @@ private fun NetflixAppleBadge(
  * Helper to accurately detect resolution of an item using canonical quality + word boundary regex
  */
 private fun detectItemResolution(item: MediaItem): String {
+    val fn = item.fileName.lowercase()
+        .replace(Regex("""(?i)4khdhub(\.com|\.org|\.net|\.in)?"""), "")
+    val qb = item.qualityBadge.lowercase()
+        .replace(Regex("""(?i)4khdhub(\.com|\.org|\.net|\.in)?"""), "")
     val q = item.quality.lowercase()
-    if (q.contains("2160") || q.contains("4k") || q.contains("uhd")) return "4K"
+        .replace(Regex("""(?i)4khdhub(\.com|\.org|\.net|\.in)?"""), "")
+
+    // 1. Explicit pixel height in fileName is absolute ground truth
+    if (Regex("""\b2160p?\b""").containsMatchIn(fn)) return "4K"
+    if (Regex("""\b(1080p?|fhd)\b""").containsMatchIn(fn)) return "FHD"
+    if (Regex("""\b(720p?)\b""").containsMatchIn(fn)) return "HD"
+    if (Regex("""\b(480p?|sd)\b""").containsMatchIn(fn)) return "SD"
+
+    // 2. Explicit 1080/720/480 in quality or qualityBadge takes priority over generic UHD/4K (e.g. "1080p UHD BluRay")
+    val hasExplicit1080 = qb.contains("1080") || q.contains("1080") || fn.contains("1080")
+    val hasExplicit720 = qb.contains("720") || q.contains("720") || fn.contains("720")
+    val hasExplicit480 = qb.contains("480") || q.contains("480") || fn.contains("480")
+    val hasExplicit2160 = qb.contains("2160") || q.contains("2160") || fn.contains("2160")
+
+    if (hasExplicit2160 && !hasExplicit1080) return "4K"
+    if (hasExplicit1080) return "FHD"
+    if (hasExplicit720) return "HD"
+    if (hasExplicit480) return "SD"
+
+    // 3. Fallback to 4K / UHD only if no 1080p/720p/480p is present anywhere
+    val combined = "$q $qb $fn"
+    if (Regex("""\b(4k|uhd)\b""").containsMatchIn(combined) && !combined.contains("1080") && !combined.contains("720") && !combined.contains("480")) {
+        return "4K"
+    }
+
     if (q.contains("1440") || q.contains("2k") || q.contains("qhd")) return "2K"
     if (q.contains("1080") || q.contains("fhd")) return "FHD"
     if (q.contains("720") || q.contains("hd")) return "HD"
     if (q.contains("480") || q.contains("sd")) return "SD"
-
-    val qb = item.qualityBadge.lowercase()
-    if (Regex("""\b(2160p?|4k|uhd)\b""").containsMatchIn(qb)) return "4K"
-    if (Regex("""\b(1440p?|2k|qhd)\b""").containsMatchIn(qb)) return "2K"
-    if (Regex("""\b(1080p?|fhd)\b""").containsMatchIn(qb)) return "FHD"
-    if (Regex("""\b(720p?|hd)\b""").containsMatchIn(qb)) return "HD"
-
-    val fn = item.fileName.lowercase()
-    if (Regex("""\b(2160p?|4k|uhd)\b""").containsMatchIn(fn)) return "4K"
-    if (Regex("""\b(1440p?|2k|qhd)\b""").containsMatchIn(fn)) return "2K"
-    if (Regex("""\b(1080p?|fhd)\b""").containsMatchIn(fn)) return "FHD"
-    if (Regex("""\b(720p?|hd)\b""").containsMatchIn(fn)) return "HD"
 
     return "FHD"
 }

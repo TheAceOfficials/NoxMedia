@@ -834,16 +834,6 @@ class LocalHttpServer(
             .replace(Regex("""(?i)[\s._\-\(\[]*momstealer[\s._\-\)\]]*"""), "")
             .replace(Regex("""(?i)(katmoviehd|vegamovies|bollyflix|cinemaluxe|topmovies|luxmovies|hdhub4u|moviesmod)"""), "")
 
-        val is4k = fnResClean.contains("2160p") ||
-                   Regex("""(?i)\b(4k|uhd)\b""").containsMatchIn(fnResClean) ||
-                   qLower.contains("2160p") ||
-                   Regex("""(?i)\b(4k|uhd)\b""").containsMatchIn(qLower)
-
-        val is2k = fnResClean.contains("1440p") ||
-                   Regex("""(?i)\b(2k|qhd)\b""").containsMatchIn(fnResClean) ||
-                   qLower.contains("1440p") ||
-                   Regex("""(?i)\b(2k|qhd)\b""").containsMatchIn(qLower)
-
         val is1080 = fnResClean.contains("1080p") ||
                      Regex("""(?i)\b(fhd)\b""").containsMatchIn(fnResClean) ||
                      qLower.contains("1080p") ||
@@ -853,6 +843,14 @@ class LocalHttpServer(
                     Regex("""(?i)\b(hd)\b(?!(\+|plus))""").containsMatchIn(fnResClean) ||
                     qLower.contains("720p") ||
                     Regex("""(?i)\b(hd)\b""").containsMatchIn(qLower)
+
+        val is4k = (fnResClean.contains("2160p") || qLower.contains("2160p")) ||
+                   (!is1080 && !is720 && (Regex("""(?i)\b(4k|uhd)\b""").containsMatchIn(fnResClean) || Regex("""(?i)\b(4k|uhd)\b""").containsMatchIn(qLower)))
+
+        val is2k = fnResClean.contains("1440p") ||
+                   Regex("""(?i)\b(2k|qhd)\b""").containsMatchIn(fnResClean) ||
+                   qLower.contains("1440p") ||
+                   Regex("""(?i)\b(2k|qhd)\b""").containsMatchIn(qLower)
 
         val is480 = fnResClean.contains("480p") ||
                     Regex("""(?i)\b(sd)\b""").containsMatchIn(fnResClean) ||

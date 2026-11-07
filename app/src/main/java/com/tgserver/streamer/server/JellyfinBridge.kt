@@ -1258,10 +1258,10 @@ class JellyfinBridge(
         val fn = (cleanFn + " " + item.quality + " " + item.qualityBadge).lowercase()
 
         // 1. Resolution
-        val is4K = fn.contains("2160") || Regex("""\b(4k|uhd)\b""").containsMatchIn(fn)
         val is1080 = fn.contains("1080") || Regex("""\b(fhd)\b""").containsMatchIn(fn)
         val is720 = fn.contains("720") || Regex("""\b(hd)\b""").containsMatchIn(fn)
         val is480 = fn.contains("480") || Regex("""\b(sd)\b""").containsMatchIn(fn)
+        val is4K = fn.contains("2160") || (Regex("""\b(4k|uhd)\b""").containsMatchIn(fn) && !is1080 && !is720)
 
         val width = when {
             is4K -> 3840

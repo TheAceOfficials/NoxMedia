@@ -174,8 +174,8 @@ data class MediaGroup(
     val has4K: Boolean = items.any {
         val q = it.quality.lowercase()
         val fnClean = it.fileName.lowercase().replace(REGEX_4K_HDHUB, "")
-        q.contains("2160") || REGEX_4K_UHD.containsMatchIn(q) ||
-        fnClean.contains("2160p") || REGEX_4K_UHD.containsMatchIn(fnClean)
+        val hasLowerExplicit = fnClean.contains("1080p") || fnClean.contains("720p") || fnClean.contains("480p")
+        (fnClean.contains("2160p") || q.contains("2160")) || (!hasLowerExplicit && (REGEX_4K_UHD.containsMatchIn(q) || REGEX_4K_UHD.containsMatchIn(fnClean)))
     }
     val has1080p: Boolean = items.any { it.quality.contains("1080", true) || it.quality.contains("FHD", true) || it.fileName.contains("1080p", true) }
     val has720p: Boolean = items.any { it.quality.contains("720", true) || it.quality.contains("HD", true) || it.fileName.contains("720p", true) }

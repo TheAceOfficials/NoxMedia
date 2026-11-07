@@ -14,11 +14,12 @@ _RELEASE_GROUP_RE = re.compile(r"\[[^\]]{1,40}\]")
 
 # Resolutions
 _RES_PATTERNS = [
-    (re.compile(r"(?i)\b(2160p|4k|uhd)\b"), "4K 2160p"),
-    (re.compile(r"(?i)\b(1080p|fhd)\b"), "1080p"),
-    (re.compile(r"(?i)\b(720p|hd)\b"), "720p"),
-    (re.compile(r"(?i)\b(480p|sd)\b"), "480p"),
+    (re.compile(r"(?i)\b2160p?\b"), "4K 2160p"),
+    (re.compile(r"(?i)\b(1080p?|fhd)\b"), "1080p"),
+    (re.compile(r"(?i)\b(720p?|hd)\b"), "720p"),
+    (re.compile(r"(?i)\b(480p?|sd)\b"), "480p"),
     (re.compile(r"(?i)\b(360p|240p)\b"), "360p"),
+    (re.compile(r"(?i)\b(4k|uhd)\b"), "4K 2160p"),
 ]
 
 # HDR / Visual formats
@@ -242,9 +243,15 @@ def parse_media_filename(filename: str, caption: str = "", is_anime: bool = Fals
             languages.add(_LANGUAGES_MAP[w])
 
     # Quality / Resolution
+    res_search_text = re.sub(r"(?i)4khdhub(\.com|\.org|\.net|\.in)?", "", base_no_ext + " " + caption)
     quality = "1080p"
+    has_explicit_lower = bool(re.search(r"(?i)\b(1080p?|fhd|720p?|hd|480p?|sd)\b", res_search_text))
+
     for pat, label in _RES_PATTERNS:
-        if pat.search(base_no_ext + " " + caption):
+        # Don't let generic 4k/uhd override explicit lower resolution like 1080p UHD BluRay
+        if label == "4K 2160p" and has_explicit_lower and not re.search(r"(?i)\b2160p?\b", res_search_text):
+            continue
+        if pat.search(res_search_text):
             quality = label
             break
 

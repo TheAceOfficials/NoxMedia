@@ -445,6 +445,16 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun selectTab(tab: AppTab) {
+        if (tab == AppTab.LIBRARY && _selectedTab.value == AppTab.LIBRARY) {
+            // Re-tapping already selected Library tab acts as Back button if content details is open
+            if (_selectedMediaGroupKey.value != null) {
+                clearSelectedMediaGroup()
+                return
+            }
+        }
+        if (tab != AppTab.LIBRARY && _selectedMediaGroupKey.value != null) {
+            clearSelectedMediaGroup()
+        }
         _selectedTab.value = tab
     }
 
