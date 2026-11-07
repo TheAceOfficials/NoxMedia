@@ -3023,8 +3023,8 @@ class TelegramClientManager(private val context: Context) {
 
         // 1. Auxiliary FFmpeg / Lavf metadata probe:
         //    Nuvio iOS uses Lavf (FFmpeg) concurrently to inspect tracks/codecs/subtitles.
-        //    It is NEVER the primary playback engine (libmpv is) and must run concurrently without killing active playback.
-        val isLavfProbe = userAgent.contains("lavf", ignoreCase = true)
+        //    Small ranges (<= 25MB) run concurrently as auxiliary probes without killing active playback.
+        val isLavfProbe = userAgent.contains("lavf", ignoreCase = true) && contentLength <= 25_000_000L
 
         // 2. Initial Container Header Probe:
         //    Reads container metadata (EBML, Tracks, Codecs) at the very start of the file.

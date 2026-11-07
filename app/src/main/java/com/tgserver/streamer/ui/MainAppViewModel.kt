@@ -1270,11 +1270,16 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     // --- Settings Actions & Persistence ---
 
     private fun loadStoredConfig(): ServerConfig {
+        val rawBufMb = prefs.getInt("buffer_pipeline_mb", 64)
+        val bufMb = if (rawBufMb <= 20) 64 else rawBufMb
+        if (rawBufMb <= 20) {
+            prefs.edit().putInt("buffer_pipeline_mb", 64).apply()
+        }
         return ServerConfig(
             port = prefs.getInt("server_port", 7788),
             bufferChunkSizeKb = prefs.getInt("buffer_chunk_kb", 512),
             diskCacheMb = prefs.getInt("disk_cache_mb", 2048),
-            bufferPipelineMb = prefs.getInt("buffer_pipeline_mb", 64),
+            bufferPipelineMb = bufMb,
             customPosterUrl = prefs.getString("custom_poster_url", "") ?: "",
             customPosterApiKey = prefs.getString("custom_poster_api_key", "") ?: "",
             tmdbApiKey = prefs.getString("tmdb_api_key", "") ?: "",
