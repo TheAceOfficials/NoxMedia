@@ -106,7 +106,8 @@ class TelegramClientManager(private val context: Context) {
         @Volatile var activePlaybackMediaKey: String? = null,
         @Volatile var activePlaybackStartByte: Long = 0L,
         @Volatile var activePlaybackStartTime: Long = 0L,
-        @Volatile var activeLavfFullStreamId: String? = null
+        @Volatile var activeLavfFullStreamId: String? = null,
+        @Volatile var activeLavfStartTime: Long = 0L
     )
     private val clientStreamStates = java.util.concurrent.ConcurrentHashMap<String, ClientStreamState>()
 
@@ -2873,6 +2874,7 @@ class TelegramClientManager(private val context: Context) {
                 if (streamId.isNotBlank()) {
                     if (isLavfFull && state.activePlaybackStreamId != null) {
                         state.activeLavfFullStreamId = streamId
+                        state.activeLavfStartTime = System.currentTimeMillis()
                     } else if (!isLavfProbe && !isHeaderProbe && !isCuesProbe) {
                         state.activePlaybackStreamId = streamId
                         state.activePlaybackStartByte = startByte
@@ -2997,14 +2999,23 @@ class TelegramClientManager(private val context: Context) {
         if (isLavfProbe || isHeaderProbe || isCuesProbe || (isLavfFullStream && state.activePlaybackStreamId != null)) {
             if (isLavfFullStream) {
                 val prevLavf = state.activeLavfFullStreamId
+                val now = System.currentTimeMillis()
                 if (prevLavf != null) {
-                    StreamLog.w(TAG, "[$platform][$clientKey] New Lavf auxiliary demux stream: terminating previous Lavf stream $prevLavf")
-                    try {
-                        bridge.callAttr("close_stream", prevLavf, false)
-                    } catch (ce: Exception) {
-                        StreamLog.w(TAG, "[$platform][$clientKey] Notice closing old Lavf stream $prevLavf: ${ce.message}")
+                    val lavfAge = now - state.activeLavfStartTime
+                    // Only terminate previous Lavf stream if it's genuinely abandoned (> 20s old).
+                    // During MPV / FFmpeg startup bursts, multiple connections open in parallel;
+                    // killing them causes premature connection reset and "[mpv] loading failed".
+                    if (lavfAge > 20_000L) {
+                        StreamLog.w(TAG, "[$platform][$clientKey] Terminating abandoned Lavf stream $prevLavf (age=${lavfAge}ms)")
+                        try {
+                            bridge.callAttr("close_stream", prevLavf, false)
+                        } catch (ce: Exception) {
+                            StreamLog.w(TAG, "[$platform][$clientKey] Notice closing old Lavf stream $prevLavf: ${ce.message}")
+                        }
+                        state.activeLavfFullStreamId = null
+                    } else {
+                        StreamLog.i(TAG, "[$platform][$clientKey] Concurrent Lavf demux stream (age=${lavfAge}ms): keeping previous stream $prevLavf alive")
                     }
-                    state.activeLavfFullStreamId = null
                 }
                 StreamLog.i(TAG, "[$platform][$clientKey] Lavf auxiliary demux stream: range=$startByte-$effectiveEnd/$totalSize (len=${contentLength / 1024 / 1024}MB) - capped prefetch")
             } else {

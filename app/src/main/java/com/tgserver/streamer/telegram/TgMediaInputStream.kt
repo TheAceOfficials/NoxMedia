@@ -52,7 +52,7 @@ class TgMediaInputStream(
 
             var nextChunk: ByteArray? = null
             var retryCount = 0
-            val maxRetries = 10 // Allow up to 10 retries with 500ms delay = 5 seconds of network packet loss / buffer underrun tolerance
+            val maxRetries = 30 // Allow up to 30 retries with 500ms delay = 15 seconds of network packet loss / buffer underrun tolerance
             while (retryCount < maxRetries && !isClosed) {
                 val pyBytes = try {
                     bridge.callAttr("read_stream_chunk", streamId, bytesNeeded)
