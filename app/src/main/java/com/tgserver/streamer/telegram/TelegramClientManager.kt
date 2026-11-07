@@ -2943,12 +2943,10 @@ class TelegramClientManager(private val context: Context) {
         val currentMediaKey = "${effectiveChannelId}_${media?.id ?: extractedMsgId ?: messageId}"
         val isDifferentMedia = state.activePlaybackMediaKey != null && state.activePlaybackMediaKey != currentMediaKey
         if (isDifferentMedia) {
-            var resetDone = false
             state.activePlaybackStreamId?.let { prevId ->
                 StreamLog.w(TAG, "[$platform][$clientKey] New media selected ($currentMediaKey vs ${state.activePlaybackMediaKey}): terminating previous playback stream $prevId")
                 try {
-                    bridge.callAttr("close_stream", prevId, true)
-                    resetDone = true
+                    bridge.callAttr("close_stream", prevId, false)
                 } catch (ce: Exception) {
                     StreamLog.w(TAG, "[$platform][$clientKey] Notice closing stream for previous media: ${ce.message}")
                 }
@@ -2958,13 +2956,6 @@ class TelegramClientManager(private val context: Context) {
                 try { bridge.callAttr("close_stream", prevLavf, false) } catch (_: Exception) {}
             }
             state.activeLavfFullStreamId = null
-            if (!resetDone) {
-                try {
-                    bridge.callAttr("reset_media_sessions")
-                } catch (ce: Exception) {
-                    StreamLog.w(TAG, "[$platform][$clientKey] Notice resetting media sessions for new media: ${ce.message}")
-                }
-            }
         }
         state.activePlaybackMediaKey = currentMediaKey
 
@@ -3046,7 +3037,7 @@ class TelegramClientManager(private val context: Context) {
             val isUserSeek = !sameOffset && !isStartupBurst
             StreamLog.w(TAG, "[$platform][$clientKey] Active stream superseded ($prevStart -> $startByte, age=${now - prevStartTime}ms): terminating previous stream $prevStreamId (isSeek=$isUserSeek)")
             try {
-                bridge.callAttr("close_stream", prevStreamId, isUserSeek)
+                bridge.callAttr("close_stream", prevStreamId, false)
                 StreamLog.i(TAG, "[$platform][$clientKey] Previous stream $prevStreamId terminated successfully (isSeek=$isUserSeek)")
             } catch (ce: Exception) {
                 StreamLog.w(TAG, "[$platform][$clientKey] Notice closing superseded stream $prevStreamId: ${ce.message}")

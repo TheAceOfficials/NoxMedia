@@ -1104,19 +1104,32 @@ async def _reset_media_session(client: Client, dc_id: int, bad_session: Optional
                 # DO NOT call old_session.results.clear()!
                 # Pyrogram's Session.send needs self.results.pop(msg_id) to find the entry,
                 # see that r.value is None, and cleanly raise TimeoutError rather than crashing with KeyError.
+            if hasattr(old_session, "ping_task") and old_session.ping_task and not old_session.ping_task.done():
+                try:
+                    old_session.ping_task.cancel()
+                except Exception:
+                    pass
+            if hasattr(old_session, "recv_task") and old_session.recv_task and not old_session.recv_task.done():
+                try:
+                    old_session.recv_task.cancel()
+                except Exception:
+                    pass
+            try:
+                await old_session.stop()
+            except Exception:
+                pass
             if hasattr(old_session, "connection") and old_session.connection:
                 try:
                     await old_session.connection.close()
                 except Exception:
                     pass
-            await old_session.stop()
         except Exception:
             pass
 
 async def _reset_all_media_sessions():
     """
-    Unblocks all pending RPC futures and closes all active MTProto media session sockets.
-    Terminates dead in-flight byte streams from Telegram DC immediately to eliminate Head-of-Line blocking.
+    Unblocks all pending RPC futures and closes all active MTProto media session sockets cleanly.
+    Called only during full logout / shutdown.
     """
     async with _media_session_lock:
         sessions_to_close = list(_media_sessions.values())
@@ -1133,16 +1146,27 @@ async def _reset_all_media_sessions():
                         r.event.set()
                     except Exception:
                         pass
-                # DO NOT call s.results.clear()!
-                # Leaving entries intact allows waking workers to pop msg_id cleanly and raise TimeoutError.
+            if hasattr(s, "ping_task") and s.ping_task and not s.ping_task.done():
+                try:
+                    s.ping_task.cancel()
+                except Exception:
+                    pass
+            if hasattr(s, "recv_task") and s.recv_task and not s.recv_task.done():
+                try:
+                    s.recv_task.cancel()
+                except Exception:
+                    pass
+            try:
+                await s.stop()
+            except Exception:
+                pass
             if hasattr(s, "connection") and s.connection:
                 try:
                     await s.connection.close()
                 except Exception:
                     pass
-            await s.stop()
         except Exception as ex:
-            print(f"[ResetMediaSessions] Stop notice: {ex}", flush=True)
+            print(f"[ResetAllMediaSessions] Notice: {ex}", flush=True)
 
     async with _fetch_dedup_lock:
         for k, t in list(_pending_fetches.items()):
@@ -1150,15 +1174,22 @@ async def _reset_all_media_sessions():
             if t and not t.done():
                 t.cancel()
 
-    _log_stream("All MTProto media sessions reset (in-flight socket backlog cleared)", "I")
+    _log_stream("All MTProto media sessions stopped cleanly", "I")
 
 def reset_media_sessions():
     """
-    Exposed bridge method: resets all MTProto media session TCP sockets.
-    Called when a user seeks to flush in-flight byte backlog for instant timeline jumping.
+    Exposed bridge method: cancels all dangling in-flight fetch tasks across streams.
+    Preserves active MTProto media session TCP sockets to eliminate the 10-20s TCP + Auth re-handshake delay.
     """
+    async def _cleanup_dangling():
+        async with _fetch_dedup_lock:
+            for k, t in list(_pending_fetches.items()):
+                _pending_fetches.pop(k, None)
+                if t and not t.done():
+                    t.cancel()
     try:
-        run_async(_reset_all_media_sessions(), timeout=4)
+        run_async(_cleanup_dangling(), timeout=2)
+        _log_stream("Dangling chunk fetch tasks cancelled (media session preserved warm)", "I")
     except Exception as e:
         _log_stream(f"Notice in reset_media_sessions: {e}", "W")
 
@@ -1444,6 +1475,7 @@ class VirtualStreamSession:
         self.queue: asyncio.Queue = asyncio.Queue(maxsize=q_size)
         self._closed = False
         self._eof = False
+        self._is_reading = False
         self._last_active = time.time()
         self.tasks = self._plan_tasks()
         self.prefetch_task: Optional[asyncio.Task] = None
@@ -1561,8 +1593,8 @@ class VirtualStreamSession:
 
             # Worker Concurrency:
             # - For probes: 1 worker only (no bufferbloat, no bandwidth contention with playback)
-            # - For playback: max 2 workers (keeps TCP pipe saturated while avoiding HOL congestion)
-            MAX_IN_FLIGHT = 1 if self.is_probe else min(2, max(1, _buffer_pipeline_mb // 32))
+            # - For playback: 3-4 workers (saturates MTProto pipe for 2x-3x higher throughput)
+            MAX_IN_FLIGHT = 1 if self.is_probe else min(4, max(3, _buffer_pipeline_mb // 16))
             next_task_idx = next_seq_to_emit
             completed_chunks: Dict[int, bytes] = {}
             active_tasks_map: Dict[asyncio.Task, int] = {}
@@ -1570,24 +1602,23 @@ class VirtualStreamSession:
 
             while (next_seq_to_emit < total_tasks) and not self._closed:
                 # Flow control & Abandoned stream check:
-                # If buffer has data waiting and player hasn't called read_bytes in > 20s,
-                # the player paused, disconnected, or switched devices. Terminate prefetch immediately.
+                # Only check idle timeout if the player is NOT currently inside read_bytes
                 idle_sec = time.time() - self._last_active
-                if (self.queue.qsize() > 0 or len(completed_chunks) > 0) and idle_sec > 20.0:
-                    _log_stream(f"Stream[{self.stream_id[:8]}]: Abandoned stream detected ({idle_sec:.1f}s without player reads while data waiting). Terminating background prefetch.", "I")
-                    self._closed = True
-                    break
-                elif idle_sec > 45.0:
-                    _log_stream(f"Stream[{self.stream_id[:8]}]: Idle timeout ({idle_sec:.1f}s without player reads). Terminating stream.", "I")
-                    self._closed = True
-                    break
+                if not getattr(self, "_is_reading", False):
+                    if (self.queue.qsize() > 0 or len(completed_chunks) > 0) and idle_sec > 60.0:
+                        _log_stream(f"Stream[{self.stream_id[:8]}]: Abandoned stream detected ({idle_sec:.1f}s without player reads while data waiting). Terminating background prefetch.", "I")
+                        self._closed = True
+                        break
+                    elif idle_sec > 90.0:
+                        _log_stream(f"Stream[{self.stream_id[:8]}]: Idle timeout ({idle_sec:.1f}s without player reads). Terminating stream.", "I")
+                        self._closed = True
+                        break
 
                 # Dedicated Bandwidth for Buffer Underrun / Fast Recovery:
                 # If player queue is empty and the next required chunk is not yet ready,
-                # limit in-flight concurrency to 1 worker so 100% bandwidth is dedicated
-                # to delivering next_seq_to_emit ASAP without dividing throughput across speculative chunks.
+                # allow 2 workers so chunk N finishes and chunk N+1 is immediately in-flight
                 if self.queue.empty() and (next_seq_to_emit not in completed_chunks):
-                    effective_max_in_flight = 1
+                    effective_max_in_flight = min(2, MAX_IN_FLIGHT)
                 else:
                     effective_max_in_flight = MAX_IN_FLIGHT
 
@@ -1626,9 +1657,9 @@ class VirtualStreamSession:
                         print(f"[VirtualStreamSession] Exception in task {t_idx}: {e}", flush=True)
                         chunk_data = None
 
-                    if chunk_data is not None and len(chunk_data) > 0:
+                    if chunk_data is not None:
                         completed_chunks[t_idx] = chunk_data
-                        if (t_idx + 1) % 10 == 0 or (t_idx + 1) == total_tasks:
+                        if len(chunk_data) > 0 and ((t_idx + 1) % 10 == 0 or (t_idx + 1) == total_tasks):
                             _log_stream(f"Stream[{self.stream_id[:8]}]: Prefetched task {t_idx+1}/{total_tasks} (queue={self.queue.qsize()}, buffered={len(completed_chunks)})")
                     else:
                         # Resilient Retry
@@ -1647,7 +1678,8 @@ class VirtualStreamSession:
                 # 3. Deliver contiguous completed chunks in strict sequential order
                 while next_seq_to_emit in completed_chunks:
                     chunk_to_emit = completed_chunks.pop(next_seq_to_emit)
-                    await self.queue.put(chunk_to_emit)
+                    if len(chunk_to_emit) > 0:
+                        await self.queue.put(chunk_to_emit)
                     next_seq_to_emit += 1
 
         except asyncio.CancelledError:
@@ -1663,79 +1695,85 @@ class VirtualStreamSession:
             await self.queue.put(None)
 
     async def read_bytes(self, max_bytes: int) -> bytes:
+        self._is_reading = True
         self._last_active = time.time()
-        if self.bytes_read == 0 and not getattr(self, "_has_logged_first_read", False):
-            self._has_logged_first_read = True
-            _log_stream(f"Stream[{self.stream_id[:8]}]: First read_bytes from player (max_bytes={max_bytes})")
+        try:
+            if self.bytes_read == 0 and not getattr(self, "_has_logged_first_read", False):
+                self._has_logged_first_read = True
+                _log_stream(f"Stream[{self.stream_id[:8]}]: First read_bytes from player (max_bytes={max_bytes})")
 
-        # Drain all items already queued into chunk_deque
-        while not self.queue.empty():
-            item = self.queue.get_nowait()
-            if item is None:
-                self._eof = True
-                break
-            if item:
-                self.chunk_deque.append(item)
-
-        # If buffer is empty and stream is active, wait for the incoming chunk
-        if not self.chunk_deque and self.current_partial is None and not self._closed and not self._eof:
-            try:
-                item = await asyncio.wait_for(self.queue.get(), timeout=20.0)
+            # Drain all items already queued into chunk_deque
+            while not self.queue.empty():
+                item = self.queue.get_nowait()
                 if item is None:
                     self._eof = True
-                elif item:
+                    break
+                if item:
                     self.chunk_deque.append(item)
-                    # Drain any additional items that completed in the meantime
-                    while not self.queue.empty():
-                        extra = self.queue.get_nowait()
-                        if extra is None:
-                            self._eof = True
-                            break
-                        if extra:
-                            self.chunk_deque.append(extra)
-            except asyncio.TimeoutError:
-                _log_stream(f"Stream[{self.stream_id[:8]}]: Temporary queue wait timeout", level="W")
-                if self.prefetch_task and self.prefetch_task.done():
-                    self._eof = True
 
-        if not self.chunk_deque and self.current_partial is None:
-            return b""
+            # If buffer is empty and stream is active, wait for the incoming chunk
+            if not self.chunk_deque and self.current_partial is None and not self._closed and not self._eof:
+                try:
+                    item = await asyncio.wait_for(self.queue.get(), timeout=25.0)
+                    self._last_active = time.time()
+                    if item is None:
+                        self._eof = True
+                    elif item:
+                        self.chunk_deque.append(item)
+                        # Drain any additional items that completed in the meantime
+                        while not self.queue.empty():
+                            extra = self.queue.get_nowait()
+                            if extra is None:
+                                self._eof = True
+                                break
+                            if extra:
+                                self.chunk_deque.append(extra)
+                except asyncio.TimeoutError:
+                    _log_stream(f"Stream[{self.stream_id[:8]}]: Temporary queue wait timeout", level="W")
+                    if self.prefetch_task and self.prefetch_task.done():
+                        self._eof = True
 
-        parts = []
-        collected = 0
+            if not self.chunk_deque and self.current_partial is None:
+                return b""
 
-        # First consume leftover from previous partial chunk
-        if self.current_partial is not None:
-            rem = len(self.current_partial) - self.current_partial_offset
-            if rem <= (max_bytes - collected):
-                parts.append(self.current_partial[self.current_partial_offset:])
-                collected += rem
-                self.current_partial = None
-                self.current_partial_offset = 0
-            else:
-                take = max_bytes - collected
-                parts.append(self.current_partial[self.current_partial_offset:self.current_partial_offset + take])
-                self.current_partial_offset += take
-                collected += take
-                self.bytes_read += collected
-                return parts[0] if len(parts) == 1 else b"".join(parts)
+            parts = []
+            collected = 0
 
-        # Pull whole or partial chunks from deque without memmove
-        while self.chunk_deque and collected < max_bytes:
-            head = self.chunk_deque[0]
-            needed = max_bytes - collected
-            if len(head) <= needed:
-                parts.append(self.chunk_deque.popleft())
-                collected += len(head)
-            else:
-                parts.append(head[:needed])
-                self.current_partial = self.chunk_deque.popleft()
-                self.current_partial_offset = needed
-                collected += needed
-                break
+            # First consume leftover from previous partial chunk
+            if self.current_partial is not None:
+                rem = len(self.current_partial) - self.current_partial_offset
+                if rem <= (max_bytes - collected):
+                    parts.append(self.current_partial[self.current_partial_offset:])
+                    collected += rem
+                    self.current_partial = None
+                    self.current_partial_offset = 0
+                else:
+                    take = max_bytes - collected
+                    parts.append(self.current_partial[self.current_partial_offset:self.current_partial_offset + take])
+                    self.current_partial_offset += take
+                    collected += take
+                    self.bytes_read += collected
+                    return parts[0] if len(parts) == 1 else b"".join(parts)
 
-        self.bytes_read += collected
-        return parts[0] if len(parts) == 1 else b"".join(parts)
+            # Pull whole or partial chunks from deque without memmove
+            while self.chunk_deque and collected < max_bytes:
+                head = self.chunk_deque[0]
+                needed = max_bytes - collected
+                if len(head) <= needed:
+                    parts.append(self.chunk_deque.popleft())
+                    collected += len(head)
+                else:
+                    parts.append(head[:needed])
+                    self.current_partial = self.chunk_deque.popleft()
+                    self.current_partial_offset = needed
+                    collected += needed
+                    break
+
+            self.bytes_read += collected
+            return parts[0] if len(parts) == 1 else b"".join(parts)
+        finally:
+            self._is_reading = False
+            self._last_active = time.time()
 
     def close(self):
         if not self._closed:
@@ -1793,8 +1831,8 @@ def create_stream(api_id: int, api_hash: str, session_str: str, chat_id: int, pa
 
     async def _async_create():
         now = time.time()
-        # Clean up any streams that have been idle for > 20s (with buffer) or > 45s (without reads)
-        expired = [sid for sid, s in list(_active_streams.items()) if (now - s._last_active > 45.0 or (now - s._last_active > 20.0 and (s.queue.qsize() > 0 or s.bytes_read > 0)))]
+        # Clean up any streams that have been idle for > 60s (with buffer) or > 90s (without reads)
+        expired = [sid for sid, s in list(_active_streams.items()) if not getattr(s, "_is_reading", False) and (now - s._last_active > 90.0 or (now - s._last_active > 60.0 and (s.queue.qsize() > 0 or s.bytes_read > 0)))]
         for sid in expired:
             s = _active_streams.pop(sid, None)
             if s:
@@ -1843,7 +1881,7 @@ def read_stream_chunk(stream_id: str, max_bytes: int = 2097152) -> bytes:
 def close_stream(stream_id: str, is_seek: bool = False):
     """
     Closes and cancels an active stream session and cleans up its prefetch buffer synchronously.
-    If is_seek is True, additionally resets MTProto media session sockets to flush in-flight byte backlog.
+    Preserves MTProto media session TCP sockets across seeks so subsequent range requests start instantly.
     """
     global _active_streams
     session = _active_streams.pop(stream_id, None)
@@ -1851,10 +1889,8 @@ def close_stream(stream_id: str, is_seek: bool = False):
         _log_stream(f"close_stream: called for {stream_id[:8]} (is_seek={bool(is_seek)})")
         async def _async_close():
             session._do_close_loop_safe()
-            if is_seek:
-                await _reset_all_media_sessions()
         try:
-            run_async(_async_close(), timeout=4)
+            run_async(_async_close(), timeout=3)
         except Exception as e:
             _log_stream(f"Notice closing stream {stream_id[:8]}: {e}", "W")
 
