@@ -50,20 +50,39 @@ class TgMediaInputStream(
             val bytesNeeded = minOf(chunkSize.toLong(), totalBytesToRead - totalBytesRead).toInt()
             if (bytesNeeded <= 0) return -1
 
-            val pyBytes = try {
-                bridge.callAttr("read_stream_chunk", streamId, bytesNeeded)
-            } catch (e: Exception) {
-                StreamLog.e(TAG, "Stream $streamId: Error fetching stream chunk: ${e.message}", e)
-                null
+            var nextChunk: ByteArray? = null
+            var retryCount = 0
+            val maxRetries = 10 // Allow up to 10 retries with 500ms delay = 5 seconds of network packet loss / buffer underrun tolerance
+            while (retryCount < maxRetries && !isClosed) {
+                val pyBytes = try {
+                    bridge.callAttr("read_stream_chunk", streamId, bytesNeeded)
+                } catch (e: Exception) {
+                    StreamLog.e(TAG, "Stream $streamId: Error fetching stream chunk: ${e.message}", e)
+                    null
+                }
+
+                if (pyBytes != null) {
+                    val rawBytes = pyBytes.toJava(ByteArray::class.java)
+                    if (rawBytes.isNotEmpty()) {
+                        nextChunk = rawBytes
+                        break
+                    }
+                }
+
+                // If genuine EOF because all bytes requested have been read
+                if (totalBytesRead >= totalBytesToRead) {
+                    break
+                }
+
+                retryCount++
+                try {
+                    Thread.sleep(500)
+                } catch (_: InterruptedException) {
+                    break
+                }
             }
 
-            if (pyBytes == null) {
-                StreamLog.w(TAG, "Stream $streamId: Python returned null chunk at totalRead=$totalBytesRead/$totalBytesToRead")
-                return -1
-            }
-
-            val nextChunk = pyBytes.toJava(ByteArray::class.java)
-            if (nextChunk.isEmpty()) {
+            if (nextChunk == null || nextChunk.isEmpty()) {
                 val elapsed = System.currentTimeMillis() - openTime
                 StreamLog.i(TAG, "Stream $streamId: EOF reached at totalRead=$totalBytesRead/$totalBytesToRead bytes in ${elapsed}ms")
                 return -1
