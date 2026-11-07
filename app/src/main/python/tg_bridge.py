@@ -1200,6 +1200,7 @@ async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_
     tries = 0
     while tries < 3:
         curr_sess_idx = (session_idx + tries) % 2
+        t_start = time.time()
         try:
             session = await _get_media_session(client, dc_id, session_idx=curr_sess_idx)
             r = await asyncio.wait_for(
@@ -1213,9 +1214,11 @@ async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_
                 ),
                 timeout=9.0
             )
+            elapsed_ms = int((time.time() - t_start) * 1000)
 
+            chunk_bytes = None
             if isinstance(r, raw.types.upload.File):
-                return r.bytes
+                chunk_bytes = r.bytes
             elif isinstance(r, raw.types.upload.FileCdnRedirect):
                 cdn_session = Session(
                     client, r.dc_id, await Auth(client, r.dc_id, await client.storage.test_mode()).create(),
@@ -1237,18 +1240,21 @@ async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_
                         r.encryption_key,
                         bytearray(r.encryption_iv[:-4] + (offset // 16).to_bytes(4, "big"))
                     )
-                    return decrypted_chunk
+                    chunk_bytes = decrypted_chunk
                 finally:
                     await cdn_session.stop()
             else:
-                raw_chunk = getattr(r, "bytes", None)
-                if raw_chunk is not None:
-                    return raw_chunk
-                return None
+                chunk_bytes = getattr(r, "bytes", None)
+
+            if chunk_bytes is not None:
+                speed_mb = (len(chunk_bytes) / (1024 * 1024)) / max(0.001, (elapsed_ms / 1000.0))
+                _log_stream(f"Chunk[off={offset // (1024*1024)}MB]: fetched {len(chunk_bytes)//1024}KB in {elapsed_ms}ms from DC{dc_id} sess{curr_sess_idx} ({speed_mb:.1f} MB/s)", "I")
+                return chunk_bytes
+            return None
         except asyncio.CancelledError:
             raise
         except (asyncio.TimeoutError, TimeoutError):
-            print(f"[tg_bridge] Chunk timeout (offset={offset}) on DC {dc_id} sess {curr_sess_idx}, resetting session...", flush=True)
+            _log_stream(f"⚠️ PACKET LOSS / TIMEOUT: Chunk[off={offset // (1024*1024)}MB] timed out after 8s on DC{dc_id} sess{curr_sess_idx} (try {tries+1}/3). Resetting socket...", "W")
             await _reset_media_session(client, dc_id, session_idx=curr_sess_idx)
             tries += 1
             await asyncio.sleep(0.2)
@@ -1263,8 +1269,10 @@ async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_
             elif "FloodWait" in type(e).__name__ or "flood" in err_str.lower():
                 m = re.search(r'(\d+)', err_str)
                 w = int(m.group(1)) if m else 3
+                _log_stream(f"⚠️ FLOOD WAIT: Sleeping {w}s on DC{dc_id}", "W")
                 await asyncio.sleep(w + 0.5)
             elif any(x in err_str for x in ["AuthKey", "SessionRevoked", "ConnectionReset", "BrokenPipe", "Bad file descriptor", "OSError"]):
+                _log_stream(f"⚠️ SOCKET ERROR: {err_str} on DC{dc_id} sess{curr_sess_idx}, resetting socket...", "W")
                 await _reset_media_session(client, dc_id, session_idx=curr_sess_idx)
             tries += 1
             await asyncio.sleep(0.2)
@@ -1858,6 +1866,41 @@ def upload_backup_file(api_id: int, api_hash: str, session_str: str, file_path: 
         return run_async(_async_upload(), timeout=60)
     except Exception as e:
         _log_stream(f"Error uploading backup to Telegram: {e}", "E")
+        return json.dumps({"status": "error", "error": str(e)})
+
+
+def upload_logs_to_telegram(api_id: int, api_hash: str, session_str: str, file_path: str, caption: str = "#NoxMediaLogs", destination: str = "me") -> str:
+    """Uploads a diagnostic log text file directly to Telegram Saved Messages ('me') or target chat."""
+    async def _async_upload_logs():
+        client = await _get_connected_stream_client(int(api_id), str(api_hash), str(session_str))
+        target_chat = _parse_backup_target_chat(destination)
+        if target_chat != "me":
+            if isinstance(target_chat, int):
+                target_chat = await _ensure_channel_peer(client, target_chat)
+            else:
+                try:
+                    c = await client.get_chat(target_chat)
+                    if c:
+                        target_chat = c.id
+                except Exception as ex:
+                    _log_stream(f"Notice resolving logs target chat {target_chat}: {ex}", "W")
+
+        sent = await client.send_document(
+            chat_id=target_chat,
+            document=file_path,
+            caption=caption[:1024]
+        )
+        _log_stream(f"Diagnostic logs exported to Telegram ({target_chat}): message_id={sent.id}")
+        return json.dumps({
+            "status": "success",
+            "message_id": sent.id,
+            "chat": str(target_chat)
+        })
+
+    try:
+        return run_async(_async_upload_logs(), timeout=60)
+    except Exception as e:
+        _log_stream(f"Error exporting logs to Telegram: {e}", "E")
         return json.dumps({"status": "error", "error": str(e)})
 
 

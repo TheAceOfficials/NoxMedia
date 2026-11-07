@@ -34,9 +34,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // 1. Initialize custom disk logger early
+        // 1. Initialize custom disk logger early and clear old session logs on cold launch
         try {
             com.tgserver.streamer.server.StreamLog.init(applicationContext)
+            if (savedInstanceState == null) {
+                com.tgserver.streamer.server.StreamLog.clear()
+            }
         } catch (_: Exception) {}
 
         // 2. Global Uncaught Exception Crash Guard: log crash and auto-heal corrupt caches
@@ -107,5 +110,14 @@ class MainActivity : ComponentActivity() {
                 .putInt("startup_crash_count", 0)
                 .apply()
         } catch (_: Exception) {}
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        if (isFinishing) {
+            try {
+                com.tgserver.streamer.server.StreamLog.clear()
+            } catch (_: Exception) {}
+        }
     }
 }

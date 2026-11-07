@@ -3152,6 +3152,79 @@ class TelegramClientManager(private val context: Context) {
         }
     }
 
+    suspend fun exportLogsToTelegram(destination: String = "me"): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            if (!_sessionState.value.isLoggedIn) {
+                return@withContext Result.failure(IllegalStateException("Telegram is not logged in"))
+            }
+            val bridge = getPyBridge()
+                ?: return@withContext Result.failure(IllegalStateException("Python runtime unavailable"))
+            val apiId = getApiId()
+            val apiHash = getApiHash()
+            val sessionStr = _sessionState.value.sessionString
+            if (sessionStr.isBlank() || apiId <= 0) {
+                return@withContext Result.failure(IllegalStateException("Missing Telegram credentials"))
+            }
+
+            val logs = getAppLogs(maxLines = 4000)
+            val timestamp = System.currentTimeMillis()
+            val dateFormatted = java.text.SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", java.util.Locale.US).format(java.util.Date(timestamp))
+            val logFile = File(context.cacheDir, "noxmedia_logs_${dateFormatted}.txt")
+
+            val header = buildString {
+                appendLine("==================================================")
+                appendLine("         NOXMEDIA STREAMING DIAGNOSTIC LOGS       ")
+                appendLine("==================================================")
+                appendLine("Generated At    : ${java.util.Date(timestamp)}")
+                appendLine("App Version     : Build ${com.tgserver.streamer.BuildConfig.VERSION_CODE} (${com.tgserver.streamer.BuildConfig.VERSION_NAME})")
+                appendLine("Device Model    : ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} (Android ${android.os.Build.VERSION.RELEASE}, SDK ${android.os.Build.VERSION.SDK_INT})")
+                appendLine("Server Port     : ${_serverStatus.value.port}")
+                appendLine("Disk Cache MB   : ${_serverStatus.value.diskCacheMb}")
+                appendLine("Buffer Pipe MB  : ${_serverStatus.value.bufferPipelineMb}")
+                appendLine("Total Entries   : ${logs.size}")
+                appendLine("==================================================")
+                appendLine()
+            }
+
+            logFile.bufferedWriter().use { writer ->
+                writer.write(header)
+                logs.forEach { line ->
+                    writer.write(line)
+                    writer.newLine()
+                }
+            }
+
+            val caption = "📋 **NoxMedia Streaming Diagnostic Logs**\n" +
+                    "📱 Device: `${android.os.Build.MODEL}` (Android ${android.os.Build.VERSION.RELEASE})\n" +
+                    "📅 Time: `${dateFormatted}`\n" +
+                    "📊 Log Entries: `${logs.size}`\n\n" +
+                    "#NoxMediaLogs #Debug"
+
+            val resStr = bridge.callAttr(
+                "upload_logs_to_telegram",
+                apiId,
+                apiHash,
+                sessionStr,
+                logFile.absolutePath,
+                caption,
+                destination
+            )?.toString() ?: ""
+
+            try { logFile.delete() } catch (_: Exception) {}
+
+            val json = JSONObject(resStr)
+            if (json.optString("status") == "success") {
+                Result.success("✓ Logs sent successfully to Telegram Saved Messages!")
+            } else {
+                val err = json.optString("error", "Failed to export logs to Telegram")
+                Result.failure(Exception(err))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "exportLogsToTelegram failed: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
     suspend fun fetchLatestBackupFromTelegram(
         source: String = "me",
         lastSyncTimestamp: Long = 0L

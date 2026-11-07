@@ -1807,6 +1807,31 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         return ok
     }
 
+    private val _isExportingLogs = MutableStateFlow(false)
+    val isExportingLogs: StateFlow<Boolean> = _isExportingLogs.asStateFlow()
+
+    fun exportLogsToTelegram(onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            if (!session.value.isLoggedIn) {
+                onResult(false, "Telegram is not connected")
+                return@launch
+            }
+            _isExportingLogs.value = true
+            try {
+                val res = tgClient.exportLogsToTelegram()
+                if (res.isSuccess) {
+                    onResult(true, "✓ Logs sent to Saved Messages in Telegram!")
+                } else {
+                    onResult(false, res.exceptionOrNull()?.message ?: "Failed to export logs")
+                }
+            } catch (e: Exception) {
+                onResult(false, e.message ?: "Failed to export logs")
+            } finally {
+                _isExportingLogs.value = false
+            }
+        }
+    }
+
     fun exportBackupJson(): String {
         val cfg = _config.value
         val channelList = channels.value
