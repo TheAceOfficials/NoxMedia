@@ -3171,16 +3171,32 @@ class TelegramClientManager(private val context: Context) {
             val dateFormatted = java.text.SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", java.util.Locale.US).format(java.util.Date(timestamp))
             val logFile = File(context.cacheDir, "noxmedia_logs_${dateFormatted}.txt")
 
+            val pInfo = try {
+                context.packageManager.getPackageInfo(context.packageName, 0)
+            } catch (_: Exception) { null }
+            val verName = pInfo?.versionName ?: "1.3"
+            val verCode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                pInfo?.longVersionCode ?: 0L
+            } else {
+                @Suppress("DEPRECATION")
+                (pInfo?.versionCode?.toLong() ?: 0L)
+            }
+
+            val prefs = context.getSharedPreferences("tg_server_prefs", Context.MODE_PRIVATE)
+            val port = prefs.getInt("server_port", 7788)
+            val diskCacheMb = prefs.getInt("disk_cache_mb", 2048)
+            val bufferMb = prefs.getInt("buffer_pipeline_mb", 64)
+
             val header = buildString {
                 appendLine("==================================================")
                 appendLine("         NOXMEDIA STREAMING DIAGNOSTIC LOGS       ")
                 appendLine("==================================================")
                 appendLine("Generated At    : ${java.util.Date(timestamp)}")
-                appendLine("App Version     : Build ${com.tgserver.streamer.BuildConfig.VERSION_CODE} (${com.tgserver.streamer.BuildConfig.VERSION_NAME})")
+                appendLine("App Version     : Build $verCode ($verName)")
                 appendLine("Device Model    : ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} (Android ${android.os.Build.VERSION.RELEASE}, SDK ${android.os.Build.VERSION.SDK_INT})")
-                appendLine("Server Port     : ${_serverStatus.value.port}")
-                appendLine("Disk Cache MB   : ${_serverStatus.value.diskCacheMb}")
-                appendLine("Buffer Pipe MB  : ${_serverStatus.value.bufferPipelineMb}")
+                appendLine("Server Port     : $port")
+                appendLine("Disk Cache MB   : $diskCacheMb")
+                appendLine("Buffer Pipe MB  : $bufferMb")
                 appendLine("Total Entries   : ${logs.size}")
                 appendLine("==================================================")
                 appendLine()

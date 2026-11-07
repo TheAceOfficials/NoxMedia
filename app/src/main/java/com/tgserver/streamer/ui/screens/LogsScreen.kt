@@ -110,7 +110,8 @@ fun LogsScreen(
     val rawLogs by viewModel.appLogs.collectAsState()
     val isRefreshing by viewModel.isRefreshingLogs.collectAsState()
     val isExportingLogs by viewModel.isExportingLogs.collectAsState()
-    val serverStatus by viewModel.serverStatus.collectAsState()
+    val telemetry by viewModel.telemetry.collectAsState()
+    val config by viewModel.config.collectAsState()
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilterTab by remember { mutableStateOf("ALL") }
@@ -429,10 +430,10 @@ fun LogsScreen(
                         Box(
                             modifier = Modifier
                                 .size(6.dp)
-                                .background(if (serverStatus.isRunning) StatusGreen else StatusAmber, CircleShape)
+                                .background(if (telemetry.isRunning) StatusGreen else StatusAmber, CircleShape)
                         )
                         Text(
-                            text = "${serverStatus.bufferPipelineMb} MB",
+                            text = "${config.bufferPipelineMb} MB",
                             color = TextPrimary,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
