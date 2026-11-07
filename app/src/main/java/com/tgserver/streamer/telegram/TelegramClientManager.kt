@@ -2943,16 +2943,21 @@ class TelegramClientManager(private val context: Context) {
             state.activePlaybackStreamId?.let { prevId ->
                 StreamLog.w(TAG, "[$platform][$clientKey] New media selected ($currentMediaKey vs ${state.activePlaybackMediaKey}): terminating previous playback stream $prevId")
                 try {
-                    bridge.callAttr("close_stream", prevId)
+                    bridge.callAttr("close_stream", prevId, true)
                 } catch (ce: Exception) {
                     StreamLog.w(TAG, "[$platform][$clientKey] Notice closing stream for previous media: ${ce.message}")
                 }
             }
             state.activePlaybackStreamId = null
             state.activeLavfFullStreamId?.let { prevLavf ->
-                try { bridge.callAttr("close_stream", prevLavf) } catch (_: Exception) {}
+                try { bridge.callAttr("close_stream", prevLavf, false) } catch (_: Exception) {}
             }
             state.activeLavfFullStreamId = null
+            try {
+                bridge.callAttr("reset_media_sessions")
+            } catch (ce: Exception) {
+                StreamLog.w(TAG, "[$platform][$clientKey] Notice resetting media sessions for new media: ${ce.message}")
+            }
         }
         state.activePlaybackMediaKey = currentMediaKey
 
@@ -3006,18 +3011,26 @@ class TelegramClientManager(private val context: Context) {
                 return
             }
 
-            val isStartupBurst = startByte <= 25_000_000L && (now - prevStartTime) < 4_000L
+            val isStartupBurst = prevStart <= 25_000_000L && startByte <= 25_000_000L && (now - prevStartTime) < 4_000L
             if (isStartupBurst) {
                 StreamLog.i(TAG, "[$platform][$clientKey] Player startup cluster read (offset=$startByte, age=${now - prevStartTime}ms): letting previous stream finish naturally")
                 return
             }
 
-            StreamLog.w(TAG, "[$platform][$clientKey] Active stream superseded ($prevStart -> $startByte, age=${now - prevStartTime}ms): terminating previous stream $prevStreamId")
+            val isUserSeek = !sameOffset && !isStartupBurst
+            StreamLog.w(TAG, "[$platform][$clientKey] Active stream superseded ($prevStart -> $startByte, age=${now - prevStartTime}ms): terminating previous stream $prevStreamId (isSeek=$isUserSeek)")
             try {
-                bridge.callAttr("close_stream", prevStreamId)
-                StreamLog.i(TAG, "[$platform][$clientKey] Previous stream $prevStreamId terminated successfully")
+                bridge.callAttr("close_stream", prevStreamId, isUserSeek)
+                StreamLog.i(TAG, "[$platform][$clientKey] Previous stream $prevStreamId terminated successfully (isSeek=$isUserSeek)")
             } catch (ce: Exception) {
                 StreamLog.w(TAG, "[$platform][$clientKey] Notice closing superseded stream $prevStreamId: ${ce.message}")
+            }
+            if (isUserSeek) {
+                try {
+                    bridge.callAttr("reset_media_sessions")
+                } catch (ce: Exception) {
+                    StreamLog.w(TAG, "[$platform][$clientKey] Notice resetting media sessions: ${ce.message}")
+                }
             }
             state.activePlaybackStreamId = null
         }

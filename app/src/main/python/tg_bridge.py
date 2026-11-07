@@ -1089,13 +1089,65 @@ async def _reset_media_session(client: Client, dc_id: int, bad_session: Optional
             # Another concurrent worker already reset and replaced this session
             return
         old_session = _media_sessions.pop(dc_id, None)
-        if old_session:
-            try:
-                await old_session.stop()
-            except Exception:
-                pass
         if hasattr(client, "media_sessions"):
             client.media_sessions.pop(dc_id, None)
+
+    if old_session:
+        try:
+            if hasattr(old_session, "results") and old_session.results:
+                for r in list(old_session.results.values()):
+                    try:
+                        r.value = None
+                        r.event.set()
+                    except Exception:
+                        pass
+                old_session.results.clear()
+            await old_session.stop()
+        except Exception:
+            pass
+
+async def _reset_all_media_sessions():
+    """
+    Unblocks all pending RPC futures and closes all active MTProto media session sockets.
+    Terminates dead in-flight byte streams from Telegram DC immediately to eliminate Head-of-Line blocking.
+    """
+    async with _media_session_lock:
+        sessions_to_close = list(_media_sessions.values())
+        _media_sessions.clear()
+        if _stream_client and hasattr(_stream_client, "media_sessions"):
+            _stream_client.media_sessions.clear()
+
+    for s in sessions_to_close:
+        try:
+            if hasattr(s, "results") and s.results:
+                for r in list(s.results.values()):
+                    try:
+                        r.value = None
+                        r.event.set()
+                    except Exception:
+                        pass
+                s.results.clear()
+            await s.stop()
+        except Exception as ex:
+            print(f"[ResetMediaSessions] Stop notice: {ex}", flush=True)
+
+    async with _fetch_dedup_lock:
+        for k, t in list(_pending_fetches.items()):
+            _pending_fetches.pop(k, None)
+            if t and not t.done():
+                t.cancel()
+
+    _log_stream("All MTProto media sessions reset (in-flight socket backlog cleared)", "I")
+
+def reset_media_sessions():
+    """
+    Exposed bridge method: resets all MTProto media session TCP sockets.
+    Called when a user seeks to flush in-flight byte backlog for instant timeline jumping.
+    """
+    try:
+        run_async(_reset_all_media_sessions(), timeout=4)
+    except Exception as e:
+        _log_stream(f"Notice in reset_media_sessions: {e}", "W")
 
 def _get_location_from_file_id(file_id_obj: FileId):
     if file_id_obj.file_type == FileType.PHOTO:
@@ -1211,9 +1263,9 @@ async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_
                         offset=offset,
                         limit=limit
                     ),
-                    timeout=16.0
+                    timeout=20.0
                 ),
-                timeout=18.0
+                timeout=22.0
             )
             elapsed_ms = int((time.time() - t_start) * 1000)
 
@@ -1257,7 +1309,7 @@ async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_
         except (asyncio.TimeoutError, TimeoutError):
             tries += 1
             if tries < 2:
-                _log_stream(f"⚠️ SLOW CHUNK: Chunk[off={offset // (1024*1024)}MB] took >16s on DC{dc_id} (try {tries}/3). Retrying on active session...", "W")
+                _log_stream(f"⚠️ SLOW CHUNK: Chunk[off={offset // (1024*1024)}MB] took >20s on DC{dc_id} (try {tries}/3). Retrying on active session...", "W")
                 await asyncio.sleep(0.1)
             else:
                 _log_stream(f"⚠️ PACKET LOSS / TIMEOUT: Chunk[off={offset // (1024*1024)}MB] timed out on DC{dc_id} (try {tries}/3). Resetting socket...", "W")
@@ -1490,8 +1542,8 @@ class VirtualStreamSession:
             else:
                 next_seq_to_emit = 0
 
-            # Sliding Window with Concurrent In-Flight Workers (3-4 chunks max to prevent MTProto socket saturation)
-            MAX_IN_FLIGHT = min(4, max(3, _buffer_pipeline_mb // 20))
+            # Sliding Window with Concurrent In-Flight Workers (2-3 chunks max to prevent MTProto socket saturation and bufferbloat)
+            MAX_IN_FLIGHT = min(3, max(2, _buffer_pipeline_mb // 24))
             next_task_idx = next_seq_to_emit
             completed_chunks: Dict[int, bytes] = {}
             active_tasks_map: Dict[asyncio.Task, int] = {}
@@ -1666,6 +1718,8 @@ class VirtualStreamSession:
         try:
             pct = (self.bytes_read * 100 / max(1, self.total_to_read))
             _log_stream(f"Stream[{self.stream_id[:8]}]: Closed. Delivered {self.bytes_read / (1024*1024):.2f} MB of {self.total_to_read / (1024*1024):.2f} MB ({pct:.1f}%)")
+            self._closed = True
+            self._eof = True
             if self.prefetch_task and not self.prefetch_task.done():
                 self.prefetch_task.cancel()
             for t in list(self.active_tasks):
@@ -1750,15 +1804,23 @@ def read_stream_chunk(stream_id: str, max_bytes: int = 2097152) -> bytes:
         traceback.print_exc()
         return b""
 
-def close_stream(stream_id: str):
+def close_stream(stream_id: str, is_seek: bool = False):
     """
-    Closes and cancels an active stream session and cleans up its prefetch buffer.
+    Closes and cancels an active stream session and cleans up its prefetch buffer synchronously.
+    If is_seek is True, additionally resets MTProto media session sockets to flush in-flight byte backlog.
     """
     global _active_streams
     session = _active_streams.pop(stream_id, None)
     if session:
-        _log_stream(f"close_stream: called for {stream_id[:8]}")
-        session.close()
+        _log_stream(f"close_stream: called for {stream_id[:8]} (is_seek={bool(is_seek)})")
+        async def _async_close():
+            session._do_close_loop_safe()
+            if is_seek:
+                await _reset_all_media_sessions()
+        try:
+            run_async(_async_close(), timeout=4)
+        except Exception as e:
+            _log_stream(f"Notice closing stream {stream_id[:8]}: {e}", "W")
 
 def check_dead_messages(api_id: int, api_hash: str, session_str: str, chat_id: int, message_ids_json: str) -> str:
     """
