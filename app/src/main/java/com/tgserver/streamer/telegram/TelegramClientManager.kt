@@ -3198,8 +3198,10 @@ class TelegramClientManager(private val context: Context) {
 
             val prefs = context.getSharedPreferences("tg_server_prefs", Context.MODE_PRIVATE)
             val port = prefs.getInt("server_port", 7788)
-            val diskCacheMb = prefs.getInt("disk_cache_mb", 2048)
-            val bufferMb = prefs.getInt("buffer_pipeline_mb", 64)
+            val isLowEnd = com.tgserver.streamer.service.StreamerForegroundService.isLowMemoryOr32BitDevice(context)
+            val defaultBuf = if (isLowEnd) 16 else 64
+            val diskCacheMb = prefs.getInt("disk_cache_mb", if (isLowEnd) 1024 else 2048)
+            val bufferMb = prefs.getInt("buffer_pipeline_mb", defaultBuf)
 
             val header = buildString {
                 appendLine("==================================================")
@@ -3208,6 +3210,8 @@ class TelegramClientManager(private val context: Context) {
                 appendLine("Generated At    : ${java.util.Date(timestamp)}")
                 appendLine("App Version     : Build $verCode ($verName)")
                 appendLine("Device Model    : ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} (Android ${android.os.Build.VERSION.RELEASE}, SDK ${android.os.Build.VERSION.SDK_INT})")
+                appendLine("Architecture    : ${if (android.os.Process.is64Bit()) "64-bit (arm64-v8a)" else "32-bit (armeabi-v7a)"}")
+                appendLine("Low-RAM Device  : $isLowEnd")
                 appendLine("Server Port     : $port")
                 appendLine("Disk Cache MB   : $diskCacheMb")
                 appendLine("Buffer Pipe MB  : $bufferMb")

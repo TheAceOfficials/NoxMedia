@@ -52,6 +52,16 @@ class StreamerForegroundService : Service() {
 
         var serverStartTime: Long = 0L
             private set
+
+        fun isLowMemoryOr32BitDevice(context: Context): Boolean {
+            if (!android.os.Process.is64Bit()) return true
+            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+            if (am?.isLowRamDevice == true) return true
+            val memInfo = android.app.ActivityManager.MemoryInfo()
+            am?.getMemoryInfo(memInfo)
+            val totalRamGb = memInfo.totalMem / (1024.0 * 1024.0 * 1024.0)
+            return totalRamGb <= 3.5
+        }
     }
 
     private var server: LocalHttpServer? = null
@@ -62,10 +72,16 @@ class StreamerForegroundService : Service() {
 
     private fun loadConfigFromPrefs() {
         val prefs = applicationContext.getSharedPreferences("tg_server_prefs", Context.MODE_PRIVATE)
-        val rawBufMb = prefs.getInt("buffer_pipeline_mb", 64)
-        val bufMb = if (rawBufMb <= 20) 64 else rawBufMb
-        if (rawBufMb <= 20) {
-            prefs.edit().putInt("buffer_pipeline_mb", 64).apply()
+        val isLowEnd = isLowMemoryOr32BitDevice(applicationContext)
+        val defaultBuf = if (isLowEnd) 16 else 64
+        val rawBufMb = prefs.getInt("buffer_pipeline_mb", defaultBuf)
+        val bufMb = if (isLowEnd) {
+            if (rawBufMb > 24) 16 else rawBufMb
+        } else {
+            if (rawBufMb <= 20) 64 else rawBufMb
+        }
+        if (rawBufMb != bufMb) {
+            prefs.edit().putInt("buffer_pipeline_mb", bufMb).apply()
         }
         activeConfig = ServerConfig(
             port = prefs.getInt("server_port", 8080),

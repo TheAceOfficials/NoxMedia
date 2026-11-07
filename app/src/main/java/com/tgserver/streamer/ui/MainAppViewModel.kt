@@ -1270,10 +1270,16 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     // --- Settings Actions & Persistence ---
 
     private fun loadStoredConfig(): ServerConfig {
-        val rawBufMb = prefs.getInt("buffer_pipeline_mb", 64)
-        val bufMb = if (rawBufMb <= 20) 64 else rawBufMb
-        if (rawBufMb <= 20) {
-            prefs.edit().putInt("buffer_pipeline_mb", 64).apply()
+        val isLowEnd = StreamerForegroundService.isLowMemoryOr32BitDevice(getApplication())
+        val defaultBuf = if (isLowEnd) 16 else 64
+        val rawBufMb = prefs.getInt("buffer_pipeline_mb", defaultBuf)
+        val bufMb = if (isLowEnd) {
+            if (rawBufMb > 24) 16 else rawBufMb
+        } else {
+            if (rawBufMb <= 20) 64 else rawBufMb
+        }
+        if (rawBufMb != bufMb) {
+            prefs.edit().putInt("buffer_pipeline_mb", bufMb).apply()
         }
         return ServerConfig(
             port = prefs.getInt("server_port", 7788),
@@ -1449,15 +1455,17 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
 
     fun restoreServerDefaults(): ServerConfig {
         val current = _config.value
+        val isLowEnd = StreamerForegroundService.isLowMemoryOr32BitDevice(getApplication())
+        val defaultBuf = if (isLowEnd) 16 else 64
         val updated = current.copy(
             port = 7788,
-            diskCacheMb = 2048,
-            bufferPipelineMb = 64,
+            diskCacheMb = if (isLowEnd) 1024 else 2048,
+            bufferPipelineMb = defaultBuf,
             autoSleepEnabled = false,
             autoSleepTimeoutMinutes = 30
         )
         saveStoredConfig(updated)
-        Toast.makeText(getApplication(), "✓ Defaults restored: Cache 2048MB, Buffer 64MB, Port 7788", Toast.LENGTH_SHORT).show()
+        Toast.makeText(getApplication(), "✓ Defaults restored: Cache ${updated.diskCacheMb}MB, Buffer ${updated.bufferPipelineMb}MB, Port 7788", Toast.LENGTH_SHORT).show()
         return updated
     }
 

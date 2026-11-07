@@ -148,8 +148,10 @@ _file_id_lock = asyncio.Lock()
 _pending_file_resolutions: Dict[Tuple[int, int], asyncio.Task] = {}
 
 # High-Performance In-Memory LRU Chunk Cache
-# 48 chunks x 1MB = ~48 MB RAM (blazing fast seeking and repeat header reads)
-_CHUNK_CACHE_MAX_ENTRIES = 48
+# On 32-bit / memory-constrained devices: 12 entries (12 MB) prevents ART Large Object Space (LOS) GC thrashing
+# On 64-bit devices: 48 entries (48 MB) for blazing fast seeking and repeat header reads
+IS_32BIT = (sys.maxsize <= 2**32)
+_CHUNK_CACHE_MAX_ENTRIES = 12 if IS_32BIT else 48
 _chunk_cache: OrderedDict[Tuple[int, int, int], bytes] = OrderedDict()
 _fetch_dedup_lock = asyncio.Lock()
 _pending_fetches: Dict[Tuple[int, int, int], asyncio.Task] = {}
@@ -157,7 +159,7 @@ _pending_fetches: Dict[Tuple[int, int, int], asyncio.Task] = {}
 # Persistent On-Disk Chunk Cache & Buffer Pipeline Config
 _disk_cache_dir: Optional[str] = None
 _disk_cache_max_mb: int = 2048
-_buffer_pipeline_mb: int = 64
+_buffer_pipeline_mb: int = 16 if IS_32BIT else 64
 _last_prune_time: float = 0.0
 _stream_log_path: Optional[str] = None
 
@@ -182,7 +184,11 @@ def configure_cache(cache_dir: str, max_disk_mb: int, buffer_mb: int):
     global _disk_cache_dir, _disk_cache_max_mb, _buffer_pipeline_mb
     _disk_cache_dir = cache_dir
     _disk_cache_max_mb = int(max_disk_mb)
-    _buffer_pipeline_mb = max(2, int(buffer_mb))
+    val = int(buffer_mb)
+    if IS_32BIT and val > 24:
+        _buffer_pipeline_mb = 16
+    else:
+        _buffer_pipeline_mb = max(2, val)
     if _disk_cache_dir and not os.path.exists(_disk_cache_dir):
         try:
             os.makedirs(_disk_cache_dir, exist_ok=True)
@@ -1541,11 +1547,14 @@ class VirtualStreamSession:
         self.chunk_deque: deque = deque()
         self.current_partial: Optional[bytes] = None
         self.current_partial_offset: int = 0
-        # Pipeline buffer: Probes capped at 2MB; playback streams use dynamic buffer_mb (min 48MB, up to 128MB)
+        # Pipeline buffer: Probes capped at 2MB; playback streams use dynamic buffer_mb (min 48MB, up to 128MB on 64-bit; 8-24MB on 32-bit)
         if self.is_probe:
             q_size = 2
         else:
-            q_size = max(24, min(128, max(48, _buffer_pipeline_mb)))
+            if IS_32BIT:
+                q_size = max(8, min(24, _buffer_pipeline_mb))
+            else:
+                q_size = max(24, min(128, max(48, _buffer_pipeline_mb)))
         self.queue: asyncio.Queue = asyncio.Queue(maxsize=q_size)
         self._closed = False
         self._eof = False
@@ -1927,6 +1936,10 @@ class VirtualStreamSession:
                 if t and not t.done():
                     t.cancel()
             self.in_flight_keys.clear()
+
+            if IS_32BIT:
+                import gc
+                gc.collect(1)
         except Exception as e:
             print(f"[VirtualStreamSession._do_close_loop_safe] Error: {e}", flush=True)
 
