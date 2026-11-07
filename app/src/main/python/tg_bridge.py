@@ -1082,8 +1082,12 @@ async def _get_media_session(client: Client, dc_id: int) -> Session:
         client.media_sessions[dc_id] = session
         return session
 
-async def _reset_media_session(client: Client, dc_id: int):
+async def _reset_media_session(client: Client, dc_id: int, bad_session: Optional[Session] = None):
     async with _media_session_lock:
+        current_session = _media_sessions.get(dc_id)
+        if bad_session is not None and current_session is not bad_session:
+            # Another concurrent worker already reset and replaced this session
+            return
         old_session = _media_sessions.pop(dc_id, None)
         if old_session:
             try:
@@ -1197,6 +1201,7 @@ async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_
     tries = 0
     while tries < 3:
         t_start = time.time()
+        session = None
         try:
             session = await _get_media_session(client, dc_id)
             r = await asyncio.wait_for(
@@ -1206,9 +1211,9 @@ async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_
                         offset=offset,
                         limit=limit
                     ),
-                    timeout=10.0
+                    timeout=16.0
                 ),
-                timeout=11.0
+                timeout=18.0
             )
             elapsed_ms = int((time.time() - t_start) * 1000)
 
@@ -1228,7 +1233,7 @@ async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_
                             offset=offset,
                             limit=limit
                         ),
-                        timeout=10.0
+                        timeout=16.0
                     )
                     from pyrogram.crypto import aes
                     decrypted_chunk = aes.ctr256_decrypt(
@@ -1250,10 +1255,14 @@ async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_
         except asyncio.CancelledError:
             raise
         except (asyncio.TimeoutError, TimeoutError):
-            _log_stream(f"⚠️ PACKET LOSS / TIMEOUT: Chunk[off={offset // (1024*1024)}MB] timed out after 10s on DC{dc_id} (try {tries+1}/3). Resetting socket...", "W")
-            await _reset_media_session(client, dc_id)
             tries += 1
-            await asyncio.sleep(0.2)
+            if tries < 2:
+                _log_stream(f"⚠️ SLOW CHUNK: Chunk[off={offset // (1024*1024)}MB] took >16s on DC{dc_id} (try {tries}/3). Retrying on active session...", "W")
+                await asyncio.sleep(0.1)
+            else:
+                _log_stream(f"⚠️ PACKET LOSS / TIMEOUT: Chunk[off={offset // (1024*1024)}MB] timed out on DC{dc_id} (try {tries}/3). Resetting socket...", "W")
+                await _reset_media_session(client, dc_id, bad_session=session)
+                await asyncio.sleep(0.3)
         except Exception as e:
             err_str = str(e)
             if "FILE_REFERENCE" in err_str or "file_reference" in err_str.lower():
@@ -1269,7 +1278,7 @@ async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_
                 await asyncio.sleep(w + 0.5)
             elif any(x in err_str for x in ["AuthKey", "SessionRevoked", "ConnectionReset", "BrokenPipe", "Bad file descriptor", "OSError"]):
                 _log_stream(f"⚠️ SOCKET ERROR: {err_str} on DC{dc_id}, resetting socket...", "W")
-                await _reset_media_session(client, dc_id)
+                await _reset_media_session(client, dc_id, bad_session=session)
             tries += 1
             await asyncio.sleep(0.2)
     return None
@@ -1481,8 +1490,8 @@ class VirtualStreamSession:
             else:
                 next_seq_to_emit = 0
 
-            # True Sliding Window with Concurrent In-Flight Workers & Asynchronous Result Buffer
-            MAX_IN_FLIGHT = min(6, max(4, _buffer_pipeline_mb // 12))
+            # Sliding Window with Concurrent In-Flight Workers (3-4 chunks max to prevent MTProto socket saturation)
+            MAX_IN_FLIGHT = min(4, max(3, _buffer_pipeline_mb // 20))
             next_task_idx = next_seq_to_emit
             completed_chunks: Dict[int, bytes] = {}
             active_tasks_map: Dict[asyncio.Task, int] = {}

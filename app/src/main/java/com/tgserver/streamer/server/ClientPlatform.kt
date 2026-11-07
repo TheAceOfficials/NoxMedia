@@ -37,10 +37,11 @@ object ClientPlatformDetector {
             return ClientPlatform.ANDROID
         }
 
-        // 2. iOS / Apple Ecosystem Indicators
+        // 2. iOS / Apple Ecosystem & MPV Player Indicators
         // AppleCoreMedia is the AVFoundation / AVPlayer user-agent
         // CFNetwork / Darwin is the iOS system networking framework
         // KSPlayer, MobileVLCKit, Outplayer, Infuse are iOS media players
+        // libmpv / Lavf (FFmpeg) are used by Nuvio and Stremio on iOS/iPadOS
         // Nuvio-iOS, Stremio iOS app identifiers
         if (ua.contains("iphone") ||
             ua.contains("ipad") ||
@@ -56,6 +57,10 @@ object ClientPlatformDetector {
             ua.contains("nuvio/ios") ||
             ua.contains("stremio-ios") ||
             ua.contains("stremio/ios") ||
+            ua.contains("libmpv") ||
+            ua.contains("lavf") ||
+            ua.contains("mpv") ||
+            ua.contains("ffmpeg") ||
             (ua.contains("ios") && !ua.contains("bios"))) {
             return ClientPlatform.IOS
         }

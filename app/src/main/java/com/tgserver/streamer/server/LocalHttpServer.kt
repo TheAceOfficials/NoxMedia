@@ -1157,7 +1157,11 @@ class LocalHttpServer(
         StreamLog.i(TAG, "[Android-Stream] Requesting stream source from Telegram: range=$startByte-$endByte/$totalSize (len=$requestedLength bytes / ${StreamTrafficStats.formatBytes(requestedLength)})")
         val t0 = System.currentTimeMillis()
         val chunk = try {
-            tgClient.getStreamSource(effectiveChannelId, resolvedMessageId, startByte, endByte, mediaId = targetParam, platform = ClientPlatform.ANDROID)
+            tgClient.getStreamSource(
+                effectiveChannelId, resolvedMessageId, startByte, endByte,
+                mediaId = targetParam, platform = ClientPlatform.ANDROID,
+                userAgent = userAgent, clientIp = clientIp
+            )
         } catch (e: Exception) {
             StreamLog.e(TAG, "[Android-Stream] Stream error for $uri: ${e.message}", e)
             val isAuthErr = e.message?.contains("AUTH_KEY_UNREGISTERED", ignoreCase = true) == true ||
@@ -1282,7 +1286,8 @@ class LocalHttpServer(
         val chunk = try {
             tgClient.getStreamSource(
                 effectiveChannelId, resolvedMessageId, startByte, endByte,
-                mediaId = targetParam, platform = ClientPlatform.IOS, userAgent = userAgent
+                mediaId = targetParam, platform = ClientPlatform.IOS,
+                userAgent = userAgent, clientIp = clientIp
             )
         } catch (e: Exception) {
             StreamLog.e(TAG, "[iOS-Stream] Stream error for $uri: ${e.message}", e)
