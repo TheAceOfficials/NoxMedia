@@ -1274,7 +1274,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             port = prefs.getInt("server_port", 7788),
             bufferChunkSizeKb = prefs.getInt("buffer_chunk_kb", 512),
             diskCacheMb = prefs.getInt("disk_cache_mb", 2048),
-            bufferPipelineMb = prefs.getInt("buffer_pipeline_mb", 20),
+            bufferPipelineMb = prefs.getInt("buffer_pipeline_mb", 64),
             customPosterUrl = prefs.getString("custom_poster_url", "") ?: "",
             customPosterApiKey = prefs.getString("custom_poster_api_key", "") ?: "",
             tmdbApiKey = prefs.getString("tmdb_api_key", "") ?: "",
@@ -1447,12 +1447,12 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         val updated = current.copy(
             port = 7788,
             diskCacheMb = 2048,
-            bufferPipelineMb = 20,
+            bufferPipelineMb = 64,
             autoSleepEnabled = false,
             autoSleepTimeoutMinutes = 30
         )
         saveStoredConfig(updated)
-        Toast.makeText(getApplication(), "✓ Defaults restored: Cache 2048MB, Buffer 20MB, Port 7788", Toast.LENGTH_SHORT).show()
+        Toast.makeText(getApplication(), "✓ Defaults restored: Cache 2048MB, Buffer 64MB, Port 7788", Toast.LENGTH_SHORT).show()
         return updated
     }
 

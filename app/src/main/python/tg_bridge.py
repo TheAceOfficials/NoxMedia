@@ -84,7 +84,7 @@ _pending_fetches: Dict[Tuple[int, int, int], asyncio.Task] = {}
 # Persistent On-Disk Chunk Cache & Buffer Pipeline Config
 _disk_cache_dir: Optional[str] = None
 _disk_cache_max_mb: int = 2048
-_buffer_pipeline_mb: int = 20
+_buffer_pipeline_mb: int = 64
 _last_prune_time: float = 0.0
 _stream_log_path: Optional[str] = None
 
@@ -1339,8 +1339,8 @@ class VirtualStreamSession:
         self.chunk_deque: deque = deque()
         self.current_partial: Optional[bytes] = None
         self.current_partial_offset: int = 0
-        # Pipeline buffer: queue maxsize dynamically based on buffer_mb (min 20MB for rock-solid stability)
-        q_size = max(8, min(64, max(20, _buffer_pipeline_mb)))
+        # Pipeline buffer: queue maxsize dynamically based on buffer_mb (min 48MB, up to 128MB for smooth continuous throughput)
+        q_size = max(24, min(128, max(48, _buffer_pipeline_mb)))
         self.queue: asyncio.Queue = asyncio.Queue(maxsize=q_size)
         self._closed = False
         self._eof = False
@@ -1443,7 +1443,7 @@ class VirtualStreamSession:
                 first_msg_id = self.tasks[0]["msg_id"]
                 await _resolve_file_id(self.client, self.chat_id, first_msg_id)
 
-            MAX_IN_FLIGHT = min(5, max(3, _buffer_pipeline_mb // 5))
+            MAX_IN_FLIGHT = min(6, max(4, _buffer_pipeline_mb // 12))
             task_idx = 0
             total_tasks = len(self.tasks)
 

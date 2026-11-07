@@ -1274,7 +1274,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                                 }
                             },
                             label = "BUFFER MB",
-                            placeholder = "20",
+                            placeholder = "64",
                             isMonospace = true,
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
@@ -1306,7 +1306,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         onClick = {
                             val parsedPort = portInput.toIntOrNull() ?: 7788
                             val parsedCache = cacheMbInput.toIntOrNull() ?: 2048
-                            val parsedBuf = bufferMbInput.toIntOrNull() ?: 20
+                            val parsedBuf = bufferMbInput.toIntOrNull() ?: 64
                             viewModel.updateServerNetwork(parsedPort, parsedCache, parsedBuf, remoteUrlInput, startOnBoot)
                         },
                         modifier = Modifier.weight(1.3f),
