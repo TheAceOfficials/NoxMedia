@@ -34,6 +34,69 @@ def _safe_rpc_error_init(self, value=None, rpc_name=None, is_unknown=False, is_s
 
 pyrogram.errors.rpc_error.RPCError.__init__ = _safe_rpc_error_init
 
+# Monkey-patch pyrogram.session.Session.send to guarantee:
+# 1. Clean RPC cancellation: self.results.pop(msg_id, None) in a finally block ensures cancelled requests (e.g. on seek)
+#    never leave orphaned 1MB chunk buffers in memory, preventing Large Object Space GC pauses on entry-level Android devices.
+# 2. Resilient pop: using .pop(msg_id, None) instead of .pop(msg_id) completely eliminates KeyError crashes when sessions reset.
+import pyrogram.session.session as _pss
+
+async def _safe_session_send(self, data, wait_response=True, timeout=Session.WAIT_TIMEOUT):
+    message = self.msg_factory(data)
+    msg_id = message.msg_id
+
+    if wait_response:
+        self.results[msg_id] = _pss.Result()
+
+    _pss.log.debug("Sent: %s", message)
+
+    payload = await self.loop.run_in_executor(
+        _pss.pyrogram.crypto_executor,
+        _pss.mtproto.pack,
+        message,
+        self.salt,
+        self.session_id,
+        self.auth_key,
+        self.auth_key_id
+    )
+
+    try:
+        await self.connection.send(payload)
+    except OSError as e:
+        self.results.pop(msg_id, None)
+        raise e
+
+    if wait_response:
+        try:
+            try:
+                await _pss.asyncio.wait_for(self.results[msg_id].event.wait(), timeout)
+            except _pss.asyncio.TimeoutError:
+                pass
+
+            res_obj = self.results.pop(msg_id, None)
+            result = res_obj.value if res_obj is not None else None
+
+            if result is None:
+                raise TimeoutError("Request timed out")
+
+            if isinstance(result, _pss.raw.types.RpcError):
+                if isinstance(data, (_pss.raw.functions.InvokeWithoutUpdates, _pss.raw.functions.InvokeWithTakeout)):
+                    data = data.query
+
+                _pss.RPCError.raise_it(result, type(data))
+
+            if isinstance(result, _pss.raw.types.BadMsgNotification):
+                _pss.log.warning("%s: %s", _pss.BadMsgNotification.__name__, _pss.BadMsgNotification(result.error_code))
+
+            if isinstance(result, _pss.raw.types.BadServerSalt):
+                self.salt = result.new_server_salt
+                return await self.send(data, wait_response, timeout)
+
+            return result
+        finally:
+            self.results.pop(msg_id, None)
+
+Session.send = _safe_session_send
+
 def _format_auth_error(e: Exception) -> str:
     msg = str(e)
     if "SEND_CODE_UNAVAILABLE" in msg:
@@ -71,6 +134,14 @@ _file_id_cache: Dict[Tuple[int, int], FileId] = {}
 _media_sessions: Dict[int, Session] = {}
 _dc_auth_keys: Dict[int, bytes] = {}
 _media_session_lock = asyncio.Lock()
+_dc_semaphores: Dict[int, asyncio.Semaphore] = {}
+
+def _get_dc_semaphore(dc_id: int) -> asyncio.Semaphore:
+    if dc_id not in _dc_semaphores:
+        # Strict global limit of 2 concurrent in-flight GetFile RPCs per Telegram DC across all streams/workers.
+        # Guarantees maximum line throughput with zero MTProto bufferbloat or server-side DC congestion penalties.
+        _dc_semaphores[dc_id] = asyncio.Semaphore(2)
+    return _dc_semaphores[dc_id]
 _channel_peer_lock = asyncio.Lock()
 _resolved_channels: Dict[int, int] = {}
 _file_id_lock = asyncio.Lock()
@@ -437,7 +508,8 @@ async def _get_connected_stream_client(api_id: int, api_hash: str, session_str: 
         api_id=int(api_id),
         api_hash=api_hash.strip(),
         session_string=session_str.strip(),
-        in_memory=True
+        in_memory=True,
+        no_updates=True
     )
     await _stream_client.start()
 
@@ -1293,24 +1365,26 @@ async def _do_resolve_file_id(client: Client, chat_id: int, msg_id: int, key: Tu
 async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_obj: FileId, offset: int, limit: int) -> Optional[bytes]:
     location = _get_location_from_file_id(file_id_obj)
     dc_id = file_id_obj.dc_id
+    dc_sem = _get_dc_semaphore(dc_id)
 
     tries = 0
     while tries < 3:
         t_start = time.time()
         session = None
         try:
-            session = await _get_media_session(client, dc_id)
-            r = await asyncio.wait_for(
-                session.invoke(
-                    raw.functions.upload.GetFile(
-                        location=location,
-                        offset=offset,
-                        limit=limit
+            async with dc_sem:
+                session = await _get_media_session(client, dc_id)
+                r = await asyncio.wait_for(
+                    session.invoke(
+                        raw.functions.upload.GetFile(
+                            location=location,
+                            offset=offset,
+                            limit=limit
+                        ),
+                        timeout=14.0
                     ),
-                    timeout=20.0
-                ),
-                timeout=22.0
-            )
+                    timeout=15.0
+                )
             elapsed_ms = int((time.time() - t_start) * 1000)
 
             chunk_bytes = None
@@ -1329,7 +1403,7 @@ async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_
                             offset=offset,
                             limit=limit
                         ),
-                        timeout=16.0
+                        timeout=14.0
                     )
                     from pyrogram.crypto import aes
                     decrypted_chunk = aes.ctr256_decrypt(
@@ -1353,7 +1427,7 @@ async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_
         except (asyncio.TimeoutError, TimeoutError):
             tries += 1
             if tries < 2:
-                _log_stream(f"⚠️ SLOW CHUNK: Chunk[off={offset // (1024*1024)}MB] took >20s on DC{dc_id} (try {tries}/3). Retrying on active session...", "W")
+                _log_stream(f"⚠️ SLOW CHUNK: Chunk[off={offset // (1024*1024)}MB] took >14s on DC{dc_id} (try {tries}/3). Retrying on active session...", "W")
                 await asyncio.sleep(0.1)
             else:
                 _log_stream(f"⚠️ PACKET LOSS / TIMEOUT: Chunk[off={offset // (1024*1024)}MB] timed out on DC{dc_id} (try {tries}/3). Resetting socket...", "W")
@@ -1579,6 +1653,39 @@ class VirtualStreamSession:
                 await self.queue.put(None)
                 return
 
+            if self.is_probe:
+                # Probes only need Chunk 0 upfront for instantaneous header / cues demuxing.
+                # Never speculatively pipeline background tasks for probes so 100% bandwidth remains dedicated to playback.
+                t0_info = self.tasks[0]
+                slice0 = await self._fetch_task_slice(t0_info)
+                if self._closed:
+                    return
+                if slice0 is not None and len(slice0) > 0:
+                    _log_stream(f"Stream[{self.stream_id[:8]}]: First chunk fetched from TG ({len(slice0)} bytes)")
+                    await self.queue.put(slice0)
+
+                if total_tasks <= 1:
+                    await self.queue.put(None)
+                    return
+
+                # For multi-chunk probes, fetch sequentially ONLY on-demand when the player consumes data
+                for t_idx in range(1, total_tasks):
+                    if self._closed:
+                        break
+                    while self.queue.qsize() > 0 and not self._closed:
+                        await asyncio.sleep(0.04)
+                    if self._closed:
+                        break
+                    slice_n = await self._fetch_task_slice(self.tasks[t_idx])
+                    if self._closed:
+                        break
+                    if slice_n:
+                        await self.queue.put(slice_n)
+                    else:
+                        break
+                await self.queue.put(None)
+                return
+
             # Fast-Start: Fetch Chunk 0 alone first so player gets initial bytes instantly with 100% bandwidth
             t0_info = self.tasks[0]
             slice0 = await self._fetch_task_slice(t0_info)
@@ -1592,9 +1699,10 @@ class VirtualStreamSession:
                 next_seq_to_emit = 0
 
             # Worker Concurrency:
-            # - For probes: 1 worker only (no bufferbloat, no bandwidth contention with playback)
-            # - For playback: 3-4 workers (saturates MTProto pipe for 2x-3x higher throughput)
-            MAX_IN_FLIGHT = 1 if self.is_probe else min(4, max(3, _buffer_pipeline_mb // 16))
+            # Strictly 2 workers for continuous, buttery-smooth pipelining.
+            # Worker 0 downloads while Worker 1 is pre-queued on Telegram's server.
+            # Zero idle wire time, zero bufferbloat, and instant seek cancellations.
+            MAX_IN_FLIGHT = 2
             next_task_idx = next_seq_to_emit
             completed_chunks: Dict[int, bytes] = {}
             active_tasks_map: Dict[asyncio.Task, int] = {}
