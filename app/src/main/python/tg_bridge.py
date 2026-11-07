@@ -1443,9 +1443,22 @@ class VirtualStreamSession:
                 first_msg_id = self.tasks[0]["msg_id"]
                 await _resolve_file_id(self.client, self.chat_id, first_msg_id)
 
-            MAX_IN_FLIGHT = min(6, max(4, _buffer_pipeline_mb // 4))
+            MAX_IN_FLIGHT = min(5, max(3, _buffer_pipeline_mb // 5))
             task_idx = 0
             total_tasks = len(self.tasks)
+
+            # Fast-Start: Fetch Chunk 0 alone first so player gets initial bytes instantly with 100% bandwidth
+            if total_tasks > 0:
+                t0_info = self.tasks[0]
+                task_idx = 1
+                slice0 = await self._fetch_task_slice(t0_info)
+                if self._closed:
+                    return
+                if slice0 is not None and len(slice0) > 0:
+                    _log_stream(f"Stream[{self.stream_id[:8]}]: First chunk fetched from TG ({len(slice0)} bytes)")
+                    await self.queue.put(slice0)
+                else:
+                    task_idx = 0
 
             while (task_idx < total_tasks or in_flight) and not self._closed:
                 while task_idx < total_tasks and len(in_flight) < MAX_IN_FLIGHT and not self._closed:

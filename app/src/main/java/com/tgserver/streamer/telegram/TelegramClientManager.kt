@@ -2974,9 +2974,9 @@ class TelegramClientManager(private val context: Context) {
         //    An active timeline jump to an arbitrary mid-movie position (> 25MB, not header, not cue probe).
         val isUserSeek = !isMetadataOrCuesProbe && !isInitialPlayback && contentLength > 15_000_000L
 
-        if (isUserSeek) {
+        if (!isMetadataOrCuesProbe) {
             androidActiveStreamId?.let { prevId ->
-                StreamLog.w(TAG, "[Android] User timeline seek detected to byte $startByte (mid-media): terminating previous playback stream $prevId to free 100% bandwidth")
+                StreamLog.w(TAG, "[Android] Superseding previous playback stream $prevId: range=$startByte-$effectiveEnd (isSeek=$isUserSeek)")
                 try {
                     bridge.callAttr("close_stream", prevId)
                     StreamLog.i(TAG, "[Android] Previous playback stream $prevId closed successfully")
@@ -2984,10 +2984,9 @@ class TelegramClientManager(private val context: Context) {
                     StreamLog.w(TAG, "[Android] Notice closing superseded stream $prevId: ${ce.message}")
                 }
             }
-        } else if (isMetadataOrCuesProbe) {
-            StreamLog.i(TAG, "[Android] Metadata / Cues probe detected: range=$startByte-$effectiveEnd (len=$contentLength bytes, nearEnd=$isNearFileEnd) - running concurrently without killing active playback stream ($androidActiveStreamId)")
+            androidActiveStreamId = null
         } else {
-            StreamLog.i(TAG, "[Android] Initial playback stream: range=$startByte-$effectiveEnd (len=$contentLength bytes)")
+            StreamLog.i(TAG, "[Android] Metadata / Cues probe detected: range=$startByte-$effectiveEnd (len=$contentLength bytes, nearEnd=$isNearFileEnd) - running concurrently without killing active playback stream ($androidActiveStreamId)")
         }
     }
 
