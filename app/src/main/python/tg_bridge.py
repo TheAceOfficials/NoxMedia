@@ -1101,7 +1101,14 @@ async def _reset_media_session(client: Client, dc_id: int, bad_session: Optional
                         r.event.set()
                     except Exception:
                         pass
-                old_session.results.clear()
+                # DO NOT call old_session.results.clear()!
+                # Pyrogram's Session.send needs self.results.pop(msg_id) to find the entry,
+                # see that r.value is None, and cleanly raise TimeoutError rather than crashing with KeyError.
+            if hasattr(old_session, "connection") and old_session.connection:
+                try:
+                    await old_session.connection.close()
+                except Exception:
+                    pass
             await old_session.stop()
         except Exception:
             pass
@@ -1126,7 +1133,13 @@ async def _reset_all_media_sessions():
                         r.event.set()
                     except Exception:
                         pass
-                s.results.clear()
+                # DO NOT call s.results.clear()!
+                # Leaving entries intact allows waking workers to pop msg_id cleanly and raise TimeoutError.
+            if hasattr(s, "connection") and s.connection:
+                try:
+                    await s.connection.close()
+                except Exception:
+                    pass
             await s.stop()
         except Exception as ex:
             print(f"[ResetMediaSessions] Stop notice: {ex}", flush=True)
@@ -1397,10 +1410,11 @@ async def _do_fetch_chunk_network(client: Client, chat_id: int, msg_id: int, fet
         return None
 
 class VirtualStreamSession:
-    def __init__(self, client: Client, chat_id: int, parts: List[Dict[str, Any]], start_byte: int, end_byte: int, stream_id: str = ""):
+    def __init__(self, client: Client, chat_id: int, parts: List[Dict[str, Any]], start_byte: int, end_byte: int, stream_id: str = "", is_probe: bool = False):
         self.stream_id = stream_id or str(uuid.uuid4())
         self.client = client
         self.chat_id = chat_id
+        self.is_probe = bool(is_probe)
         # Dynamically sort parts by partNumber and compute cumStart from sizeBytes reliably
         sorted_parts = sorted(parts, key=lambda p: int(p.get("partNumber", 1)))
         running_cum = 0
@@ -1422,8 +1436,11 @@ class VirtualStreamSession:
         self.chunk_deque: deque = deque()
         self.current_partial: Optional[bytes] = None
         self.current_partial_offset: int = 0
-        # Pipeline buffer: queue maxsize dynamically based on buffer_mb (min 48MB, up to 128MB for smooth continuous throughput)
-        q_size = max(24, min(128, max(48, _buffer_pipeline_mb)))
+        # Pipeline buffer: Probes capped at 2MB; playback streams use dynamic buffer_mb (min 48MB, up to 128MB)
+        if self.is_probe:
+            q_size = 2
+        else:
+            q_size = max(24, min(128, max(48, _buffer_pipeline_mb)))
         self.queue: asyncio.Queue = asyncio.Queue(maxsize=q_size)
         self._closed = False
         self._eof = False
@@ -1432,7 +1449,7 @@ class VirtualStreamSession:
         self.prefetch_task: Optional[asyncio.Task] = None
         self.active_tasks: Set[asyncio.Task] = set()
         self.in_flight_keys: Set[Tuple[int, int, int]] = set()
-        _log_stream(f"Stream[{self.stream_id[:8]}]: Init chat={chat_id}, parts_count={len(self.parts)}, range={start_byte}-{end_byte} ({(self.total_to_read)/(1024*1024):.2f}MB), total_tasks={len(self.tasks)}, buffer_mb={_buffer_pipeline_mb}")
+        _log_stream(f"Stream[{self.stream_id[:8]}]: Init chat={chat_id}, parts_count={len(self.parts)}, range={start_byte}-{end_byte} ({(self.total_to_read)/(1024*1024):.2f}MB), total_tasks={len(self.tasks)}, buffer_mb={q_size if self.is_probe else _buffer_pipeline_mb}, is_probe={self.is_probe}")
         if self.tasks:
             _log_stream(f"Stream[{self.stream_id[:8]}]: Task[0] msg_id={self.tasks[0]['msg_id']}, off={self.tasks[0]['fetch_off']}, slice={self.tasks[0]['s_start']}-{self.tasks[0]['s_end']}")
 
@@ -1542,16 +1559,40 @@ class VirtualStreamSession:
             else:
                 next_seq_to_emit = 0
 
-            # Sliding Window with Concurrent In-Flight Workers (2-3 chunks max to prevent MTProto socket saturation and bufferbloat)
-            MAX_IN_FLIGHT = min(3, max(2, _buffer_pipeline_mb // 24))
+            # Worker Concurrency:
+            # - For probes: 1 worker only (no bufferbloat, no bandwidth contention with playback)
+            # - For playback: max 2 workers (keeps TCP pipe saturated while avoiding HOL congestion)
+            MAX_IN_FLIGHT = 1 if self.is_probe else min(2, max(1, _buffer_pipeline_mb // 32))
             next_task_idx = next_seq_to_emit
             completed_chunks: Dict[int, bytes] = {}
             active_tasks_map: Dict[asyncio.Task, int] = {}
             task_retries: Dict[int, int] = {}
 
             while (next_seq_to_emit < total_tasks) and not self._closed:
-                # 1. Fill available worker slots up to MAX_IN_FLIGHT
-                while next_task_idx < total_tasks and len(active_tasks_map) < MAX_IN_FLIGHT and not self._closed:
+                # Flow control & Abandoned stream check:
+                # If buffer has data waiting and player hasn't called read_bytes in > 20s,
+                # the player paused, disconnected, or switched devices. Terminate prefetch immediately.
+                idle_sec = time.time() - self._last_active
+                if (self.queue.qsize() > 0 or len(completed_chunks) > 0) and idle_sec > 20.0:
+                    _log_stream(f"Stream[{self.stream_id[:8]}]: Abandoned stream detected ({idle_sec:.1f}s without player reads while data waiting). Terminating background prefetch.", "I")
+                    self._closed = True
+                    break
+                elif idle_sec > 45.0:
+                    _log_stream(f"Stream[{self.stream_id[:8]}]: Idle timeout ({idle_sec:.1f}s without player reads). Terminating stream.", "I")
+                    self._closed = True
+                    break
+
+                # Dedicated Bandwidth for Buffer Underrun / Fast Recovery:
+                # If player queue is empty and the next required chunk is not yet ready,
+                # limit in-flight concurrency to 1 worker so 100% bandwidth is dedicated
+                # to delivering next_seq_to_emit ASAP without dividing throughput across speculative chunks.
+                if self.queue.empty() and (next_seq_to_emit not in completed_chunks):
+                    effective_max_in_flight = 1
+                else:
+                    effective_max_in_flight = MAX_IN_FLIGHT
+
+                # 1. Fill available worker slots up to effective_max_in_flight
+                while next_task_idx < total_tasks and len(active_tasks_map) < effective_max_in_flight and not self._closed:
                     # Flow control: pause scheduling if queue + completed chunks reaches pipeline limit
                     if (self.queue.qsize() + len(completed_chunks)) >= self.queue.maxsize:
                         break
@@ -1564,11 +1605,6 @@ class VirtualStreamSession:
 
                 if not active_tasks_map:
                     if next_seq_to_emit < total_tasks:
-                        # Auto-close abandoned streams if no reads from player for > 60 seconds
-                        if time.time() - self._last_active > 60:
-                            _log_stream(f"Stream[{self.stream_id[:8]}]: Idle timeout (60s without player reads). Auto-closing background prefetch.", "I")
-                            self._closed = True
-                            break
                         # Queue is full, yield briefly to let player consume
                         await asyncio.sleep(0.08)
                         continue
@@ -1748,7 +1784,7 @@ class VirtualStreamSession:
         except Exception as e:
             print(f"[VirtualStreamSession._do_close_loop_safe] Error: {e}", flush=True)
 
-def create_stream(api_id: int, api_hash: str, session_str: str, chat_id: int, parts_json: str, start_byte: int, end_byte: int) -> str:
+def create_stream(api_id: int, api_hash: str, session_str: str, chat_id: int, parts_json: str, start_byte: int, end_byte: int, is_probe: bool = False) -> str:
     """
     Initializes a virtual byte stream with concurrent pre-buffering and returns a unique stream_id.
     Supports concurrent HTTP 206 range requests (header demuxing, cues indexing, and playback).
@@ -1757,12 +1793,12 @@ def create_stream(api_id: int, api_hash: str, session_str: str, chat_id: int, pa
 
     async def _async_create():
         now = time.time()
-        # Clean up any streams that have been idle for > 30 seconds
-        expired = [sid for sid, s in list(_active_streams.items()) if now - s._last_active > 30]
+        # Clean up any streams that have been idle for > 20s (with buffer) or > 45s (without reads)
+        expired = [sid for sid, s in list(_active_streams.items()) if (now - s._last_active > 45.0 or (now - s._last_active > 20.0 and (s.queue.qsize() > 0 or s.bytes_read > 0)))]
         for sid in expired:
             s = _active_streams.pop(sid, None)
             if s:
-                _log_stream(f"Stream[{sid[:8]}]: Evicted due to 30s idle timeout")
+                _log_stream(f"Stream[{sid[:8]}]: Evicted stale stream due to {now - s._last_active:.1f}s inactivity")
                 s.close()
 
         parts = json.loads(parts_json)
@@ -1771,8 +1807,8 @@ def create_stream(api_id: int, api_hash: str, session_str: str, chat_id: int, pa
         await _ensure_channel_peer(client, int(chat_id))
 
         stream_id = str(uuid.uuid4())
-        _log_stream(f"create_stream: id={stream_id[:8]}, chat={chat_id}, range={start_byte}-{end_byte} ({(end_byte - start_byte + 1)/(1024*1024):.2f}MB), parts={len(parts)}")
-        session = VirtualStreamSession(client, int(chat_id), parts, int(start_byte), int(end_byte), stream_id=stream_id)
+        _log_stream(f"create_stream: id={stream_id[:8]}, chat={chat_id}, range={start_byte}-{end_byte} ({(end_byte - start_byte + 1)/(1024*1024):.2f}MB), parts={len(parts)}, is_probe={bool(is_probe)}")
+        session = VirtualStreamSession(client, int(chat_id), parts, int(start_byte), int(end_byte), stream_id=stream_id, is_probe=bool(is_probe))
         session.start_prefetch()
         _active_streams[stream_id] = session
         return stream_id

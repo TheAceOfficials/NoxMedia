@@ -2810,6 +2810,18 @@ class TelegramClientManager(private val context: Context) {
 
                 val partsJson = gson.toJson(partsList)
 
+                val state = clientStreamStates.computeIfAbsent(clientKey) { ClientStreamState() }
+                val isLavf = userAgent.contains("lavf", ignoreCase = true)
+                val isLavfFull = isLavf && contentLength > 25_000_000L
+                val isLavfProbe = isLavf && contentLength <= 25_000_000L
+                val isHeaderProbe = startByte <= 2_000_000L && contentLength <= 2_000_000L && state.activePlaybackStreamId != null
+                val isNearFileEnd = totalSize > 0 && (
+                    startByte >= maxOf(0L, totalSize - 150_000_000L) ||
+                    (totalSize - startByte) <= (totalSize * 0.15).toLong()
+                )
+                val isCuesProbe = isNearFileEnd && contentLength <= 25_000_000L
+                val isProbeStream = isLavfProbe || isHeaderProbe || isCuesProbe || (isLavfFull && state.activePlaybackStreamId != null)
+
                 // Per-client stream management to prevent playback stream supersession wars
                 managePlaybackStream(
                     clientKey = clientKey,
@@ -2835,7 +2847,8 @@ class TelegramClientManager(private val context: Context) {
                     effectiveChannelId,
                     partsJson,
                     startByte,
-                    effectiveEnd
+                    effectiveEnd,
+                    isProbeStream
                 )?.toString() ?: ""
 
                 if (streamId.isBlank()) {
@@ -2849,26 +2862,16 @@ class TelegramClientManager(private val context: Context) {
                         effectiveChannelId,
                         partsJson,
                         startByte,
-                        effectiveEnd
+                        effectiveEnd,
+                        isProbeStream
                     )?.toString() ?: ""
                 }
                 val pyElapsed = System.currentTimeMillis() - t0
 
-                StreamLog.i(TAG, "create_stream [$platform][$clientKey] in ${pyElapsed}ms: streamId=$streamId, partsCount=${partsList.size}, channelId=$effectiveChannelId, range=$startByte-$effectiveEnd/$totalSize (contentLength=$contentLength)")
+                StreamLog.i(TAG, "create_stream [$platform][$clientKey] in ${pyElapsed}ms: streamId=$streamId, partsCount=${partsList.size}, channelId=$effectiveChannelId, range=$startByte-$effectiveEnd/$totalSize (contentLength=$contentLength, isProbe=$isProbeStream)")
 
                 if (streamId.isNotBlank()) {
-                    val state = clientStreamStates.computeIfAbsent(clientKey) { ClientStreamState() }
-                    val isLavf = userAgent.contains("lavf", ignoreCase = true)
-                    val isLavfFull = isLavf && contentLength > 25_000_000L
-                    val isLavfProbe = isLavf && contentLength <= 25_000_000L
-                    val isHeaderProbe = startByte <= 2_000_000L && contentLength <= 2_000_000L && state.activePlaybackStreamId != null
-                    val isNearFileEnd = totalSize > 0 && (
-                        startByte >= maxOf(0L, totalSize - 150_000_000L) ||
-                        (totalSize - startByte) <= (totalSize * 0.15).toLong()
-                    )
-                    val isCuesProbe = isNearFileEnd && contentLength <= 25_000_000L
-
-                    if (isLavfFull) {
+                    if (isLavfFull && state.activePlaybackStreamId != null) {
                         state.activeLavfFullStreamId = streamId
                     } else if (!isLavfProbe && !isHeaderProbe && !isCuesProbe) {
                         state.activePlaybackStreamId = streamId
@@ -2940,10 +2943,12 @@ class TelegramClientManager(private val context: Context) {
         val currentMediaKey = "${effectiveChannelId}_${media?.id ?: extractedMsgId ?: messageId}"
         val isDifferentMedia = state.activePlaybackMediaKey != null && state.activePlaybackMediaKey != currentMediaKey
         if (isDifferentMedia) {
+            var resetDone = false
             state.activePlaybackStreamId?.let { prevId ->
                 StreamLog.w(TAG, "[$platform][$clientKey] New media selected ($currentMediaKey vs ${state.activePlaybackMediaKey}): terminating previous playback stream $prevId")
                 try {
                     bridge.callAttr("close_stream", prevId, true)
+                    resetDone = true
                 } catch (ce: Exception) {
                     StreamLog.w(TAG, "[$platform][$clientKey] Notice closing stream for previous media: ${ce.message}")
                 }
@@ -2953,10 +2958,12 @@ class TelegramClientManager(private val context: Context) {
                 try { bridge.callAttr("close_stream", prevLavf, false) } catch (_: Exception) {}
             }
             state.activeLavfFullStreamId = null
-            try {
-                bridge.callAttr("reset_media_sessions")
-            } catch (ce: Exception) {
-                StreamLog.w(TAG, "[$platform][$clientKey] Notice resetting media sessions for new media: ${ce.message}")
+            if (!resetDone) {
+                try {
+                    bridge.callAttr("reset_media_sessions")
+                } catch (ce: Exception) {
+                    StreamLog.w(TAG, "[$platform][$clientKey] Notice resetting media sessions for new media: ${ce.message}")
+                }
             }
         }
         state.activePlaybackMediaKey = currentMediaKey
@@ -2975,21 +2982,40 @@ class TelegramClientManager(private val context: Context) {
         )
         val isCuesProbe = isNearFileEnd && contentLength <= 25_000_000L
 
-        // 4a. Lavf full-file demux stream:
+        // Cross-client cleanup: If a non-probe stream starts, terminate any abandoned streams from other clients
+        // to prevent an abandoned iPad stream from stealing Telegram DC bandwidth from an Android TV.
+        if (!isLavfProbe && !isHeaderProbe && !isCuesProbe) {
+            for ((otherKey, otherState) in clientStreamStates) {
+                if (otherKey != clientKey) {
+                    otherState.activePlaybackStreamId?.let { oldId ->
+                        StreamLog.w(TAG, "[$platform][$clientKey] Terminating abandoned playback stream $oldId from other client $otherKey")
+                        try { bridge.callAttr("close_stream", oldId, false) } catch (_: Exception) {}
+                    }
+                    otherState.activePlaybackStreamId = null
+                    otherState.activeLavfFullStreamId?.let { oldLavf ->
+                        StreamLog.w(TAG, "[$platform][$clientKey] Terminating abandoned Lavf stream $oldLavf from other client $otherKey")
+                        try { bridge.callAttr("close_stream", oldLavf, false) } catch (_: Exception) {}
+                    }
+                    otherState.activeLavfFullStreamId = null
+                }
+            }
+        }
+
+        // 4a. Probes and Auxiliary Lavf Demux Streams:
         val isLavfFullStream = isLavf && contentLength > 25_000_000L
-        if (isLavfProbe || isHeaderProbe || isCuesProbe || isLavfFullStream) {
+        if (isLavfProbe || isHeaderProbe || isCuesProbe || (isLavfFullStream && state.activePlaybackStreamId != null)) {
             if (isLavfFullStream) {
                 val prevLavf = state.activeLavfFullStreamId
                 if (prevLavf != null) {
-                    StreamLog.w(TAG, "[$platform][$clientKey] New Lavf full-demux stream: terminating previous Lavf stream $prevLavf")
+                    StreamLog.w(TAG, "[$platform][$clientKey] New Lavf auxiliary demux stream: terminating previous Lavf stream $prevLavf")
                     try {
-                        bridge.callAttr("close_stream", prevLavf)
+                        bridge.callAttr("close_stream", prevLavf, false)
                     } catch (ce: Exception) {
                         StreamLog.w(TAG, "[$platform][$clientKey] Notice closing old Lavf stream $prevLavf: ${ce.message}")
                     }
                     state.activeLavfFullStreamId = null
                 }
-                StreamLog.i(TAG, "[$platform][$clientKey] Lavf full-demux stream: range=$startByte-$effectiveEnd/$totalSize (len=${contentLength / 1024 / 1024}MB) - running concurrently")
+                StreamLog.i(TAG, "[$platform][$clientKey] Lavf auxiliary demux stream: range=$startByte-$effectiveEnd/$totalSize (len=${contentLength / 1024 / 1024}MB) - capped prefetch")
             } else {
                 StreamLog.i(TAG, "[$platform][$clientKey] Metadata/Cues probe (UA: '$userAgent'): range=$startByte-$effectiveEnd/$totalSize (len=$contentLength) - running concurrently")
             }
@@ -3025,14 +3051,14 @@ class TelegramClientManager(private val context: Context) {
             } catch (ce: Exception) {
                 StreamLog.w(TAG, "[$platform][$clientKey] Notice closing superseded stream $prevStreamId: ${ce.message}")
             }
-            if (isUserSeek) {
-                try {
-                    bridge.callAttr("reset_media_sessions")
-                } catch (ce: Exception) {
-                    StreamLog.w(TAG, "[$platform][$clientKey] Notice resetting media sessions: ${ce.message}")
-                }
-            }
             state.activePlaybackStreamId = null
+
+            // CRITICAL: Also terminate any active Lavf demux stream on seek!
+            state.activeLavfFullStreamId?.let { prevLavf ->
+                StreamLog.w(TAG, "[$platform][$clientKey] Seek detected: terminating background Lavf stream $prevLavf")
+                try { bridge.callAttr("close_stream", prevLavf, false) } catch (_: Exception) {}
+            }
+            state.activeLavfFullStreamId = null
         }
     }
 
