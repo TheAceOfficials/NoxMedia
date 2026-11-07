@@ -2039,4 +2039,26 @@ def reset_session_and_cache() -> str:
         return json.dumps({"status": "error", "error": str(e)})
 
 
+def prewarm_media_session(api_id: int, api_hash: str, session_str: str, dc_id: int = 0) -> str:
+    """
+    Pre-warm the MTProto media session for the given DC (default: same DC as the user account).
+    Call this at app startup (after login, before first stream) to eliminate the 8-24 second
+    cold-start delay that occurs when the first stream request has to authenticate a fresh session.
+
+    Returns JSON: {"status": "ok", "dc_id": N} or {"status": "error", "error": "..."}.
+    """
+    async def _async_prewarm():
+        client = await _get_connected_stream_client(int(api_id), str(api_hash), str(session_str))
+        target_dc = int(dc_id) if int(dc_id) > 0 else await client.storage.dc_id()
+        _log_stream(f"prewarm_media_session: pre-warming DC{target_dc} MTProto session...")
+        await _get_media_session(client, target_dc)
+        _log_stream(f"prewarm_media_session: DC{target_dc} session ready ✓")
+        return target_dc
+
+    try:
+        warmed_dc = run_async(_async_prewarm(), timeout=30)
+        return json.dumps({"status": "ok", "dc_id": warmed_dc})
+    except Exception as e:
+        _log_stream(f"prewarm_media_session: warning — {e}", "W")
+        return json.dumps({"status": "error", "error": str(e)})
 

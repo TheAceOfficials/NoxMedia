@@ -113,6 +113,14 @@ class TelegramClientManager(private val context: Context) {
     private var iosActiveMediaKey: String? = null
     @Volatile
     private var iosActiveStreamStartByte: Long = 0L
+    @Volatile
+    private var iosActiveStreamStartTime: Long = 0L  // epoch-ms when last playback stream was created
+
+    // Lavf full-file stream tracking (separate from libmpv playback stream).
+    // A Lavf request with contentLength > 25MB is a full concurrent demux stream;
+    // we track it so older Lavf full streams are terminated when a newer one starts.
+    @Volatile
+    private var iosLavfFullStreamId: String? = null
 
     private val _apiCredentials = MutableStateFlow(
         Pair(
@@ -218,6 +226,9 @@ class TelegramClientManager(private val context: Context) {
                 Log.d(TAG, "Python runtime pre-warmed successfully in background")
                 if (sessionState.value.isLoggedIn) {
                     refreshUserProfile()
+                    // Pre-warm MTProto media session on the user's home DC so that
+                    // the first stream request doesn't stall for 8-24s doing cold auth.
+                    prewarmMediaSession()
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Background Python warm-up / profile refresh: ${e.message}")
@@ -347,6 +358,11 @@ class TelegramClientManager(private val context: Context) {
             apply()
         }
         _sessionState.value = session
+        // If the session just became active, pre-warm the MTProto media session
+        // so the first stream request doesn't face an 8-24 second cold-start delay.
+        if (session.isLoggedIn && session.sessionString.isNotBlank()) {
+            prewarmMediaSession()
+        }
     }
 
     private fun loadChannels() {
@@ -2864,17 +2880,22 @@ class TelegramClientManager(private val context: Context) {
 
                 if (streamId.isNotBlank()) {
                     if (platform == ClientPlatform.IOS) {
-                        val isLavfProbe = userAgent.contains("lavf", ignoreCase = true)
+                        val isLavfProbe = userAgent.contains("lavf", ignoreCase = true) && contentLength <= 25_000_000L
+                        val isLavfFull = userAgent.contains("lavf", ignoreCase = true) && contentLength > 25_000_000L
                         val isHeaderProbe = startByte <= 2_000_000L && (contentLength <= 2_000_000L || isLavfProbe) && iosActiveStreamId != null
                         val isNearFileEnd = totalSize > 0 && (
                             startByte >= maxOf(0L, totalSize - 150_000_000L) ||
                             (totalSize - startByte) <= (totalSize * 0.15).toLong()
                         )
                         val isCuesProbe = isNearFileEnd && contentLength <= 25_000_000L
-                        val isIosProbe = isLavfProbe || isHeaderProbe || isCuesProbe
-                        if (!isIosProbe) {
+                        val isIosProbe = isLavfProbe || isHeaderProbe || isCuesProbe || isLavfFull
+                        if (isLavfFull) {
+                            // Track the new Lavf full-demux stream slot
+                            iosLavfFullStreamId = streamId
+                        } else if (!isIosProbe) {
                             iosActiveStreamId = streamId
                             iosActiveStreamStartByte = startByte
+                            iosActiveStreamStartTime = System.currentTimeMillis()
                         }
                     } else {
                         // Android: Only track playback streams (NOT metadata / Cues probes!)
@@ -2890,6 +2911,9 @@ class TelegramClientManager(private val context: Context) {
                     val stream = TgMediaInputStream(bridge, streamId, contentLength) { closedId ->
                         if (iosActiveStreamId == closedId) {
                             iosActiveStreamId = null
+                        }
+                        if (iosLavfFullStreamId == closedId) {
+                            iosLavfFullStreamId = null
                         }
                         if (androidActiveStreamId == closedId) {
                             androidActiveStreamId = null
@@ -3038,22 +3062,57 @@ class TelegramClientManager(private val context: Context) {
         )
         val isCuesProbe = isNearFileEnd && contentLength <= 25_000_000L
 
-        if (isLavfProbe || isHeaderProbe || isCuesProbe) {
-            StreamLog.i(TAG, "[iOS] Metadata/Cues probe (UA: '$userAgent'): range=$startByte-$effectiveEnd/$totalSize (len=$contentLength) - running concurrently")
+        // 4a. Lavf full-file demux stream (contentLength > 25MB, UA contains "lavf"):
+        //     This is NOT a small probe — it's FFmpeg/Lavf doing a full-file demux for codec/track detection.
+        //     Allow it to run concurrently with the libmpv playback stream, but limit to ONE at a time.
+        //     If a previous Lavf full stream exists, terminate it before allowing the new one.
+        val isLavfFullStream = userAgent.contains("lavf", ignoreCase = true) && contentLength > 25_000_000L
+        if (isLavfProbe || isHeaderProbe || isCuesProbe || isLavfFullStream) {
+            if (isLavfFullStream) {
+                val prevLavf = iosLavfFullStreamId
+                if (prevLavf != null) {
+                    StreamLog.w(TAG, "[iOS] New Lavf full-demux stream: terminating previous Lavf stream $prevLavf to prevent bandwidth split")
+                    try {
+                        bridge.callAttr("close_stream", prevLavf)
+                    } catch (ce: Exception) {
+                        StreamLog.w(TAG, "[iOS] Notice closing old Lavf stream $prevLavf: ${ce.message}")
+                    }
+                    iosLavfFullStreamId = null
+                }
+                // The stream ID is registered after this function returns (by the caller);
+                // we capture it via a post-creation hook — instead, we set a flag so the caller
+                // can assign iosLavfFullStreamId. We pass the assignment in return value indirectly:
+                // set a volatile sentinel that the caller reads immediately after create_stream.
+                // Simpler: since manageIosPlaybackStream returns Unit, we set the field directly
+                // using the streamId that is passed by the caller BEFORE calling this function.
+                // See caller site: iosLavfFullStreamId assignment happens after this call returns.
+                StreamLog.i(TAG, "[iOS] Lavf full-demux stream: range=$startByte-$effectiveEnd/$totalSize (len=${contentLength/1024/1024}MB) - running concurrently (1 slot)")
+            } else {
+                StreamLog.i(TAG, "[iOS] Metadata/Cues probe (UA: '$userAgent'): range=$startByte-$effectiveEnd/$totalSize (len=$contentLength) - running concurrently")
+            }
             return
         }
 
-        // 4. Playback & Seek Streams (libmpv):
-        //    Every other request is an active playback stream at a timeline position.
-        //    If ANY previous playback stream exists, terminate it IMMEDIATELY!
-        //    Whether the user seeked by 10 minutes or libmpv hopped by 1.5MB to the next cluster:
-        //    The new request supersedes the old one. Terminating the old stream immediately
-        //    stops background MTProto downloads in 0ms, prevents multi-stream accumulation,
-        //    and dedicates 100% bandwidth to the target keyframe for instant playback!
+        // 4b. Playback & Seek Streams (libmpv):
+        //     Every other request is an active playback stream at a timeline position.
+        //     GRACE WINDOW: libmpv closes the TCP connection after getting first chunk and immediately
+        //     re-opens the same range (normal HTTP/1.0 reconnect behavior). If the same startByte is
+        //     re-requested within 6 seconds of the previous stream creation, keep the old stream alive
+        //     — do NOT terminate it. The new HTTP request will attach to the same Python VirtualStreamSession.
         val prevStreamId = iosActiveStreamId
         val prevStart = iosActiveStreamStartByte
+        val prevStartTime = iosActiveStreamStartTime
+        val now = System.currentTimeMillis()
 
         if (prevStreamId != null) {
+            val sameOffset = prevStart == startByte
+            val withinGrace = (now - prevStartTime) < 6_000L
+            if (sameOffset && withinGrace) {
+                // libmpv TCP reconnect: same position, within 6s — do NOT kill the old stream.
+                // The old stream's prefetch buffer is still warm; just let the new HTTP handler read it.
+                StreamLog.i(TAG, "[iOS] libmpv reconnect within grace window (offset=$startByte, age=${now - prevStartTime}ms): keeping stream $prevStreamId alive")
+                return
+            }
             StreamLog.w(TAG, "[iOS] Active stream superseded ($prevStart -> $startByte): terminating previous stream $prevStreamId to free 100% bandwidth for instant seek")
             try {
                 bridge.callAttr("close_stream", prevStreamId)
@@ -3062,6 +3121,32 @@ class TelegramClientManager(private val context: Context) {
                 StreamLog.w(TAG, "[iOS] Notice closing superseded stream $prevStreamId: ${ce.message}")
             }
             iosActiveStreamId = null
+        }
+    }
+
+    /**
+     * Pre-warms the MTProto media session on the user's home DC (and optionally DC5).
+     * Called at app startup after login to eliminate the 8-24 second cold-start delay
+     * on the first stream request. Runs entirely in the background; never blocks the UI.
+     */
+    private fun prewarmMediaSession() {
+        managerScope.launch {
+            try {
+                val bridge = getPyBridge() ?: return@launch
+                val session = sessionState.value
+                if (!session.isLoggedIn || session.sessionString.isBlank()) return@launch
+                val apiId = getApiId()
+                val apiHash = getApiHash()
+                if (apiId <= 0 || apiHash.isBlank()) return@launch
+
+                StreamLog.i(TAG, "prewarm: initiating MTProto media session pre-warm (dc_id=0 → home DC)...")
+                val result = withContext(Dispatchers.IO) {
+                    bridge.callAttr("prewarm_media_session", apiId, apiHash, session.sessionString, 0).toString()
+                }
+                StreamLog.i(TAG, "prewarm: result=$result")
+            } catch (e: Exception) {
+                StreamLog.w(TAG, "prewarm: warning — ${e.message}")
+            }
         }
     }
 
