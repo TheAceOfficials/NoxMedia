@@ -230,11 +230,19 @@ class TelegramClientManager(private val context: Context) {
         autoScanJob = managerScope.launch {
             delay(15_000L) // Initial delay after boot
             while (isActive) {
+                // Yield CPU and SQLite resources while any client is actively streaming media
+                val isStreamingActive = clientStreamStates.values.any { it.activePlaybackStreamId != null }
+                if (isStreamingActive) {
+                    delay(15_000L)
+                    continue
+                }
+
                 val isEnabled = prefs.getBoolean("auto_scan_new_content", true)
                 if (isEnabled && sessionState.value.isLoggedIn) {
                     val channelList = channels.values.toList()
                     for (ch in channelList) {
                         if (!isActive) break
+                        if (clientStreamStates.values.any { it.activePlaybackStreamId != null }) break
                         if (activeScanJobs.containsKey(ch.id)) continue
 
                         val maxKnown = getMaxKnownMessageId(ch.id)
