@@ -105,9 +105,7 @@ class TelegramClientManager(private val context: Context) {
         @Volatile var activePlaybackStreamId: String? = null,
         @Volatile var activePlaybackMediaKey: String? = null,
         @Volatile var activePlaybackStartByte: Long = 0L,
-        @Volatile var activePlaybackStartTime: Long = 0L,
-        @Volatile var activeLavfFullStreamId: String? = null,
-        @Volatile var activeLavfStartTime: Long = 0L
+        @Volatile var activePlaybackStartTime: Long = 0L
     )
     private val clientStreamStates = java.util.concurrent.ConcurrentHashMap<String, ClientStreamState>()
 
@@ -2812,16 +2810,14 @@ class TelegramClientManager(private val context: Context) {
                 val partsJson = gson.toJson(partsList)
 
                 val state = clientStreamStates.computeIfAbsent(clientKey) { ClientStreamState() }
-                val isLavf = userAgent.contains("lavf", ignoreCase = true)
-                val isLavfFull = isLavf && contentLength > 25_000_000L
-                val isLavfProbe = isLavf && contentLength <= 25_000_000L
                 val isHeaderProbe = startByte <= 2_000_000L && contentLength <= 2_000_000L && state.activePlaybackStreamId != null
                 val isNearFileEnd = totalSize > 0 && (
                     startByte >= maxOf(0L, totalSize - 150_000_000L) ||
                     (totalSize - startByte) <= (totalSize * 0.15).toLong()
                 )
                 val isCuesProbe = isNearFileEnd && contentLength <= 25_000_000L
-                val isProbeStream = isLavfProbe || isHeaderProbe || isCuesProbe || (isLavfFull && state.activePlaybackStreamId != null)
+                // Strictly bound probes to <= 25MB. Any stream requesting > 25MB is full playback/seek, never a probe!
+                val isProbeStream = contentLength <= 25_000_000L && (isHeaderProbe || isCuesProbe || userAgent.contains("lavf", ignoreCase = true))
 
                 // Per-client stream management to prevent playback stream supersession wars
                 managePlaybackStream(
@@ -2872,10 +2868,7 @@ class TelegramClientManager(private val context: Context) {
                 StreamLog.i(TAG, "create_stream [$platform][$clientKey] in ${pyElapsed}ms: streamId=$streamId, partsCount=${partsList.size}, channelId=$effectiveChannelId, range=$startByte-$effectiveEnd/$totalSize (contentLength=$contentLength, isProbe=$isProbeStream)")
 
                 if (streamId.isNotBlank()) {
-                    if (isLavfFull && state.activePlaybackStreamId != null) {
-                        state.activeLavfFullStreamId = streamId
-                        state.activeLavfStartTime = System.currentTimeMillis()
-                    } else if (!isLavfProbe && !isHeaderProbe && !isCuesProbe) {
+                    if (!isProbeStream) {
                         state.activePlaybackStreamId = streamId
                         state.activePlaybackStartByte = startByte
                         state.activePlaybackStartTime = System.currentTimeMillis()
@@ -2883,13 +2876,8 @@ class TelegramClientManager(private val context: Context) {
 
                     val stream = TgMediaInputStream(bridge, streamId, contentLength) { closedId ->
                         val s = clientStreamStates[clientKey]
-                        if (s != null) {
-                            if (s.activePlaybackStreamId == closedId) {
-                                s.activePlaybackStreamId = null
-                            }
-                            if (s.activeLavfFullStreamId == closedId) {
-                                s.activeLavfFullStreamId = null
-                            }
+                        if (s != null && s.activePlaybackStreamId == closedId) {
+                            s.activePlaybackStreamId = null
                         }
                     }
                     return StreamChunkResult(
@@ -2954,30 +2942,28 @@ class TelegramClientManager(private val context: Context) {
                 }
             }
             state.activePlaybackStreamId = null
-            state.activeLavfFullStreamId?.let { prevLavf ->
-                try { bridge.callAttr("close_stream", prevLavf, false) } catch (_: Exception) {}
-            }
-            state.activeLavfFullStreamId = null
         }
         state.activePlaybackMediaKey = currentMediaKey
 
-        // 1. Auxiliary FFmpeg / Lavf metadata probe:
-        val isLavf = userAgent.contains("lavf", ignoreCase = true)
-        val isLavfProbe = isLavf && contentLength <= 25_000_000L
-
-        // 2. Initial Container Header Probe:
+        // Probe identification:
+        // 1. Initial Container Header Probe: <= 2MB near the start
         val isHeaderProbe = startByte <= 2_000_000L && contentLength <= 2_000_000L && state.activePlaybackStreamId != null
 
-        // 3. Cues / Index / Moov Probe:
+        // 2. Cues / Index / Moov Probe: <= 25MB near file end
         val isNearFileEnd = totalSize > 0 && (
             startByte >= maxOf(0L, totalSize - 150_000_000L) ||
             (totalSize - startByte) <= (totalSize * 0.15).toLong()
         )
         val isCuesProbe = isNearFileEnd && contentLength <= 25_000_000L
 
-        // Cross-client cleanup: If a non-probe stream starts, terminate any abandoned streams from other clients
-        // to prevent an abandoned iPad stream from stealing Telegram DC bandwidth from an Android TV.
-        if (!isLavfProbe && !isHeaderProbe && !isCuesProbe) {
+        // 3. Small metadata probe: explicitly bounded to <= 25MB
+        val isSmallProbe = contentLength <= 25_000_000L && (isHeaderProbe || isCuesProbe || userAgent.contains("lavf", ignoreCase = true))
+
+        val isProbeStream = isSmallProbe
+
+        // Cross-client cleanup: If a new non-probe stream starts from a different client,
+        // terminate abandoned streams from other clients to conserve Telegram DC bandwidth.
+        if (!isProbeStream) {
             for ((otherKey, otherState) in clientStreamStates) {
                 if (otherKey != clientKey) {
                     otherState.activePlaybackStreamId?.let { oldId ->
@@ -2985,46 +2971,17 @@ class TelegramClientManager(private val context: Context) {
                         try { bridge.callAttr("close_stream", oldId, false) } catch (_: Exception) {}
                     }
                     otherState.activePlaybackStreamId = null
-                    otherState.activeLavfFullStreamId?.let { oldLavf ->
-                        StreamLog.w(TAG, "[$platform][$clientKey] Terminating abandoned Lavf stream $oldLavf from other client $otherKey")
-                        try { bridge.callAttr("close_stream", oldLavf, false) } catch (_: Exception) {}
-                    }
-                    otherState.activeLavfFullStreamId = null
                 }
             }
         }
 
-        // 4a. Probes and Auxiliary Lavf Demux Streams:
-        val isLavfFullStream = isLavf && contentLength > 25_000_000L
-        if (isLavfProbe || isHeaderProbe || isCuesProbe || (isLavfFullStream && state.activePlaybackStreamId != null)) {
-            if (isLavfFullStream) {
-                val prevLavf = state.activeLavfFullStreamId
-                val now = System.currentTimeMillis()
-                if (prevLavf != null) {
-                    val lavfAge = now - state.activeLavfStartTime
-                    // Only terminate previous Lavf stream if it's genuinely abandoned (> 20s old).
-                    // During MPV / FFmpeg startup bursts, multiple connections open in parallel;
-                    // killing them causes premature connection reset and "[mpv] loading failed".
-                    if (lavfAge > 20_000L) {
-                        StreamLog.w(TAG, "[$platform][$clientKey] Terminating abandoned Lavf stream $prevLavf (age=${lavfAge}ms)")
-                        try {
-                            bridge.callAttr("close_stream", prevLavf, false)
-                        } catch (ce: Exception) {
-                            StreamLog.w(TAG, "[$platform][$clientKey] Notice closing old Lavf stream $prevLavf: ${ce.message}")
-                        }
-                        state.activeLavfFullStreamId = null
-                    } else {
-                        StreamLog.i(TAG, "[$platform][$clientKey] Concurrent Lavf demux stream (age=${lavfAge}ms): keeping previous stream $prevLavf alive")
-                    }
-                }
-                StreamLog.i(TAG, "[$platform][$clientKey] Lavf auxiliary demux stream: range=$startByte-$effectiveEnd/$totalSize (len=${contentLength / 1024 / 1024}MB) - capped prefetch")
-            } else {
-                StreamLog.i(TAG, "[$platform][$clientKey] Metadata/Cues probe (UA: '$userAgent'): range=$startByte-$effectiveEnd/$totalSize (len=$contentLength) - running concurrently")
-            }
+        // Probes run concurrently without altering active playback session
+        if (isProbeStream) {
+            StreamLog.i(TAG, "[$platform][$clientKey] Metadata/Cues probe (UA: '$userAgent'): range=$startByte-$effectiveEnd/$totalSize (len=$contentLength) - running concurrently")
             return
         }
 
-        // 4b. Playback & Seek Streams:
+        // Playback & Seek Streams (contentLength > 25MB):
         val prevStreamId = state.activePlaybackStreamId
         val prevStart = state.activePlaybackStartByte
         val prevStartTime = state.activePlaybackStartTime
@@ -3032,19 +2989,24 @@ class TelegramClientManager(private val context: Context) {
 
         if (prevStreamId != null) {
             val sameOffset = prevStart == startByte
-            val withinGrace = (now - prevStartTime) < 6_000L
+            val withinGrace = (now - prevStartTime) < 8_000L
 
             if (sameOffset && withinGrace) {
                 StreamLog.i(TAG, "[$platform][$clientKey] Player reconnect within grace window (offset=$startByte, age=${now - prevStartTime}ms): keeping stream $prevStreamId alive")
                 return
             }
 
-            val isStartupBurst = prevStart <= 25_000_000L && startByte <= 25_000_000L && (now - prevStartTime) < 4_000L
+            // Player startup cluster read: Demuxers (MPV/FFmpeg) open 0- for header, then offset X (e.g. 594564-) for first cluster.
+            // Both are near the start (<= 50MB) and within startup window (10s).
+            // Hand over active playback tracking to the new cluster stream without terminating the header stream prematurely.
+            val isStartupBurst = prevStart <= 50_000_000L && startByte <= 50_000_000L && (now - prevStartTime) < 10_000L
             if (isStartupBurst) {
-                StreamLog.i(TAG, "[$platform][$clientKey] Player startup cluster read (offset=$startByte, age=${now - prevStartTime}ms): letting previous stream finish naturally")
+                StreamLog.i(TAG, "[$platform][$clientKey] Demuxer startup cluster read (offset=$startByte, age=${now - prevStartTime}ms): handing over active playback to new stream")
+                state.activePlaybackStreamId = null
                 return
             }
 
+            // Genuinely superseded playback / user seek (e.g. jumped timeline from 10MB to 500MB):
             val isUserSeek = !sameOffset && !isStartupBurst
             StreamLog.w(TAG, "[$platform][$clientKey] Active stream superseded ($prevStart -> $startByte, age=${now - prevStartTime}ms): terminating previous stream $prevStreamId (isSeek=$isUserSeek)")
             try {
@@ -3054,13 +3016,6 @@ class TelegramClientManager(private val context: Context) {
                 StreamLog.w(TAG, "[$platform][$clientKey] Notice closing superseded stream $prevStreamId: ${ce.message}")
             }
             state.activePlaybackStreamId = null
-
-            // CRITICAL: Also terminate any active Lavf demux stream on seek!
-            state.activeLavfFullStreamId?.let { prevLavf ->
-                StreamLog.w(TAG, "[$platform][$clientKey] Seek detected: terminating background Lavf stream $prevLavf")
-                try { bridge.callAttr("close_stream", prevLavf, false) } catch (_: Exception) {}
-            }
-            state.activeLavfFullStreamId = null
         }
     }
 

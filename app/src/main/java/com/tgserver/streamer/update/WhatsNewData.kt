@@ -53,7 +53,7 @@ object WhatsNewRepository {
             WhatsNewItem(
                 category = ChangeCategory.FIX,
                 title = "Resolved MPV Playback Loading Error",
-                description = "Fixed an issue where concurrent demuxer probe streams during player startup were prematurely terminated, resolving '[mpv] loading failed' on iOS/iPadOS."
+                description = "Fixed an issue where concurrent demuxer startup cluster streams were mistakenly categorized as probe streams and prematurely killed, resolving '[mpv] loading failed' on iOS, iPadOS, and MPV."
             ),
             WhatsNewItem(
                 category = ChangeCategory.IMPROVEMENT,
@@ -63,7 +63,7 @@ object WhatsNewRepository {
             WhatsNewItem(
                 category = ChangeCategory.IMPROVEMENT,
                 title = "Enhanced Stream Read Tolerance",
-                description = "Increased buffer underrun tolerance to 15 seconds, preventing premature EOF disconnects during slower chunk downloads."
+                description = "Increased buffer underrun tolerance to 15 seconds, preventing premature EOF disconnects during slower chunk downloads on slower networks."
             ),
             WhatsNewItem(
                 category = ChangeCategory.IMPROVEMENT,
