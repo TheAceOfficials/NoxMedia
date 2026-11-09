@@ -1414,9 +1414,9 @@ async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_
                             offset=offset,
                             limit=limit
                         ),
-                        timeout=14.0
+                        timeout=18.0 if IS_32BIT else 14.0
                     ),
-                    timeout=15.0
+                    timeout=20.0 if IS_32BIT else 15.0
                 )
             elapsed_ms = int((time.time() - t_start) * 1000)
 
