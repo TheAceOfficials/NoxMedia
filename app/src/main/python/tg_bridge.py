@@ -142,8 +142,10 @@ IS_32BIT: bool = (sys.maxsize <= 2**31 - 1)
 
 def _get_dc_semaphore(dc_id: int) -> asyncio.Semaphore:
     if dc_id not in _dc_semaphores:
-        # Strictly maintain 2 concurrent RPCs per DC on a single persistent MTProto Session (Build 254/262 baseline)
-        _dc_semaphores[dc_id] = asyncio.Semaphore(2)
+        # 64-bit devices: strictly maintain 2 concurrent RPCs per DC (Build 254 baseline).
+        # 32-bit devices: 3 concurrent RPCs to match TelegramStremio's 4-5 MB/s throughput on high latency links.
+        limit = 3 if IS_32BIT else 2
+        _dc_semaphores[dc_id] = asyncio.Semaphore(limit)
     return _dc_semaphores[dc_id]
 _channel_peer_lock = asyncio.Lock()
 _resolved_channels: Dict[int, int] = {}
@@ -1101,26 +1103,7 @@ async def _ensure_channel_peer(client: Client, chat_id: int) -> int:
             except Exception:
                 pass
 
-        # 2. Try resolving via GetAllChats RPC directly (resolves all channels/groups user belongs to in 1 RPC)
-        try:
-            all_chats_res = await client.invoke(raw.functions.messages.GetAllChats(except_ids=[]))
-            if all_chats_res and getattr(all_chats_res, "chats", None):
-                await client.fetch_peers(all_chats_res.chats)
-                for ch in all_chats_res.chats:
-                    ch_id = getattr(ch, "id", None)
-                    if ch_id is None:
-                        continue
-                    ch_target_ids = {ch_id, -ch_id, int(f"-100{ch_id}")}
-                    if any(tid in ch_target_ids for tid in target_ids):
-                        real_id = int(f"-100{ch_id}")
-                        for x in (target_ids | {real_id, chat_id}):
-                            _resolved_channels[x] = real_id
-                        print(f"[PeerResolve] Resolved via GetAllChats {chat_id} -> {real_id} ({getattr(ch, 'title', '')})", flush=True)
-                        return real_id
-        except Exception as e:
-            print(f"[PeerResolve] GetAllChats notice for {chat_id}: {e}", flush=True)
-
-        # 3. Iterate dialogs up to 200 to resolve and cache the peer in Pyrogram
+        # 2. Iterate dialogs up to 200 to resolve and cache the peer in Pyrogram
         try:
             async for dialog in client.get_dialogs(limit=200):
                 dchat = dialog.chat
@@ -1202,7 +1185,6 @@ async def _get_media_session(client: Client, dc_id: int) -> Session:
         if not hasattr(client, "media_sessions"):
             client.media_sessions = {}
         client.media_sessions[dc_id] = session
-        _log_stream(f"Media session ready: DC{dc_id}")
         return session
 
 async def _reset_media_session(client: Client, dc_id: int, bad_session: Optional[Session] = None):
@@ -1416,14 +1398,14 @@ async def _do_resolve_file_id(client: Client, chat_id: int, msg_id: int, key: Tu
 async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_obj: FileId, offset: int, limit: int) -> Optional[bytes]:
     location = _get_location_from_file_id(file_id_obj)
     dc_id = file_id_obj.dc_id
-    sem = _get_dc_semaphore(dc_id)
+    dc_sem = _get_dc_semaphore(dc_id)
 
     tries = 0
     while tries < 3:
         t_start = time.time()
         session = None
         try:
-            async with sem:
+            async with dc_sem:
                 session = await _get_media_session(client, dc_id)
                 r = await asyncio.wait_for(
                     session.invoke(
@@ -1752,8 +1734,10 @@ class VirtualStreamSession:
             else:
                 next_seq_to_emit = 0
 
-            # Worker Concurrency: strictly 2 concurrent workers for continuous MTProto pipelining (Build 254/262 baseline).
-            MAX_IN_FLIGHT = 2
+            # Worker Concurrency:
+            # On 64-bit: strictly 2 workers for continuous pipelining (Build 254 baseline).
+            # On 32-bit: 3 workers to reach 4-5 MB/s (matching TelegramStremio) across higher latency links.
+            MAX_IN_FLIGHT = 3 if IS_32BIT else 2
             next_task_idx = next_seq_to_emit
             completed_chunks: Dict[int, bytes] = {}
             active_tasks_map: Dict[asyncio.Task, int] = {}
@@ -1773,7 +1757,13 @@ class VirtualStreamSession:
                         self._closed = True
                         break
 
-                effective_max_in_flight = MAX_IN_FLIGHT
+                # Dedicated Bandwidth for Buffer Underrun / Fast Recovery:
+                # If player queue is empty and the next required chunk is not yet ready,
+                # allow worker concurrency so chunk N finishes and chunk N+1 is immediately in-flight
+                if self.queue.empty() and (next_seq_to_emit not in completed_chunks):
+                    effective_max_in_flight = min(3 if IS_32BIT else 2, MAX_IN_FLIGHT)
+                else:
+                    effective_max_in_flight = MAX_IN_FLIGHT
 
                 # 1. Fill available worker slots up to effective_max_in_flight
                 while next_task_idx < total_tasks and len(active_tasks_map) < effective_max_in_flight and not self._closed:
@@ -1854,16 +1844,6 @@ class VirtualStreamSession:
             if self.bytes_read == 0 and not getattr(self, "_has_logged_first_read", False):
                 self._has_logged_first_read = True
                 _log_stream(f"Stream[{self.stream_id[:8]}]: First read_bytes from player (max_bytes={max_bytes})")
-
-            # Initial playback cushion for 32-bit devices:
-            # On non-probe playback streams, after initial chunk 0 header has been read by demuxer,
-            # allow prefetcher up to 1.8s to accumulate a 2-chunk (2MB) safety cushion
-            # before player drains the queue, eliminating micro-pauses caused by network latency jitter.
-            if IS_32BIT and not self.is_probe and self.bytes_read > 0 and (self.bytes_read <= 2 * 1024 * 1024) and not getattr(self, "_has_buffered_lead", False):
-                self._has_buffered_lead = True
-                cushion_deadline = time.time() + 1.8
-                while (self.queue.qsize() + len(self.chunk_deque)) < 2 and time.time() < cushion_deadline and not self._closed and not self._eof:
-                    await asyncio.sleep(0.04)
 
             # Drain all items already queued into chunk_deque
             while not self.queue.empty():
