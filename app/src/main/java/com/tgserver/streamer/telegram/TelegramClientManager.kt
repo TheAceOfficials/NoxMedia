@@ -110,8 +110,16 @@ class TelegramClientManager(private val context: Context) {
     )
     private val clientStreamStates = java.util.concurrent.ConcurrentHashMap<String, ClientStreamState>()
 
+    @Volatile private var lastStreamActiveTime = 0L
+
     fun isAnyStreamActive(): Boolean {
-        return clientStreamStates.values.any { it.activePlaybackStreamId != null || it.activeLavfFullStreamId != null }
+        val hasActive = clientStreamStates.values.any { it.activePlaybackStreamId != null || it.activeLavfFullStreamId != null }
+        if (hasActive) {
+            lastStreamActiveTime = System.currentTimeMillis()
+            return true
+        }
+        // 15-second grace window after stream close (covers seeks, track switching, player buffer rebuild)
+        return (System.currentTimeMillis() - lastStreamActiveTime) < 15_000L
     }
 
     private val _apiCredentials = MutableStateFlow(
@@ -2276,6 +2284,10 @@ class TelegramClientManager(private val context: Context) {
         incremental: Boolean = true,
         onProgress: (ScanProgressState) -> Unit = {}
     ): Result<Int> = withContext(Dispatchers.IO) {
+        if (isAnyStreamActive()) {
+            Log.d(TAG, "scanChannelLive: skipping scan for channel $channelId, video streaming is active")
+            return@withContext Result.success(0)
+        }
         try {
             val apiId = getApiId()
             val apiHash = getApiHash()
@@ -2329,6 +2341,10 @@ class TelegramClientManager(private val context: Context) {
             onProgress(initialProgress)
 
             while (kotlin.coroutines.coroutineContext.isActive) {
+                if (isAnyStreamActive()) {
+                    Log.d(TAG, "scanChannelLive: halting scan for channel $channelId, video streaming started")
+                    break
+                }
                 batchNumber++
 
                 val progressReport = ScanProgressState(
