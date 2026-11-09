@@ -140,8 +140,8 @@ _dc_semaphores: Dict[int, asyncio.Semaphore] = {}
 # System architecture detection (32-bit vs 64-bit)
 IS_32BIT: bool = (sys.maxsize <= 2**31 - 1)
 
-# 32-bit Multi-Session MTProto Connection Pool (4 distinct TCP sockets to bypass single-socket BDP ceiling)
-_POOL_SIZE_32BIT = 4
+# 32-bit Multi-Session MTProto Connection Pool (2 distinct TCP sockets to bypass single-socket BDP ceiling without LOS GC pressure)
+_POOL_SIZE_32BIT = 2
 _dc_session_pools: Dict[int, asyncio.Queue] = {}
 _pool_init_lock = asyncio.Lock()
 
@@ -166,8 +166,8 @@ _file_id_lock = asyncio.Lock()
 _pending_file_resolutions: Dict[Tuple[int, int], asyncio.Task] = {}
 
 # High-Performance In-Memory LRU Chunk Cache
-# 48 chunks x 1MB = ~48 MB RAM on 64-bit; 12 chunks x 1MB = ~12 MB RAM on 32-bit to eliminate ART heap GC thrashing
-_CHUNK_CACHE_MAX_ENTRIES = 12 if IS_32BIT else 48
+# 48 chunks x 1MB = ~48 MB RAM on 64-bit; 6 chunks x 1MB = ~6 MB RAM on 32-bit to eliminate Large Object Space (LOS) GC pauses
+_CHUNK_CACHE_MAX_ENTRIES = 6 if IS_32BIT else 48
 _chunk_cache: OrderedDict[Tuple[int, int, int], bytes] = OrderedDict()
 _fetch_dedup_lock = asyncio.Lock()
 _pending_fetches: Dict[Tuple[int, int, int], asyncio.Task] = {}
@@ -1684,12 +1684,12 @@ class VirtualStreamSession:
         self.chunk_deque: deque = deque()
         self.current_partial: Optional[bytes] = None
         self.current_partial_offset: int = 0
-        # Pipeline buffer: Probes capped at 2MB; 32-bit devices use 8-24MB (default 16MB) to eliminate ART heap GC thrashing;
+        # Pipeline buffer: Probes capped at 2MB; 32-bit devices capped to 4-6MB to eliminate Large Object Space (LOS) GC pauses;
         # 64-bit devices strictly maintain Build 254 baseline (min 48MB, up to 128MB).
         if self.is_probe:
             q_size = 2
         elif IS_32BIT:
-            q_size = max(8, min(24, _buffer_pipeline_mb))
+            q_size = max(4, min(6, _buffer_pipeline_mb))
         else:
             q_size = max(24, min(128, max(48, _buffer_pipeline_mb)))
         self.queue: asyncio.Queue = asyncio.Queue(maxsize=q_size)
@@ -1846,8 +1846,8 @@ class VirtualStreamSession:
 
             # Worker Concurrency:
             # On 64-bit: strictly 2 workers for continuous pipelining (Build 254 baseline).
-            # On 32-bit: 4 workers across 4 striped MTProto sessions to reach 4-5 MB/s (matching TelegramStremio).
-            MAX_IN_FLIGHT = 4 if IS_32BIT else 2
+            # On 32-bit: 2 workers across 2 striped MTProto sessions to eliminate Large Object Space (LOS) GC pauses.
+            MAX_IN_FLIGHT = 2
             next_task_idx = next_seq_to_emit
             completed_chunks: Dict[int, bytes] = {}
             active_tasks_map: Dict[asyncio.Task, int] = {}
@@ -1871,7 +1871,7 @@ class VirtualStreamSession:
                 # If player queue is empty and the next required chunk is not yet ready,
                 # allow worker concurrency so chunk N finishes and chunk N+1 is immediately in-flight
                 if self.queue.empty() and (next_seq_to_emit not in completed_chunks):
-                    effective_max_in_flight = min(4 if IS_32BIT else 2, MAX_IN_FLIGHT)
+                    effective_max_in_flight = min(2, MAX_IN_FLIGHT)
                 else:
                     effective_max_in_flight = MAX_IN_FLIGHT
 
