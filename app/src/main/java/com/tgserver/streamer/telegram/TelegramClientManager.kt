@@ -2842,15 +2842,14 @@ class TelegramClientManager(private val context: Context) {
 
                 val state = clientStreamStates.computeIfAbsent(clientKey) { ClientStreamState() }
                 val isLavf = userAgent.contains("lavf", ignoreCase = true) || userAgent.contains("mpv", ignoreCase = true)
-                val isLavfFull = isLavf && contentLength > 25_000_000L
                 val isLavfProbe = isLavf && contentLength <= 25_000_000L
                 val isHeaderProbe = startByte <= 2_000_000L && contentLength <= 2_000_000L && state.activePlaybackStreamId != null
                 val isNearFileEnd = totalSize > 0 && (
                     startByte >= maxOf(0L, totalSize - 150_000_000L) ||
                     (totalSize - startByte) <= (totalSize * 0.15).toLong()
                 )
-                val isCuesProbe = isNearFileEnd
-                val isProbeStream = isLavfProbe || isHeaderProbe || isCuesProbe || (isLavfFull && state.activePlaybackStreamId != null)
+                val isCuesProbe = isNearFileEnd && contentLength <= 25_000_000L
+                val isProbeStream = isLavfProbe || isHeaderProbe || isCuesProbe
 
                 // Per-client stream management to prevent playback stream supersession wars
                 managePlaybackStream(
@@ -2901,9 +2900,7 @@ class TelegramClientManager(private val context: Context) {
                 StreamLog.i(TAG, "create_stream [$platform][$clientKey] in ${pyElapsed}ms: streamId=$streamId, partsCount=${partsList.size}, channelId=$effectiveChannelId, range=$startByte-$effectiveEnd/$totalSize (contentLength=$contentLength, isProbe=$isProbeStream)")
 
                 if (streamId.isNotBlank()) {
-                    if (isLavfFull && state.activePlaybackStreamId != null) {
-                        state.activeLavfFullStreamId = streamId
-                    } else if (!isLavfProbe && !isHeaderProbe && !isCuesProbe) {
+                    if (!isProbeStream) {
                         state.activePlaybackStreamId = streamId
                         state.activePlaybackStartByte = startByte
                         state.activePlaybackStartTime = System.currentTimeMillis()
@@ -3001,7 +2998,7 @@ class TelegramClientManager(private val context: Context) {
             startByte >= maxOf(0L, totalSize - 150_000_000L) ||
             (totalSize - startByte) <= (totalSize * 0.15).toLong()
         )
-        val isCuesProbe = isNearFileEnd
+        val isCuesProbe = isNearFileEnd && contentLength <= 25_000_000L
 
         // Cross-client cleanup: If a non-probe stream starts, terminate any abandoned streams from other clients
         // to prevent an abandoned iPad stream from stealing Telegram DC bandwidth from an Android TV.
@@ -3022,24 +3019,9 @@ class TelegramClientManager(private val context: Context) {
             }
         }
 
-        // 4a. Probes and Auxiliary Lavf Demux Streams:
-        val isLavfFullStream = isLavf && contentLength > 25_000_000L
-        if (isLavfProbe || isHeaderProbe || isCuesProbe || (isLavfFullStream && state.activePlaybackStreamId != null)) {
-            if (isLavfFullStream) {
-                val prevLavf = state.activeLavfFullStreamId
-                if (prevLavf != null) {
-                    StreamLog.w(TAG, "[$platform][$clientKey] New Lavf auxiliary demux stream: terminating previous Lavf stream $prevLavf")
-                    try {
-                        bridge.callAttr("close_stream", prevLavf, false)
-                    } catch (ce: Exception) {
-                        StreamLog.w(TAG, "[$platform][$clientKey] Notice closing old Lavf stream $prevLavf: ${ce.message}")
-                    }
-                    state.activeLavfFullStreamId = null
-                }
-                StreamLog.i(TAG, "[$platform][$clientKey] Lavf auxiliary demux stream: range=$startByte-$effectiveEnd/$totalSize (len=${contentLength / 1024 / 1024}MB) - capped prefetch")
-            } else {
-                StreamLog.i(TAG, "[$platform][$clientKey] Metadata/Cues probe (UA: '$userAgent'): range=$startByte-$effectiveEnd/$totalSize (len=$contentLength) - running concurrently")
-            }
+        // 4a. Metadata / Cues Probes (<= 25MB):
+        if (isLavfProbe || isHeaderProbe || isCuesProbe) {
+            StreamLog.i(TAG, "[$platform][$clientKey] Metadata/Cues probe (UA: '$userAgent'): range=$startByte-$effectiveEnd/$totalSize (len=$contentLength) - running concurrently")
             return
         }
 
