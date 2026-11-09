@@ -1270,10 +1270,17 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     // --- Settings Actions & Persistence ---
 
     private fun loadStoredConfig(): ServerConfig {
-        val rawBufMb = prefs.getInt("buffer_pipeline_mb", 64)
-        val bufMb = if (rawBufMb <= 20) 64 else rawBufMb
-        if (rawBufMb <= 20) {
-            prefs.edit().putInt("buffer_pipeline_mb", 64).apply()
+        val is64Bit = android.os.Process.is64Bit()
+        val rawBufMb = prefs.getInt("buffer_pipeline_mb", if (is64Bit) 64 else 16)
+        val bufMb = if (is64Bit) {
+            val v = if (rawBufMb <= 20) 64 else rawBufMb
+            if (rawBufMb <= 20) {
+                prefs.edit().putInt("buffer_pipeline_mb", 64).apply()
+            }
+            v
+        } else {
+            // On 32-bit devices, clamp to 8-24MB (default 16MB) to eliminate ART heap GC thrashing
+            rawBufMb.coerceIn(8, 24)
         }
         return ServerConfig(
             port = prefs.getInt("server_port", 7788),

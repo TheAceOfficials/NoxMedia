@@ -16,7 +16,7 @@ class TgMediaInputStream(
     private val bridge: PyObject,
     private val streamId: String,
     private val totalBytesToRead: Long,
-    private val chunkSize: Int = 2097152, // 2MB chunk buffer (doubled to minimize JNI calls and smooth streaming)
+    private val chunkSize: Int = if (android.os.Process.is64Bit()) 2097152 else 1048576, // 1MB on 32-bit to eliminate JNI heap fragmentation & GC pauses, 2MB on 64-bit
     private val onClosed: ((String) -> Unit)? = null
 ) : InputStream() {
 

@@ -110,6 +110,10 @@ class TelegramClientManager(private val context: Context) {
     )
     private val clientStreamStates = java.util.concurrent.ConcurrentHashMap<String, ClientStreamState>()
 
+    fun isAnyStreamActive(): Boolean {
+        return clientStreamStates.values.any { it.activePlaybackStreamId != null || it.activeLavfFullStreamId != null }
+    }
+
     private val _apiCredentials = MutableStateFlow(
         Pair(
             prefs.getInt("tg_api_id", 0),
@@ -231,11 +235,16 @@ class TelegramClientManager(private val context: Context) {
         autoScanJob = managerScope.launch {
             delay(15_000L) // Initial delay after boot
             while (isActive) {
+                // Yield CPU and MTProto sockets completely if a video is actively streaming
+                if (isAnyStreamActive()) {
+                    delay(10_000L)
+                    continue
+                }
                 val isEnabled = prefs.getBoolean("auto_scan_new_content", true)
                 if (isEnabled && sessionState.value.isLoggedIn) {
                     val channelList = channels.values.toList()
                     for (ch in channelList) {
-                        if (!isActive) break
+                        if (!isActive || isAnyStreamActive()) break
                         if (activeScanJobs.containsKey(ch.id)) continue
 
                         val maxKnown = getMaxKnownMessageId(ch.id)
@@ -274,6 +283,11 @@ class TelegramClientManager(private val context: Context) {
         autoBackupJob = managerScope.launch {
             delay(30_000L) // Wait 30s after startup
             while (isActive) {
+                // Yield network and CPU if a video is actively streaming
+                if (isAnyStreamActive()) {
+                    delay(30_000L)
+                    continue
+                }
                 val isEnabled = prefs.getBoolean("auto_backup_enabled", false)
                 val intervalHours = prefs.getInt("auto_backup_interval_hours", 12)
                 if (isEnabled && _sessionState.value.isLoggedIn) {
