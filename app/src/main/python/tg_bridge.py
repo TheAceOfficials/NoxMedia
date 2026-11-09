@@ -132,7 +132,7 @@ _auth_state = {
 # Active streaming sessions and cache
 _active_streams: Dict[str, Any] = {}
 _file_id_cache: Dict[Tuple[int, int], FileId] = {}
-_media_sessions: Dict[int, Session] = {}
+_media_sessions: Dict[Tuple[int, int], Session] = {}
 _dc_auth_keys: Dict[int, bytes] = {}
 _media_session_lock = asyncio.Lock()
 _dc_semaphores: Dict[int, asyncio.Semaphore] = {}
@@ -140,12 +140,25 @@ _dc_semaphores: Dict[int, asyncio.Semaphore] = {}
 # System architecture detection (32-bit vs 64-bit)
 IS_32BIT: bool = (sys.maxsize <= 2**31 - 1)
 
+# 32-bit Multi-Session MTProto Connection Pool (4 distinct TCP sockets to bypass single-socket BDP ceiling)
+_POOL_SIZE_32BIT = 4
+_dc_session_pools: Dict[int, asyncio.Queue] = {}
+_pool_init_lock = asyncio.Lock()
+
+async def _get_dc_pool(dc_id: int) -> asyncio.Queue:
+    if dc_id not in _dc_session_pools:
+        async with _pool_init_lock:
+            if dc_id not in _dc_session_pools:
+                q = asyncio.Queue()
+                for idx in range(_POOL_SIZE_32BIT):
+                    q.put_nowait(idx)
+                _dc_session_pools[dc_id] = q
+    return _dc_session_pools[dc_id]
+
 def _get_dc_semaphore(dc_id: int) -> asyncio.Semaphore:
     if dc_id not in _dc_semaphores:
-        # 64-bit devices: strictly maintain 2 concurrent RPCs per DC (Build 254 baseline).
-        # 32-bit devices: 3 concurrent RPCs to match TelegramStremio's 4-5 MB/s throughput on high latency links.
-        limit = 3 if IS_32BIT else 2
-        _dc_semaphores[dc_id] = asyncio.Semaphore(limit)
+        # Strictly maintain 64-bit Build 254 baseline (2 concurrent RPCs per DC)
+        _dc_semaphores[dc_id] = asyncio.Semaphore(2)
     return _dc_semaphores[dc_id]
 _channel_peer_lock = asyncio.Lock()
 _resolved_channels: Dict[int, int] = {}
@@ -1127,17 +1140,18 @@ async def _ensure_channel_peer(client: Client, chat_id: int) -> int:
 
         return chat_id
 
-async def _get_media_session(client: Client, dc_id: int) -> Session:
+async def _get_media_session(client: Client, dc_id: int, session_idx: int = 0) -> Session:
     """
     Obtains or initializes a reliable authenticated media Session for datacenter dc_id.
-    Uses a single authenticated MTProto connection per DC with full multiplexing support.
+    Supports MTProto multi-socket session striping on 32-bit devices.
     """
-    session = _media_sessions.get(dc_id)
+    key = (dc_id, session_idx)
+    session = _media_sessions.get(key)
     if session and getattr(session, "is_started", None) and session.is_started.is_set():
         return session
 
     async with _media_session_lock:
-        session = _media_sessions.get(dc_id)
+        session = _media_sessions.get(key)
         if session and getattr(session, "is_started", None) and session.is_started.is_set():
             return session
 
@@ -1179,22 +1193,25 @@ async def _get_media_session(client: Client, dc_id: int) -> Session:
                     await session.stop()
                 except Exception:
                     pass
-                raise RuntimeError(f"Failed to export/import authorization for DC {dc_id}")
+                raise RuntimeError(f"Failed to export/import authorization for DC {dc_id} (session {session_idx})")
 
-        _media_sessions[dc_id] = session
+        _media_sessions[key] = session
         if not hasattr(client, "media_sessions"):
             client.media_sessions = {}
-        client.media_sessions[dc_id] = session
+        if session_idx == 0:
+            client.media_sessions[dc_id] = session
+        _log_stream(f"Media session ready: DC{dc_id} (session_idx={session_idx})")
         return session
 
-async def _reset_media_session(client: Client, dc_id: int, bad_session: Optional[Session] = None):
+async def _reset_media_session(client: Client, dc_id: int, bad_session: Optional[Session] = None, session_idx: int = 0):
+    key = (dc_id, session_idx)
     async with _media_session_lock:
-        current_session = _media_sessions.get(dc_id)
+        current_session = _media_sessions.get(key)
         if bad_session is not None and current_session is not bad_session:
             # Another concurrent worker already reset and replaced this session
             return
-        old_session = _media_sessions.pop(dc_id, None)
-        if hasattr(client, "media_sessions"):
+        old_session = _media_sessions.pop(key, None)
+        if hasattr(client, "media_sessions") and session_idx == 0:
             client.media_sessions.pop(dc_id, None)
 
     if old_session:
@@ -1398,15 +1415,106 @@ async def _do_resolve_file_id(client: Client, chat_id: int, msg_id: int, key: Tu
 async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_obj: FileId, offset: int, limit: int) -> Optional[bytes]:
     location = _get_location_from_file_id(file_id_obj)
     dc_id = file_id_obj.dc_id
-    dc_sem = _get_dc_semaphore(dc_id)
 
-    tries = 0
-    while tries < 3:
-        t_start = time.time()
-        session = None
-        try:
-            async with dc_sem:
-                session = await _get_media_session(client, dc_id)
+    if not IS_32BIT:
+        # Strictly maintain 64-bit Build 254 baseline: single session with 2 concurrent RPCs
+        dc_sem = _get_dc_semaphore(dc_id)
+        tries = 0
+        while tries < 3:
+            t_start = time.time()
+            session = None
+            try:
+                async with dc_sem:
+                    session = await _get_media_session(client, dc_id, 0)
+                    r = await asyncio.wait_for(
+                        session.invoke(
+                            raw.functions.upload.GetFile(
+                                location=location,
+                                offset=offset,
+                                limit=limit
+                            ),
+                            timeout=14.0
+                        ),
+                        timeout=15.0
+                    )
+                elapsed_ms = int((time.time() - t_start) * 1000)
+
+                chunk_bytes = None
+                if isinstance(r, raw.types.upload.File):
+                    chunk_bytes = r.bytes
+                elif isinstance(r, raw.types.upload.FileCdnRedirect):
+                    cdn_session = Session(
+                        client, r.dc_id, await Auth(client, r.dc_id, await client.storage.test_mode()).create(),
+                        await client.storage.test_mode(), is_media=True, is_cdn=True
+                    )
+                    try:
+                        await cdn_session.start()
+                        r2 = await cdn_session.invoke(
+                            raw.functions.upload.GetCdnFile(
+                                file_token=r.file_token,
+                                offset=offset,
+                                limit=limit
+                            ),
+                            timeout=14.0
+                        )
+                        from pyrogram.crypto import aes
+                        decrypted_chunk = aes.ctr256_decrypt(
+                            r2.bytes,
+                            r.encryption_key,
+                            bytearray(r.encryption_iv[:-4] + (offset // 16).to_bytes(4, "big"))
+                        )
+                        chunk_bytes = decrypted_chunk
+                    finally:
+                        await cdn_session.stop()
+                else:
+                    chunk_bytes = getattr(r, "bytes", None)
+
+                if chunk_bytes is not None:
+                    speed_mb = (len(chunk_bytes) / (1024 * 1024)) / max(0.001, (elapsed_ms / 1000.0))
+                    _log_stream(f"Chunk[off={offset // (1024*1024)}MB]: fetched {len(chunk_bytes)//1024}KB in {elapsed_ms}ms from DC{dc_id} ({speed_mb:.1f} MB/s)", "I")
+                    return chunk_bytes
+                return None
+            except asyncio.CancelledError:
+                raise
+            except (asyncio.TimeoutError, TimeoutError):
+                tries += 1
+                if tries < 2:
+                    _log_stream(f"⚠️ SLOW CHUNK: Chunk[off={offset // (1024*1024)}MB] took >14s on DC{dc_id} (try {tries}/3). Retrying on active session...", "W")
+                    await asyncio.sleep(0.1)
+                else:
+                    _log_stream(f"⚠️ PACKET LOSS / TIMEOUT: Chunk[off={offset // (1024*1024)}MB] timed out on DC{dc_id} (try {tries}/3). Resetting socket...", "W")
+                    await _reset_media_session(client, dc_id, bad_session=session, session_idx=0)
+                    await asyncio.sleep(0.3)
+            except Exception as e:
+                err_str = str(e)
+                if "FILE_REFERENCE" in err_str or "file_reference" in err_str.lower():
+                    _file_id_cache.pop((chat_id, msg_id), None)
+                    refreshed = await _resolve_file_id(client, chat_id, msg_id)
+                    if refreshed:
+                        file_id_obj = refreshed
+                        location = _get_location_from_file_id(refreshed)
+                elif "FloodWait" in type(e).__name__ or "flood" in err_str.lower():
+                    m = re.search(r'(\d+)', err_str)
+                    w = int(m.group(1)) if m else 3
+                    _log_stream(f"⚠️ FLOOD WAIT: Sleeping {w}s on DC{dc_id}", "W")
+                    await asyncio.sleep(w + 0.5)
+                elif any(x in err_str for x in ["AuthKey", "SessionRevoked", "ConnectionReset", "BrokenPipe", "Bad file descriptor", "OSError"]):
+                    _log_stream(f"⚠️ SOCKET ERROR: {err_str} on DC{dc_id}, resetting socket...", "W")
+                    await _reset_media_session(client, dc_id, bad_session=session, session_idx=0)
+                tries += 1
+                await asyncio.sleep(0.2)
+        return None
+
+    # --- 32-bit: Multi-Session Socket Striping via Dynamic Connection Pool (4 distinct TCP sockets) ---
+    pool = await _get_dc_pool(dc_id)
+    session_idx = await pool.get()
+    try:
+        tries = 0
+        while tries < 3:
+            t_start = time.time()
+            session = None
+            try:
+                session = await _get_media_session(client, dc_id, session_idx)
                 r = await asyncio.wait_for(
                     session.invoke(
                         raw.functions.upload.GetFile(
@@ -1414,77 +1522,79 @@ async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_
                             offset=offset,
                             limit=limit
                         ),
-                        timeout=18.0 if IS_32BIT else 14.0
+                        timeout=18.0
                     ),
-                    timeout=20.0 if IS_32BIT else 15.0
+                    timeout=20.0
                 )
-            elapsed_ms = int((time.time() - t_start) * 1000)
+                elapsed_ms = int((time.time() - t_start) * 1000)
 
-            chunk_bytes = None
-            if isinstance(r, raw.types.upload.File):
-                chunk_bytes = r.bytes
-            elif isinstance(r, raw.types.upload.FileCdnRedirect):
-                cdn_session = Session(
-                    client, r.dc_id, await Auth(client, r.dc_id, await client.storage.test_mode()).create(),
-                    await client.storage.test_mode(), is_media=True, is_cdn=True
-                )
-                try:
-                    await cdn_session.start()
-                    r2 = await cdn_session.invoke(
-                        raw.functions.upload.GetCdnFile(
-                            file_token=r.file_token,
-                            offset=offset,
-                            limit=limit
-                        ),
-                        timeout=14.0
+                chunk_bytes = None
+                if isinstance(r, raw.types.upload.File):
+                    chunk_bytes = r.bytes
+                elif isinstance(r, raw.types.upload.FileCdnRedirect):
+                    cdn_session = Session(
+                        client, r.dc_id, await Auth(client, r.dc_id, await client.storage.test_mode()).create(),
+                        await client.storage.test_mode(), is_media=True, is_cdn=True
                     )
-                    from pyrogram.crypto import aes
-                    decrypted_chunk = aes.ctr256_decrypt(
-                        r2.bytes,
-                        r.encryption_key,
-                        bytearray(r.encryption_iv[:-4] + (offset // 16).to_bytes(4, "big"))
-                    )
-                    chunk_bytes = decrypted_chunk
-                finally:
-                    await cdn_session.stop()
-            else:
-                chunk_bytes = getattr(r, "bytes", None)
+                    try:
+                        await cdn_session.start()
+                        r2 = await cdn_session.invoke(
+                            raw.functions.upload.GetCdnFile(
+                                file_token=r.file_token,
+                                offset=offset,
+                                limit=limit
+                            ),
+                            timeout=14.0
+                        )
+                        from pyrogram.crypto import aes
+                        decrypted_chunk = aes.ctr256_decrypt(
+                            r2.bytes,
+                            r.encryption_key,
+                            bytearray(r.encryption_iv[:-4] + (offset // 16).to_bytes(4, "big"))
+                        )
+                        chunk_bytes = decrypted_chunk
+                    finally:
+                        await cdn_session.stop()
+                else:
+                    chunk_bytes = getattr(r, "bytes", None)
 
-            if chunk_bytes is not None:
-                speed_mb = (len(chunk_bytes) / (1024 * 1024)) / max(0.001, (elapsed_ms / 1000.0))
-                _log_stream(f"Chunk[off={offset // (1024*1024)}MB]: fetched {len(chunk_bytes)//1024}KB in {elapsed_ms}ms from DC{dc_id} ({speed_mb:.1f} MB/s)", "I")
-                return chunk_bytes
-            return None
-        except asyncio.CancelledError:
-            raise
-        except (asyncio.TimeoutError, TimeoutError):
-            tries += 1
-            if tries < 2:
-                _log_stream(f"⚠️ SLOW CHUNK: Chunk[off={offset // (1024*1024)}MB] took >14s on DC{dc_id} (try {tries}/3). Retrying on active session...", "W")
-                await asyncio.sleep(0.1)
-            else:
-                _log_stream(f"⚠️ PACKET LOSS / TIMEOUT: Chunk[off={offset // (1024*1024)}MB] timed out on DC{dc_id} (try {tries}/3). Resetting socket...", "W")
-                await _reset_media_session(client, dc_id, bad_session=session)
-                await asyncio.sleep(0.3)
-        except Exception as e:
-            err_str = str(e)
-            if "FILE_REFERENCE" in err_str or "file_reference" in err_str.lower():
-                _file_id_cache.pop((chat_id, msg_id), None)
-                refreshed = await _resolve_file_id(client, chat_id, msg_id)
-                if refreshed:
-                    file_id_obj = refreshed
-                    location = _get_location_from_file_id(refreshed)
-            elif "FloodWait" in type(e).__name__ or "flood" in err_str.lower():
-                m = re.search(r'(\d+)', err_str)
-                w = int(m.group(1)) if m else 3
-                _log_stream(f"⚠️ FLOOD WAIT: Sleeping {w}s on DC{dc_id}", "W")
-                await asyncio.sleep(w + 0.5)
-            elif any(x in err_str for x in ["AuthKey", "SessionRevoked", "ConnectionReset", "BrokenPipe", "Bad file descriptor", "OSError"]):
-                _log_stream(f"⚠️ SOCKET ERROR: {err_str} on DC{dc_id}, resetting socket...", "W")
-                await _reset_media_session(client, dc_id, bad_session=session)
-            tries += 1
-            await asyncio.sleep(0.2)
-    return None
+                if chunk_bytes is not None:
+                    speed_mb = (len(chunk_bytes) / (1024 * 1024)) / max(0.001, (elapsed_ms / 1000.0))
+                    _log_stream(f"Chunk[off={offset // (1024*1024)}MB]: fetched {len(chunk_bytes)//1024}KB in {elapsed_ms}ms from DC{dc_id} s{session_idx} ({speed_mb:.1f} MB/s)", "I")
+                    return chunk_bytes
+                return None
+            except asyncio.CancelledError:
+                raise
+            except (asyncio.TimeoutError, TimeoutError):
+                tries += 1
+                if tries < 2:
+                    _log_stream(f"⚠️ SLOW CHUNK: Chunk[off={offset // (1024*1024)}MB] took >18s on DC{dc_id} (s{session_idx}, try {tries}/3). Retrying...", "W")
+                    await asyncio.sleep(0.1)
+                else:
+                    _log_stream(f"⚠️ PACKET LOSS / TIMEOUT: Chunk[off={offset // (1024*1024)}MB] timed out on DC{dc_id} (s{session_idx}, try {tries}/3). Resetting socket...", "W")
+                    await _reset_media_session(client, dc_id, bad_session=session, session_idx=session_idx)
+                    await asyncio.sleep(0.3)
+            except Exception as e:
+                err_str = str(e)
+                if "FILE_REFERENCE" in err_str or "file_reference" in err_str.lower():
+                    _file_id_cache.pop((chat_id, msg_id), None)
+                    refreshed = await _resolve_file_id(client, chat_id, msg_id)
+                    if refreshed:
+                        file_id_obj = refreshed
+                        location = _get_location_from_file_id(refreshed)
+                elif "FloodWait" in type(e).__name__ or "flood" in err_str.lower():
+                    m = re.search(r'(\d+)', err_str)
+                    w = int(m.group(1)) if m else 3
+                    _log_stream(f"⚠️ FLOOD WAIT: Sleeping {w}s on DC{dc_id} s{session_idx}", "W")
+                    await asyncio.sleep(w + 0.5)
+                elif any(x in err_str for x in ["AuthKey", "SessionRevoked", "ConnectionReset", "BrokenPipe", "Bad file descriptor", "OSError"]):
+                    _log_stream(f"⚠️ SOCKET ERROR: {err_str} on DC{dc_id} s{session_idx}, resetting socket...", "W")
+                    await _reset_media_session(client, dc_id, bad_session=session, session_idx=session_idx)
+                tries += 1
+                await asyncio.sleep(0.2)
+        return None
+    finally:
+        pool.put_nowait(session_idx)
 
 async def _get_or_fetch_chunk(client: Client, chat_id: int, msg_id: int, fetch_off: int, limit: int) -> Optional[bytes]:
     key = (chat_id, msg_id, fetch_off)
@@ -1736,8 +1846,8 @@ class VirtualStreamSession:
 
             # Worker Concurrency:
             # On 64-bit: strictly 2 workers for continuous pipelining (Build 254 baseline).
-            # On 32-bit: 3 workers to reach 4-5 MB/s (matching TelegramStremio) across higher latency links.
-            MAX_IN_FLIGHT = 3 if IS_32BIT else 2
+            # On 32-bit: 4 workers across 4 striped MTProto sessions to reach 4-5 MB/s (matching TelegramStremio).
+            MAX_IN_FLIGHT = 4 if IS_32BIT else 2
             next_task_idx = next_seq_to_emit
             completed_chunks: Dict[int, bytes] = {}
             active_tasks_map: Dict[asyncio.Task, int] = {}
@@ -1761,7 +1871,7 @@ class VirtualStreamSession:
                 # If player queue is empty and the next required chunk is not yet ready,
                 # allow worker concurrency so chunk N finishes and chunk N+1 is immediately in-flight
                 if self.queue.empty() and (next_seq_to_emit not in completed_chunks):
-                    effective_max_in_flight = min(3 if IS_32BIT else 2, MAX_IN_FLIGHT)
+                    effective_max_in_flight = min(4 if IS_32BIT else 2, MAX_IN_FLIGHT)
                 else:
                     effective_max_in_flight = MAX_IN_FLIGHT
 
@@ -2377,8 +2487,14 @@ def prewarm_media_session(api_id: int, api_hash: str, session_str: str, dc_id: i
         client = await _get_connected_stream_client(int(api_id), str(api_hash), str(session_str))
         target_dc = int(dc_id) if int(dc_id) > 0 else await client.storage.dc_id()
         _log_stream(f"prewarm_media_session: pre-warming DC{target_dc} MTProto session...")
-        await _get_media_session(client, target_dc)
-        _log_stream(f"prewarm_media_session: DC{target_dc} session ready ✓")
+        await _get_media_session(client, target_dc, 0)
+        if IS_32BIT:
+            for s_idx in range(1, _POOL_SIZE_32BIT):
+                try:
+                    await _get_media_session(client, target_dc, s_idx)
+                except Exception as e:
+                    _log_stream(f"prewarm_media_session: notice warming s{s_idx}: {e}", "W")
+        _log_stream(f"prewarm_media_session: DC{target_dc} sessions ready ✓")
         return target_dc
 
     try:
