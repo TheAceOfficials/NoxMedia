@@ -2811,7 +2811,7 @@ class TelegramClientManager(private val context: Context) {
                 val partsJson = gson.toJson(partsList)
 
                 val state = clientStreamStates.computeIfAbsent(clientKey) { ClientStreamState() }
-                val isLavf = userAgent.contains("lavf", ignoreCase = true)
+                val isLavf = userAgent.contains("lavf", ignoreCase = true) || userAgent.contains("mpv", ignoreCase = true)
                 val isLavfFull = isLavf && contentLength > 25_000_000L
                 val isLavfProbe = isLavf && contentLength <= 25_000_000L
                 val isHeaderProbe = startByte <= 2_000_000L && contentLength <= 2_000_000L && state.activePlaybackStreamId != null
@@ -2819,7 +2819,7 @@ class TelegramClientManager(private val context: Context) {
                     startByte >= maxOf(0L, totalSize - 150_000_000L) ||
                     (totalSize - startByte) <= (totalSize * 0.15).toLong()
                 )
-                val isCuesProbe = isNearFileEnd && contentLength <= 25_000_000L
+                val isCuesProbe = isNearFileEnd
                 val isProbeStream = isLavfProbe || isHeaderProbe || isCuesProbe || (isLavfFull && state.activePlaybackStreamId != null)
 
                 // Per-client stream management to prevent playback stream supersession wars
@@ -2959,8 +2959,8 @@ class TelegramClientManager(private val context: Context) {
         }
         state.activePlaybackMediaKey = currentMediaKey
 
-        // 1. Auxiliary FFmpeg / Lavf metadata probe:
-        val isLavf = userAgent.contains("lavf", ignoreCase = true)
+        // 1. Auxiliary FFmpeg / Lavf / MPV metadata probe:
+        val isLavf = userAgent.contains("lavf", ignoreCase = true) || userAgent.contains("mpv", ignoreCase = true)
         val isLavfProbe = isLavf && contentLength <= 25_000_000L
 
         // 2. Initial Container Header Probe:
@@ -2971,7 +2971,7 @@ class TelegramClientManager(private val context: Context) {
             startByte >= maxOf(0L, totalSize - 150_000_000L) ||
             (totalSize - startByte) <= (totalSize * 0.15).toLong()
         )
-        val isCuesProbe = isNearFileEnd && contentLength <= 25_000_000L
+        val isCuesProbe = isNearFileEnd
 
         // Cross-client cleanup: If a non-probe stream starts, terminate any abandoned streams from other clients
         // to prevent an abandoned iPad stream from stealing Telegram DC bandwidth from an Android TV.
@@ -3028,7 +3028,7 @@ class TelegramClientManager(private val context: Context) {
                 return
             }
 
-            val isStartupBurst = prevStart <= 25_000_000L && startByte <= 25_000_000L && (now - prevStartTime) < 4_000L
+            val isStartupBurst = prevStart <= 64_000_000L && startByte <= 64_000_000L && (now - prevStartTime) < 8_000L
             if (isStartupBurst) {
                 StreamLog.i(TAG, "[$platform][$clientKey] Player startup cluster read (offset=$startByte, age=${now - prevStartTime}ms): letting previous stream finish naturally")
                 return

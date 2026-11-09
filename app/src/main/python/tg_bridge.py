@@ -495,6 +495,16 @@ def check_password(password: str, target_avatar_path: str = "") -> str:
 async def _get_connected_stream_client(api_id: int, api_hash: str, session_str: str) -> Client:
     global _stream_client
     if _stream_client is not None and _stream_client.is_connected:
+        if getattr(_stream_client, "me", None) is None:
+            try:
+                _stream_client.me = await _stream_client.get_me()
+            except Exception:
+                pass
+            if getattr(_stream_client, "me", None) is None:
+                class _FallbackMe:
+                    id = 0
+                    is_premium = False
+                _stream_client.me = _FallbackMe()
         return _stream_client
 
     if _stream_client is not None:
@@ -512,6 +522,18 @@ async def _get_connected_stream_client(api_id: int, api_hash: str, session_str: 
         no_updates=True
     )
     await _stream_client.start()
+
+    # Ensure client.me is initialized so Pyrogram's send_document / save_file doesn't crash with None.is_premium
+    if getattr(_stream_client, "me", None) is None:
+        try:
+            _stream_client.me = await _stream_client.get_me()
+        except Exception:
+            pass
+        if getattr(_stream_client, "me", None) is None:
+            class _FallbackMe:
+                id = 0
+                is_premium = False
+            _stream_client.me = _FallbackMe()
 
     # Pre-cache initial dialogs (limit=20, timeout 3s) so user's channel access hashes are known
     try:
@@ -1044,18 +1066,25 @@ async def _ensure_channel_peer(client: Client, chat_id: int) -> int:
         if chat_id in _resolved_channels:
             return _resolved_channels[chat_id]
 
-        target_ids = [chat_id]
-        chat_str = str(chat_id)
-        if chat_str.startswith("-100"):
-            try:
-                target_ids.append(int(chat_str[4:]))
-            except Exception:
-                pass
-        elif not chat_str.startswith("-"):
-            try:
-                target_ids.append(int(f"-100{chat_str}"))
-            except Exception:
-                pass
+        target_ids = {chat_id}
+        chat_str = str(chat_id).strip()
+        if chat_str.startswith("-100") and chat_str[4:].isdigit():
+            bare = int(chat_str[4:])
+            target_ids.add(bare)
+            target_ids.add(-bare)
+        elif chat_str.startswith("-") and chat_str[1:].isdigit():
+            bare_str = chat_str[1:]
+            bare = int(bare_str)
+            target_ids.add(bare)
+            if not bare_str.startswith("100"):
+                target_ids.add(int(f"-100{bare_str}"))
+        elif chat_str.isdigit():
+            bare = int(chat_str)
+            target_ids.add(-bare)
+            if not chat_str.startswith("100"):
+                target_ids.add(int(f"-100{chat_str}"))
+            else:
+                target_ids.add(int(f"-{chat_str}"))
 
         # 1. Try get_chat directly first (works for public channels or pre-cached peers)
         for tid in target_ids:
@@ -1063,35 +1092,34 @@ async def _ensure_channel_peer(client: Client, chat_id: int) -> int:
                 c = await client.get_chat(tid)
                 if c:
                     real_id = c.id
-                    for x in set(target_ids) | {real_id}:
+                    for x in (target_ids | {real_id, chat_id}):
                         _resolved_channels[x] = real_id
                     return real_id
             except Exception:
                 pass
 
-        # 2. Iterate dialogs once to resolve and cache the peer in Pyrogram
+        # 2. Iterate dialogs up to 200 to resolve and cache the peer in Pyrogram
         try:
-            async for dialog in client.get_dialogs(limit=50):
+            async for dialog in client.get_dialogs(limit=200):
                 dchat = dialog.chat
                 if dchat:
                     did = dchat.id
-                    d_str = str(abs(did))
+                    d_str = str(abs(did)).removeprefix("100")
                     matched = False
                     for tid in target_ids:
-                        t_str = str(abs(tid))
-                        if did == tid or d_str.endswith(t_str) or t_str.endswith(d_str):
+                        t_str = str(abs(tid)).removeprefix("100")
+                        if did == tid or did in target_ids or d_str == t_str:
                             matched = True
                             break
                     if matched:
                         real_id = dchat.id
-                        for x in set(target_ids) | {real_id}:
+                        for x in (target_ids | {real_id, chat_id}):
                             _resolved_channels[x] = real_id
                         print(f"[PeerResolve] Resolved chat {chat_id} -> {real_id} ({getattr(dchat, 'title', '')})", flush=True)
                         return real_id
         except Exception as e:
             print(f"[PeerResolve] Dialog scan notice for {chat_id}: {e}", flush=True)
 
-        _resolved_channels[chat_id] = chat_id
         return chat_id
 
 async def _get_media_session(client: Client, dc_id: int) -> Session:
@@ -2060,12 +2088,28 @@ def check_dead_messages(api_id: int, api_hash: str, session_str: str, chat_id: i
 
 def _parse_backup_target_chat(chat_val: str):
     c = str(chat_val).strip()
-    if not c or c.lower() in ("me", "self", "saved", "saved messages"):
+    if not c or c.lower() in ("me", "self", "saved", "saved messages", "null"):
         return "me"
+
+    # Handle private channel message links: t.me/c/1234567890/...
+    c_match = re.search(r"t\.me/c/(\d+)", c)
+    if c_match:
+        return int(f"-100{c_match.group(1)}")
+
     if "t.me/" in c:
         c = c.split("t.me/")[-1].replace("+", "").replace("/", "").strip()
-        if not c.startswith("@") and not c.startswith("-100"):
+        if not c.startswith("@") and not c.startswith("-100") and not c.isdigit():
             c = "@" + c
+
+    # Normalize numeric channel IDs
+    if c.startswith("-100") and c[4:].isdigit():
+        return int(c)
+    elif c.startswith("-") and c[1:].isdigit():
+        bare = c[1:]
+        return int(f"-100{bare}" if not bare.startswith("100") else c)
+    elif c.isdigit():
+        return int(f"-{c}" if c.startswith("100") else f"-100{c}")
+
     try:
         return int(c)
     except ValueError:
@@ -2099,6 +2143,18 @@ def upload_backup_file(api_id: int, api_hash: str, session_str: str, file_path: 
                 _log_stream(f"Purged {len(old_ids)} older backup message(s) from {target_chat}")
         except Exception as e:
             _log_stream(f"Notice cleaning older backups: {e}", "W")
+
+        # Ensure client.me is initialized so Pyrogram's send_document/save_file does not fail with 'NoneType' object has no attribute 'is_premium'
+        if getattr(client, "me", None) is None:
+            try:
+                client.me = await client.get_me()
+            except Exception:
+                pass
+            if getattr(client, "me", None) is None:
+                class _FallbackMe:
+                    id = 0
+                    is_premium = False
+                client.me = _FallbackMe()
 
         # 2. Send the document
         sent = await client.send_document(
@@ -2134,6 +2190,18 @@ def upload_logs_to_telegram(api_id: int, api_hash: str, session_str: str, file_p
                         target_chat = c.id
                 except Exception as ex:
                     _log_stream(f"Notice resolving logs target chat {target_chat}: {ex}", "W")
+
+        # Ensure client.me is initialized so Pyrogram's send_document/save_file does not fail with 'NoneType' object has no attribute 'is_premium'
+        if getattr(client, "me", None) is None:
+            try:
+                client.me = await client.get_me()
+            except Exception:
+                pass
+            if getattr(client, "me", None) is None:
+                class _FallbackMe:
+                    id = 0
+                    is_premium = False
+                client.me = _FallbackMe()
 
         sent = await client.send_document(
             chat_id=target_chat,
