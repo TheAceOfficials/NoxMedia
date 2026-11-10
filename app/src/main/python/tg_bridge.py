@@ -140,8 +140,8 @@ _dc_semaphores: Dict[int, asyncio.Semaphore] = {}
 # System architecture detection (32-bit vs 64-bit)
 IS_32BIT: bool = (sys.maxsize <= 2**31 - 1)
 
-# 32-bit Multi-Session MTProto Connection Pool (2 distinct TCP sockets to bypass single-socket BDP ceiling without LOS GC pressure)
-_POOL_SIZE_32BIT = 2
+# 32-bit Multi-Session MTProto Connection Pool (3 distinct TCP sockets to reach 3.5-4.5 MB/s throughput for high-bitrate 4K streaming without LOS GC pressure)
+_POOL_SIZE_32BIT = 3
 _dc_session_pools: Dict[int, asyncio.Queue] = {}
 _pool_init_lock = asyncio.Lock()
 
@@ -1861,8 +1861,8 @@ class VirtualStreamSession:
 
             # Worker Concurrency:
             # On 64-bit: strictly 2 workers for continuous pipelining (Build 254 baseline).
-            # On 32-bit: 2 workers across 2 striped MTProto sessions to eliminate Large Object Space (LOS) GC pauses.
-            MAX_IN_FLIGHT = 2
+            # On 32-bit: 3 workers across 3 striped MTProto sessions to saturate 3.5-4.5 MB/s for 4K streaming without LOS GC pauses.
+            MAX_IN_FLIGHT = 3 if IS_32BIT else 2
             next_task_idx = next_seq_to_emit
             completed_chunks: Dict[int, bytes] = {}
             active_tasks_map: Dict[asyncio.Task, int] = {}
@@ -1888,13 +1888,7 @@ class VirtualStreamSession:
                         self._closed = True
                         break
 
-                # Dedicated Bandwidth for Buffer Underrun / Fast Recovery:
-                # If player queue is empty and the next required chunk is not yet ready,
-                # allow worker concurrency so chunk N finishes and chunk N+1 is immediately in-flight
-                if self.queue.empty() and (next_seq_to_emit not in completed_chunks):
-                    effective_max_in_flight = min(2, MAX_IN_FLIGHT)
-                else:
-                    effective_max_in_flight = MAX_IN_FLIGHT
+                effective_max_in_flight = MAX_IN_FLIGHT
 
                 # 1. Fill available worker slots up to effective_max_in_flight
                 while next_task_idx < total_tasks and len(active_tasks_map) < effective_max_in_flight and not self._closed:
