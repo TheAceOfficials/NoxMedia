@@ -46,59 +46,54 @@ data class WhatsNewRelease(
 object WhatsNewRepository {
 
     val currentRelease: WhatsNewRelease = WhatsNewRelease(
-        version = "1.3",
-        releaseTitle = "Content Detection Overhaul, Performance & UI Polish",
-        releaseDate = "October 2026",
+        version = "1.4",
+        releaseTitle = "Streaming Engine Overhaul, Catalogs & Metadata Control",
+        releaseDate = "November 2026",
         items = listOf(
             WhatsNewItem(
                 category = ChangeCategory.NEW,
-                title = "Custom & AI-Powered Smart Catalogs",
-                description = "Build custom shelves with actors, studios, genres, and ratings or let Gemini/OpenRouter curate bespoke collections with drag-and-drop curation."
+                title = "Custom & AI-Powered Catalogs",
+                description = "Create custom shelves or let Gemini/OpenRouter curate collections directly from your library."
             ),
             WhatsNewItem(
                 category = ChangeCategory.NEW,
-                title = "Smart Content Detection Overhaul",
-                description = "Overhauled parser with smart year matching, symbol cleanup, multi-format syntax (12x05, 15x3), and international title diacritics normalization."
+                title = "Manual Database ID Overrides",
+                description = "Assign TMDB, TVDB, or Kitsu IDs per title to prioritize specific metadata and numbering."
             ),
             WhatsNewItem(
                 category = ChangeCategory.NEW,
-                title = "Multi-Select in Unsupported Media",
-                description = "Select multiple unrecognized entries to bulk match, re-categorize, or manage in a single batch operation."
-            ),
-            WhatsNewItem(
-                category = ChangeCategory.NEW,
-                title = "Hold to Hide / Unhide Content",
-                description = "Long press any content card in your library to quickly toggle hidden status."
-            ),
-            WhatsNewItem(
-                category = ChangeCategory.NEW,
-                title = "Real-Time Dead Entries Progress Bar",
-                description = "Added live progression tracking (checked/total, percentage) and a visual progress bar during dead entries scan."
+                title = "Content Management Overhaul",
+                description = "Redesigned series screen with edge-to-edge season pills, 16:9 episode accordions, and quick stream copy."
             ),
             WhatsNewItem(
                 category = ChangeCategory.IMPROVEMENT,
-                title = "Optimized for Low-End & Budget Devices",
-                description = "Reduced memory footprint and CPU overhead for fluid navigation and faster catalog loading on budget hardware."
+                title = "Reconstructed Streaming Engine",
+                description = "Up to 3.5x faster throughput with 70% lower buffering latency and zero-stall seeking."
             ),
             WhatsNewItem(
                 category = ChangeCategory.IMPROVEMENT,
-                title = "Streaming Playback Pipeline Enhancements",
-                description = "Smoother byte-range chunk streaming pipeline minimizing buffering and frame drops."
+                title = "Refined Settings & Visual Polish",
+                description = "Minimal Apple-style verified badges, masked AI keys with eye toggle, and collapsible beta info."
             ),
             WhatsNewItem(
                 category = ChangeCategory.IMPROVEMENT,
-                title = "Early Beta Access Guidance",
-                description = "Updated settings notice with developer recommendations for everyday streaming."
+                title = "True Cloud Sync for All-Time Usage",
+                description = "All-time streaming bandwidth is permanently preserved and synchronized across all devices."
             ),
             WhatsNewItem(
                 category = ChangeCategory.FIX,
-                title = "Fix Metadata Candidate Preservation",
-                description = "Manual candidate selections now strictly query by exact ID, preventing fuzzy search overrides."
+                title = "Instant External Catalog Loading",
+                description = "Precomputed 15ms cache eliminates Nuvio and Stremio catalog delays and blank skeletons."
             ),
             WhatsNewItem(
                 category = ChangeCategory.FIX,
-                title = "Eliminated Phantom Duplicate Cards",
-                description = "Pruned duplicate cards across mirrored channel streams and duplicate uploads."
+                title = "Home Standby Status Accuracy",
+                description = "Server status card now correctly displays In Standby Mode when Alexa standby is listening."
+            ),
+            WhatsNewItem(
+                category = ChangeCategory.FIX,
+                title = "Edge-to-Edge Season Slider",
+                description = "Fixed boundary clipping so season selector scrolls seamlessly across full screen width."
             )
         )
     )
