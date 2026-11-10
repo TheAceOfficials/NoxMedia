@@ -769,7 +769,10 @@ class CatalogRepository(
                 val isCurated = f.curatedTitles.any { ct ->
                     val ctClean = ct.trim().lowercase()
                     if (ctClean.isBlank()) false
-                    else groupTitleClean == ctClean || groupTitleClean.contains(ctClean) || ctClean.contains(groupTitleClean)
+                    else {
+                        val diff = Math.abs(groupTitleClean.length - ctClean.length)
+                        groupTitleClean == ctClean || (diff <= 3 && (groupTitleClean.contains(ctClean) || ctClean.contains(groupTitleClean)))
+                    }
                 }
 
                 if (isCurated) {
