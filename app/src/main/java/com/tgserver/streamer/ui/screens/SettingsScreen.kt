@@ -131,6 +131,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
     var aiKeySuccess by remember { mutableStateOf<String?>(null) }
     var expandedWhatsNew by remember { mutableStateOf(false) }
     var showBetaInfo by remember { mutableStateOf(false) }
+    var showDockReflectionInfo by remember { mutableStateOf(false) }
     var showArtworkInfo by remember { mutableStateOf(false) }
     var showServerEngineInfo by remember { mutableStateOf(false) }
     var showRemoteAccessInfo by remember { mutableStateOf(false) }
@@ -2677,6 +2678,81 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                         ) {
                             Text(
                                 text = "Developer recommends the stable release for everyday use. Beta versions may contain unexpected bugs, crashes, or UI glitches.",
+                                color = Color(0xFF9CA3AF),
+                                fontSize = 10.5.sp,
+                                lineHeight = 14.5.sp
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Dynamic Dock Light Reflection Toggle
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "Dynamic Dock Reflection",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(18.dp)
+                                    .clip(CircleShape)
+                                    .background(if (showDockReflectionInfo) Color(0x33A855F7) else Color(0x1AFFFFFF))
+                                    .clickable { showDockReflectionInfo = !showDockReflectionInfo },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Info,
+                                    contentDescription = "Dock reflection info",
+                                    tint = if (showDockReflectionInfo) Color(0xFFA855F7) else Color(0xFF9CA3AF),
+                                    modifier = Modifier.size(12.dp)
+                                )
+                            }
+                        }
+
+                        Switch(
+                            checked = config.dockReflectionEnabled,
+                            onCheckedChange = { viewModel.updateDockReflection(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = Color(0xFFA855F7),
+                                uncheckedThumbColor = Color.Gray,
+                                uncheckedTrackColor = Color(0xFF1E1F27)
+                            )
+                        )
+                    }
+
+                    AnimatedVisibility(
+                        visible = showDockReflectionInfo,
+                        enter = fadeIn(tween(150)) + expandVertically(),
+                        exit = fadeOut(tween(120)) + shrinkVertically()
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF13141B))
+                                .border(0.5.dp, Color(0xFF242735), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 10.dp, vertical = 8.dp)
+                        ) {
+                            Text(
+                                text = "Dynamically reflects passing poster colors along the navigation dock's top edge (Netflix-style glass depth). Disable on lower-end devices to save GPU and battery.",
                                 color = Color(0xFF9CA3AF),
                                 fontSize = 10.5.sp,
                                 lineHeight = 14.5.sp
