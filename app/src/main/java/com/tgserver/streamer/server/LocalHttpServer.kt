@@ -12,6 +12,9 @@ import com.tgserver.streamer.data.repository.CatalogRepository
 import com.tgserver.streamer.posters.SpatialPosterService
 import com.tgserver.streamer.telegram.TelegramClientManager
 import fi.iki.elonen.NanoHTTPD
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -49,6 +52,33 @@ class LocalHttpServer(
     }
 
     private val catalogRepo by lazy { CatalogRepository(context) }
+    private val serverScope = CoroutineScope(Dispatchers.IO)
+
+    @Volatile private var cachedMediaGroups: List<com.tgserver.streamer.data.model.MediaGroup> = emptyList()
+    @Volatile private var cachedMediaTimestamp: Long = 0L
+    @Volatile private var cachedMediaSize: Int = -1
+
+    private fun getMediaGroupsCached(): List<com.tgserver.streamer.data.model.MediaGroup> {
+        val all = tgClient.getAllMedia()
+        val now = System.currentTimeMillis()
+        if (now - cachedMediaTimestamp < 10000L && cachedMediaSize == all.size && cachedMediaGroups.isNotEmpty()) {
+            return cachedMediaGroups
+        }
+        val groups = all.toMediaGroups()
+        cachedMediaGroups = groups
+        cachedMediaTimestamp = now
+        cachedMediaSize = all.size
+        return groups
+    }
+
+    private fun jsonResponse(body: Any, maxAgeSeconds: Int = 1800): Response {
+        val resp = newFixedLengthResponse(Response.Status.OK, "application/json; charset=utf-8", gson.toJson(body))
+        resp.addHeader("Access-Control-Allow-Origin", "*")
+        resp.addHeader("Access-Control-Allow-Headers", "*")
+        resp.addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, HEAD")
+        resp.addHeader("Cache-Control", "public, max-age=$maxAgeSeconds")
+        return resp
+    }
 
     fun getLocalIpAddress(): String = Companion.getLocalIpAddress()
 
@@ -271,28 +301,50 @@ class LocalHttpServer(
             add("resources", gson.toJsonTree(listOf("catalog", "meta", "stream")))
             add("idPrefixes", gson.toJsonTree(listOf("tg_", "tt", "kitsu", "cat_")))
         }
-        return newFixedLengthResponse(Response.Status.OK, "application/json", gson.toJson(manifest))
+        return jsonResponse(manifest, maxAgeSeconds = 300)
     }
 
     private fun handleCatalog(uri: String): Response {
         val searchQuery = if (uri.contains("search=")) {
             try {
-                java.net.URLDecoder.decode(uri.substringAfter("search=").substringBefore(".json").substringBefore("&"), "UTF-8")
+                java.net.URLDecoder.decode(
+                    uri.substringAfter("search=")
+                        .substringBefore("&")
+                        .substringBefore("/")
+                        .substringBefore(":")
+                        .substringBefore("?")
+                        .substringBefore(".json"),
+                    "UTF-8"
+                )
             } catch (_: Exception) { "" }
         } else ""
 
-        val skip = if (uri.contains("skip=")) {
-            try {
-                uri.substringAfter("skip=").substringBefore(".json").substringBefore("&").toIntOrNull() ?: 0
-            } catch (_: Exception) { 0 }
-        } else 0
+        val skip = when {
+            uri.contains("skip=") -> {
+                uri.substringAfter("skip=")
+                    .substringBefore("&")
+                    .substringBefore("/")
+                    .substringBefore(":")
+                    .substringBefore("?")
+                    .substringBefore(".json")
+                    .toIntOrNull() ?: 0
+            }
+            else -> 0
+        }
 
         // Check if requesting custom catalog: /catalog/{type}/cat_{id}...
-        if (uri.contains("/cat_") || uri.contains("cat_")) {
-            val catId = uri.substringAfter("cat_").substringBefore("/").substringBefore(".json")
-            val catalog = catalogRepo.getCatalogs().find { it.id == catId }
+        if (uri.contains("cat_")) {
+            val rawCatId = uri.substringAfter("cat_")
+                .substringBefore("/")
+                .substringBefore(":")
+                .substringBefore("&")
+                .substringBefore("?")
+                .substringBefore(".json")
+                .trim()
+
+            val catalog = catalogRepo.getCatalogs().find { it.id == rawCatId }
             if (catalog != null) {
-                val allGroups = tgClient.getAllMedia().toMediaGroups()
+                val allGroups = getMediaGroupsCached()
                 var filtered = catalogRepo.filterMediaForCatalog(catalog, allGroups)
                 if (searchQuery.isNotBlank()) {
                     filtered = filtered.filter {
@@ -300,11 +352,11 @@ class LocalHttpServer(
                         it.items.any { item -> item.fileName.contains(searchQuery, ignoreCase = true) }
                     }
                 }
-                val isMovieReq = uri.contains("/movie/")
-                val isSeriesReq = uri.contains("/series/")
-                if (isMovieReq) {
+                val isMovieReq = uri.contains("/movie/") || uri.contains("/movie:") || uri.contains("movie")
+                val isSeriesReq = uri.contains("/series/") || uri.contains("/series:") || uri.contains("series")
+                if (isMovieReq && !isSeriesReq) {
                     filtered = filtered.filter { it.type == "movie" }
-                } else if (isSeriesReq) {
+                } else if (isSeriesReq && !isMovieReq) {
                     filtered = filtered.filter { it.type == "series" || it.type == "anime" }
                 }
 
@@ -312,33 +364,50 @@ class LocalHttpServer(
 
                 val metasArray = pagedGroups.map { group ->
                     val firstItem = group.items.firstOrNull()
-                    val poster = group.posterUrl ?: firstItem?.posterUrl ?: posterService.resolvePoster(
-                        group.title,
-                        config.customPosterUrl,
-                        config.customPosterApiKey,
-                        config.tmdbApiKey,
-                        config.tvdbApiKey
-                    )?.also { resolved ->
-                        firstItem?.posterUrl = resolved
+                    val poster = group.posterUrl
+                        ?: firstItem?.posterUrl
+                        ?: posterService.getCachedPoster(group.title)
+                        ?: "https://images.metahub.space/poster/medium/placeholder/img"
+
+                    // Asynchronously resolve poster if missing without blocking HTTP thread
+                    if (group.posterUrl.isNullOrBlank() && firstItem?.posterUrl.isNullOrBlank()) {
+                        serverScope.launch {
+                            try {
+                                val resolved = posterService.resolvePoster(
+                                    group.title,
+                                    config.customPosterUrl,
+                                    config.customPosterApiKey,
+                                    config.tmdbApiKey,
+                                    config.tvdbApiKey
+                                )
+                                if (!resolved.isNullOrBlank()) {
+                                    firstItem?.posterUrl = resolved
+                                }
+                            } catch (_: Exception) {}
+                        }
                     }
+
                     val stremioType = if (group.type == "series" || group.type == "anime") "series" else "movie"
-                    val metaId = if (!group.imdbId.isNullOrBlank()) group.imdbId else (firstItem?.id ?: group.key)
+                    val metaId = when {
+                        !group.imdbId.isNullOrBlank() -> group.imdbId
+                        firstItem != null && firstItem.id.isNotBlank() -> firstItem.id
+                        else -> "tg_${group.key}"
+                    }
                     val desc = group.overview ?: "${group.rating} Rating • ${group.items.size} files"
                     mapOf(
                         "id" to metaId,
                         "type" to stremioType,
                         "name" to group.title,
-                        "poster" to (poster ?: "https://images.metahub.space/poster/medium/placeholder/img"),
+                        "poster" to poster,
                         "releaseInfo" to (group.year ?: "2024"),
                         "description" to desc
                     )
                 }
-                val res = mapOf("metas" to metasArray)
-                return newFixedLengthResponse(Response.Status.OK, "application/json", gson.toJson(res))
+                return jsonResponse(mapOf("metas" to metasArray))
             }
         }
 
-        val isSeries = uri.contains("/series/")
+        val isSeries = uri.contains("/series/") || uri.contains("/series:")
         val isAnime = uri.contains("tg_anime") || uri.contains("anime")
 
         var mediaList = tgClient.getAllMedia().filter { !it.isHidden }.filter { item ->
@@ -395,15 +464,28 @@ class LocalHttpServer(
         val pagedShows = if (skip > 0) distinctShows.drop(skip).take(100) else distinctShows.take(100)
 
         val metasArray = pagedShows.map { item ->
-            val poster = item.posterUrl ?: posterService.resolvePoster(
-                item.title,
-                config.customPosterUrl,
-                config.customPosterApiKey,
-                config.tmdbApiKey,
-                config.tvdbApiKey
-            )?.also { resolved ->
-                item.posterUrl = resolved
+            val poster = item.posterUrl
+                ?: posterService.getCachedPoster(item.title)
+                ?: "https://images.metahub.space/poster/medium/placeholder/img"
+
+            // Asynchronously resolve poster if missing without blocking HTTP thread
+            if (item.posterUrl.isNullOrBlank()) {
+                serverScope.launch {
+                    try {
+                        val resolved = posterService.resolvePoster(
+                            item.title,
+                            config.customPosterUrl,
+                            config.customPosterApiKey,
+                            config.tmdbApiKey,
+                            config.tvdbApiKey
+                        )
+                        if (!resolved.isNullOrBlank()) {
+                            item.posterUrl = resolved
+                        }
+                    } catch (_: Exception) {}
+                }
             }
+
             val desc = item.overview ?: "${item.qualityBadge} • ${item.formattedSize}"
             val stremioType = if (isSeries || isAnime) "series" else "movie"
             val metaId = if (!item.imdbId.isNullOrBlank()) item.imdbId else item.id
@@ -411,14 +493,13 @@ class LocalHttpServer(
                 "id" to metaId,
                 "type" to stremioType,
                 "name" to item.title,
-                "poster" to (poster ?: "https://images.metahub.space/poster/medium/placeholder/img"),
+                "poster" to poster,
                 "releaseInfo" to (item.year ?: "2024"),
                 "description" to desc
             )
         }
 
-        val res = mapOf("metas" to metasArray)
-        return newFixedLengthResponse(Response.Status.OK, "application/json", gson.toJson(res))
+        return jsonResponse(mapOf("metas" to metasArray))
     }
 
     private fun handleMeta(uri: String): Response {
