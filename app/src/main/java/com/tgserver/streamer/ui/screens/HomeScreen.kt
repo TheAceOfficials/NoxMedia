@@ -308,7 +308,9 @@ fun HomeScreen(viewModel: MainAppViewModel) {
                 label = "server_state_animation"
             ) { isRunning ->
                 if (!isRunning) {
-                    // SLEEP MODE VIEW (Pure, sleek, centered)
+                    // SLEEP / STANDBY MODE VIEW (Pure, sleek, centered)
+                    val isStandby = telemetry.isStandby || config.alexaVoiceControlEnabled || com.tgserver.streamer.service.StreamerForegroundService.isStandbyMode
+                    val idleStatusText = if (isStandby) "In Standby Mode" else "In Sleep mode"
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -316,8 +318,8 @@ fun HomeScreen(viewModel: MainAppViewModel) {
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = if (isAwakening) "Server Awakening$awakeningDots" else "In Sleep mode",
-                            color = if (isAwakening) Color(0xFFE2E8F0) else Color(0xFFA0A2AC),
+                            text = if (isAwakening) "Server Awakening$awakeningDots" else idleStatusText,
+                            color = if (isAwakening || isStandby) Color(0xFFE2E8F0) else Color(0xFFA0A2AC),
                             fontFamily = NdotFont,
                             fontSize = 16.sp,
                             letterSpacing = 1.sp

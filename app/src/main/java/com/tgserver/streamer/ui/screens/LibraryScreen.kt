@@ -2544,14 +2544,14 @@ private fun ContentDetailsScreen(
         } else {
             // SERIES SEASONS & 16:9 EPISODES
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp),
+                modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // Multi-Season Selector Pills
+                // Multi-Season Selector Pills (Edge-to-Edge with start/end content padding)
                 if (seasonMap.size > 1) {
                     LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentPadding = PaddingValues(horizontal = 20.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -2575,79 +2575,86 @@ private fun ContentDetailsScreen(
                     }
                 }
 
-                val currentSeasonItems = seasonMap[selectedSeason] ?: group.items
-                val distinctEps = currentSeasonItems.map { it.episode ?: 1 }.distinct()
-                val seasonTotalSize = currentSeasonItems.sumOf { it.sizeBytes }.let { bytes ->
-                    if (bytes <= 0L) "0 MB"
-                    else {
-                        val gb = bytes.toDouble() / (1024.0 * 1024.0 * 1024.0)
-                        if (gb >= 1.0) String.format(java.util.Locale.US, "%.1f GB", gb)
-                        else String.format(java.util.Locale.US, "%.0f MB", bytes.toDouble() / (1024.0 * 1024.0))
-                    }
-                }
-
-                var isSeasonExpanded by remember(group.key, selectedSeason) { mutableStateOf(true) }
-
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { isSeasonExpanded = !isSeasonExpanded }
-                        .padding(vertical = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(horizontal = 20.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
+                    val currentSeasonItems = seasonMap[selectedSeason] ?: group.items
+                    val distinctEps = currentSeasonItems.map { it.episode ?: 1 }.distinct()
+                    val seasonTotalSize = currentSeasonItems.sumOf { it.sizeBytes }.let { bytes ->
+                        if (bytes <= 0L) "0 MB"
+                        else {
+                            val gb = bytes.toDouble() / (1024.0 * 1024.0 * 1024.0)
+                            if (gb >= 1.0) String.format(java.util.Locale.US, "%.1f GB", gb)
+                            else String.format(java.util.Locale.US, "%.0f MB", bytes.toDouble() / (1024.0 * 1024.0))
+                        }
+                    }
+
+                    var isSeasonExpanded by remember(group.key, selectedSeason) { mutableStateOf(true) }
+
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { isSeasonExpanded = !isSeasonExpanded }
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "Season $selectedSeason",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp
+                            )
+                            Icon(
+                                imageVector = if (isSeasonExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                contentDescription = if (isSeasonExpanded) "Collapse Season" else "Expand Season",
+                                tint = Color(0xFF94A3B8),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                         Text(
-                            text = "Season $selectedSeason",
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp
-                        )
-                        Icon(
-                            imageVector = if (isSeasonExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                            contentDescription = if (isSeasonExpanded) "Collapse Season" else "Expand Season",
-                            tint = Color(0xFF94A3B8),
-                            modifier = Modifier.size(20.dp)
+                            text = "${distinctEps.size} Episodes • $seasonTotalSize",
+                            color = Color(0xFF8E909A),
+                            fontSize = 12.sp
                         )
                     }
-                    Text(
-                        text = "${distinctEps.size} Episodes • $seasonTotalSize",
-                        color = Color(0xFF8E909A),
-                        fontSize = 12.sp
-                    )
-                }
 
-                // Group files by Episode number
-                val episodesGrouped = remember(currentSeasonItems) {
-                    currentSeasonItems.groupBy { it.episode ?: 1 }.toSortedMap()
-                }
+                    // Group files by Episode number
+                    val episodesGrouped = remember(currentSeasonItems) {
+                        currentSeasonItems.groupBy { it.episode ?: 1 }.toSortedMap()
+                    }
 
-                AnimatedVisibility(
-                    visible = isSeasonExpanded,
-                    enter = expandVertically() + fadeIn(),
-                    exit = shrinkVertically() + fadeOut()
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        episodesGrouped.forEach { (epNum, epItems) ->
-                            EpisodeGroupAccordionRow(
-                                epNum = epNum,
-                                epItems = epItems,
-                                showTitle = group.title,
-                                groupImdbId = group.imdbId,
-                                groupBackdropUrl = group.backdropUrl,
-                                groupPosterUrl = group.posterUrl,
-                                onToggleHide = { item ->
-                                    viewModel.toggleHideMedia(item.id)
-                                },
-                                onCopyStream = { streamUrl ->
-                                    onCopyStream(streamUrl)
-                                },
-                                streamBaseUrl = streamBaseUrl
-                            )
+                    AnimatedVisibility(
+                        visible = isSeasonExpanded,
+                        enter = expandVertically() + fadeIn(),
+                        exit = shrinkVertically() + fadeOut()
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            episodesGrouped.forEach { (epNum, epItems) ->
+                                EpisodeGroupAccordionRow(
+                                    epNum = epNum,
+                                    epItems = epItems,
+                                    showTitle = group.title,
+                                    groupImdbId = group.imdbId,
+                                    groupBackdropUrl = group.backdropUrl,
+                                    groupPosterUrl = group.posterUrl,
+                                    onToggleHide = { item ->
+                                        viewModel.toggleHideMedia(item.id)
+                                    },
+                                    onCopyStream = { streamUrl ->
+                                        onCopyStream(streamUrl)
+                                    },
+                                    streamBaseUrl = streamBaseUrl
+                                )
+                            }
                         }
                     }
                 }

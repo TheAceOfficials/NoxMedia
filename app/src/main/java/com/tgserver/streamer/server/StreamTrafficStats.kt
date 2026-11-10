@@ -54,6 +54,21 @@ object StreamTrafficStats {
         }
     }
 
+    /**
+     * Merge remote lifetime bytes from True Cloud Sync.
+     * Takes maxOf(local, remote) to ensure data usage counter is monotonic across devices.
+     */
+    fun mergeLifetimeBytes(remoteBytes: Long) {
+        if (remoteBytes <= 0L) return
+        flushLifetimeBytes()
+        prefs?.let { p ->
+            val current = p.getLong("lifetime_traffic_bytes", 0L)
+            if (remoteBytes > current) {
+                p.edit().putLong("lifetime_traffic_bytes", remoteBytes).apply()
+            }
+        }
+    }
+
     fun resetSession() {
         flushLifetimeBytes()
         sessionBytes.set(0L)

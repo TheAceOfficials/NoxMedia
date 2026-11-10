@@ -65,6 +65,7 @@ enum class AppTab {
 
 data class TelemetryUiState(
     val isRunning: Boolean = false, // Server OFF by default until user turns it on
+    val isStandby: Boolean = false,
     val port: Int = 7788,
     val localIp: String = "127.0.0.1",
     val manifestUrl: String = "http://127.0.0.1:7788/manifest.json",
@@ -469,11 +470,15 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
     private fun startTelemetryLoop() {
         com.tgserver.streamer.server.StreamTrafficStats.init(getApplication())
         viewModelScope.launch {
+            var lastSyncedLifetimeBytes = com.tgserver.streamer.server.StreamTrafficStats.getLifetimeBytes()
+            var wasRunning = false
+
             while (true) {
                 val server = StreamerForegroundService.activeServer
                 val ip = server?.getLocalIpAddress() ?: LocalHttpServer.getLocalIpAddress()
                 val port = _config.value.port
                 val isRunning = StreamerForegroundService.isServiceRunning
+                val isStandby = StreamerForegroundService.isStandbyMode || (!isRunning && _config.value.alexaVoiceControlEnabled)
                 val sTime = StreamerForegroundService.serverStartTime
                 val uptimeSec = if (isRunning && sTime > 0L) {
                     maxOf(0L, (System.currentTimeMillis() - sTime) / 1000)
@@ -492,11 +497,19 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                 val sessionBytes = if (isRunning) com.tgserver.streamer.server.StreamTrafficStats.getSessionBytes() else 0L
                 val allTimeBytes = com.tgserver.streamer.server.StreamTrafficStats.getLifetimeBytes()
 
+                // True Cloud Sync for all-time usage: auto-push when traffic changes significantly (25MB+) or streaming session ends
+                if ((allTimeBytes - lastSyncedLifetimeBytes >= 25L * 1024L * 1024L) || (wasRunning && !isRunning && allTimeBytes > lastSyncedLifetimeBytes)) {
+                    lastSyncedLifetimeBytes = allTimeBytes
+                    triggerAutoCloudBackupDebounced(5000L)
+                }
+                wasRunning = isRunning
+
                 val runtime = Runtime.getRuntime()
                 val usedMem = (runtime.totalMemory() - runtime.freeMemory()) / (1024 * 1024)
 
                 _telemetry.value = TelemetryUiState(
                     isRunning = isRunning,
+                    isStandby = isStandby,
                     port = port,
                     localIp = ip,
                     manifestUrl = "http://$ip:$port/manifest.json",
@@ -1885,6 +1898,8 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             put("aiProvider", cfg.aiProvider)
             put("geminiApiKey", cfg.geminiApiKey)
             put("openRouterApiKey", cfg.openRouterApiKey)
+            val lifetimeTrafficBytes = com.tgserver.streamer.server.StreamTrafficStats.getLifetimeBytes()
+            put("lifetimeTrafficBytes", lifetimeTrafficBytes)
         }
 
         val mediaList = tgClient.getAllMediaItems()
@@ -1898,6 +1913,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             put("timestamp", System.currentTimeMillis())
             put("backupDestination", cfg.backupDestination)
             put("settings", settingsObj)
+            put("lifetimeTrafficBytes", com.tgserver.streamer.server.StreamTrafficStats.getLifetimeBytes())
             put("channels", channelsJsonArray)
             put("mediaCount", mediaList.size)
             if (mediaList.isNotEmpty()) {
@@ -1955,6 +1971,16 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                     prefs.edit().putString("backup_destination", rawDest).apply()
                 }
                 settingsRestored = true
+            }
+
+            // Restore & merge All-Time Traffic usage across devices (True Cloud Sync)
+            val cloudTraffic = when {
+                root.has("lifetimeTrafficBytes") -> root.optLong("lifetimeTrafficBytes", 0L)
+                settingsObj?.has("lifetimeTrafficBytes") == true -> settingsObj.optLong("lifetimeTrafficBytes", 0L)
+                else -> 0L
+            }
+            if (cloudTraffic > 0L) {
+                com.tgserver.streamer.server.StreamTrafficStats.mergeLifetimeBytes(cloudTraffic)
             }
 
             if (root.has("deletedMediaIds")) {
