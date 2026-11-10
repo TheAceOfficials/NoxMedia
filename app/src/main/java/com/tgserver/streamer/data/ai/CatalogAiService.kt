@@ -74,7 +74,8 @@ class CatalogAiService(
     suspend fun generateCatalog(
         prompt: String,
         provider: AiProvider,
-        apiKey: String
+        apiKey: String,
+        librarySample: List<String> = emptyList()
     ): Result<GeneratedCatalogResult> = withContext(Dispatchers.IO) {
         if (prompt.isBlank()) {
             return@withContext Result.failure(IllegalArgumentException("Prompt cannot be empty"))
@@ -85,32 +86,49 @@ class CatalogAiService(
 
         try {
             val systemInstruction = """
-                You are an expert movie and TV series curator for NoxMedia app.
-                Analyze the user's prompt requesting a custom media category or catalog.
-                Output ONLY a single valid JSON object with no commentary or markdown markdown wrapping.
-                JSON structure must be:
+                You are an expert media curator for NoxMedia app.
+                Analyze the user's natural language request to create a dynamic catalog of movies and TV series.
+                Output ONLY a single valid JSON object with NO markdown formatting, NO backticks, and NO commentary.
+                
+                JSON SCHEMA:
                 {
-                  "title": "string (Short stylish title, 2-4 words, e.g. 'Mind-Bending Thrillers', '90s Sci-Fi Classics')",
-                  "mediaType": "all" or "movie" or "series",
-                  "personQuery": "string (actor/director name if explicitly or implicitly requested, else empty string)",
-                  "studioQuery": "string (studio or OTT platform name like 'Studio Ghibli', 'HBO', 'Netflix', 'Warner Bros' if requested, else empty string)",
-                  "genres": ["string"] (standard TMDB genres: Action, Adventure, Animation, Comedy, Crime, Documentary, Drama, Family, Fantasy, History, Horror, Music, Mystery, Romance, Science Fiction, Thriller, War, Western),
-                  "languages": ["string"] (e.g. English, Hindi, Japanese, Korean, Spanish),
-                  "ratingFilterEnabled": boolean,
-                  "minRating": number between 0.0 and 10.0 (e.g. 7.5),
+                  "title": "string (Short, stylish title, 2-4 words, e.g. 'Murder Mystery', '90s Sci-Fi Thrillers', 'Dark Fantasy')",
+                  "mediaType": "all" | "movie" | "series",
+                  "personQuery": "string (Actor or Director name ONLY if explicitly requested, else empty \"\")",
+                  "studioQuery": "string (Studio or Platform name like 'HBO', 'Netflix', 'Studio Ghibli', 'A24', 'Marvel' ONLY if requested, else empty \"\")",
+                  "genres": ["string"] (Standard TMDB genres: Action, Adventure, Animation, Comedy, Crime, Documentary, Drama, Family, Fantasy, History, Horror, Music, Mystery, Romance, Science Fiction, Thriller, War, Western),
+                  "languages": ["string"] (CRITICAL: MUST BE empty [] unless the user explicitly demanded a specific language or audio in their prompt!),
+                  "ratingFilterEnabled": boolean (CRITICAL: MUST BE false unless the user explicitly requested high/top rating or minimum score!),
+                  "minRating": number between 0.0 and 10.0 (e.g. 7.5 if ratingFilterEnabled is true, else 0.0),
                   "maxRating": 10.0,
-                  "yearFilterEnabled": boolean,
-                  "minYear": integer (e.g. 1990),
-                  "maxYear": integer (e.g. 2026),
-                  "sortBy": "RATING" or "RECENT" or "YEAR" or "TITLE",
+                  "yearFilterEnabled": boolean (CRITICAL: MUST BE false unless the user explicitly requested a specific year, decade, or era!),
+                  "minYear": integer (e.g. 2010 if 'after 2010', or 1990 if '90s', else 1920),
+                  "maxYear": integer (e.g. 1999 if '90s', else 2030),
+                  "sortBy": "RATING" | "RECENT" | "YEAR" | "TITLE",
                   "sortAscending": boolean,
-                  "keywords": ["string"] (3 to 8 semantic keywords describing themes, vibes or plot elements, e.g. "time travel", "dystopia", "heist", "cyberpunk")
+                  "keywords": ["string"] (CRITICAL: Provide 5 to 10 rich semantic keywords, synonyms, tropes, and plot concepts describing the theme. E.g. for 'Murder Mystery': ["murder", "mystery", "detective", "investigation", "whodunit", "homicide", "suspect", "sleuth", "crime scene"])
                 }
+
+                STRICT RULES:
+                1. languages: Default to [] (empty array). NEVER add English, Hindi, or any language unless the user prompt explicitly requested it.
+                2. ratingFilterEnabled: Default to false. Only true if user prompt asked for top rated / minimum score.
+                3. yearFilterEnabled: Default to false. Only true if user prompt specified a year, decade, or release time.
+                4. mediaType: Default to "all". Set to "movie" only if prompt specifies movie/film. Set to "series" only if prompt specifies series/show/anime.
+                5. keywords: Generate diverse, powerful semantic keywords so newly added items matching this concept are automatically categorized without calling the AI API again.
             """.trimIndent()
 
+            val promptWithContext = buildString {
+                append("User Catalog Request: \"").append(prompt.trim()).append("\"\n")
+                if (librarySample.isNotEmpty()) {
+                    append("\nReference - Sample titles currently in user's library (use to understand user's library and optimize keywords):\n")
+                    append(librarySample.take(50).joinToString(", "))
+                    append("\n")
+                }
+            }
+
             val rawJson = when (provider) {
-                AiProvider.GEMINI -> callGemini(prompt, systemInstruction, apiKey.trim())
-                AiProvider.OPENROUTER -> callOpenRouter(prompt, systemInstruction, apiKey.trim())
+                AiProvider.GEMINI -> callGemini(promptWithContext, systemInstruction, apiKey.trim())
+                AiProvider.OPENROUTER -> callOpenRouter(promptWithContext, systemInstruction, apiKey.trim())
             }
 
             val cleanedJson = cleanJsonResponse(rawJson)
@@ -358,10 +376,10 @@ class CatalogAiService(
             if (g.isNotBlank()) genres.add(g)
         }
 
-        val languages = mutableListOf<String>()
+        val rawLanguages = mutableListOf<String>()
         obj.getAsJsonArray("languages")?.forEach {
             val l = it.asString.trim()
-            if (l.isNotBlank()) languages.add(l)
+            if (l.isNotBlank()) rawLanguages.add(l)
         }
 
         val ratingFilterEnabled = obj.get("ratingFilterEnabled")?.asBoolean ?: false
@@ -384,19 +402,63 @@ class CatalogAiService(
         val keywords = mutableListOf<String>()
         obj.getAsJsonArray("keywords")?.forEach {
             val k = it.asString.trim().lowercase()
-            if (k.isNotBlank()) keywords.add(k)
+            if (k.isNotBlank() && !keywords.contains(k)) keywords.add(k)
+        }
+
+        // Add prompt's thematic words to keywords so they are never missed
+        val promptWords = originalPrompt.split(" ", "-", "_", "/", ",", ".")
+            .map { it.trim().lowercase() }
+            .filter { it.length >= 3 && it !in listOf("the", "and", "for", "with", "from", "movie", "movies", "series", "show", "shows", "film", "films") }
+        for (pw in promptWords) {
+            if (!keywords.contains(pw)) {
+                keywords.add(pw)
+            }
+        }
+
+        // --- STRICT GUARD RAILS ---
+        val promptLower = originalPrompt.lowercase()
+
+        // 1. Language Guard: Only apply languages if explicitly mentioned in user's prompt
+        val commonLanguageKeywords = listOf(
+            "english", "hindi", "japanese", "korean", "spanish", "french", "german",
+            "tamil", "telugu", "malayalam", "bengali", "marathi", "kannada", "punjabi",
+            "chinese", "mandarin", "cantonese", "russian", "italian", "audio", "dub",
+            "dubbed", "sub", "subtitled"
+        )
+        val userExplicitlyRequestedLanguage = commonLanguageKeywords.any { promptLower.contains(it) }
+        val effectiveLanguages = if (userExplicitlyRequestedLanguage) rawLanguages else emptyList()
+
+        // 2. Rating Guard: Only apply rating filter if user explicitly asked for rating / score / top rated
+        val ratingKeywords = listOf(
+            "rating", "rated", "score", "top", "best", "acclaimed", "imdb", "tmdb",
+            "critically", "stars", "star"
+        )
+        val userExplicitlyRequestedRating = ratingKeywords.any { promptLower.contains(it) } ||
+                promptLower.contains(">") || promptLower.contains("+")
+        val effectiveRatingEnabled = ratingFilterEnabled && userExplicitlyRequestedRating
+
+        // 3. Year Guard: Only apply year filter if user explicitly mentioned year, decade, or era
+        val yearRegex = Regex("""\b(19\d\d|20\d\d|\d0s|after|before|between|from|since|recent|classic|old|new|modern)\b""", RegexOption.IGNORE_CASE)
+        val userExplicitlyRequestedYear = yearRegex.containsMatchIn(promptLower)
+        val effectiveYearEnabled = yearFilterEnabled && userExplicitlyRequestedYear
+
+        // 4. MediaType Guard:
+        val effectiveMediaType = when {
+            promptLower.contains("movie") || promptLower.contains("film") -> "movie"
+            promptLower.contains("series") || promptLower.contains("show") || promptLower.contains("tv") || promptLower.contains("season") || promptLower.contains("anime") -> "series"
+            else -> mediaType
         }
 
         val filter = CatalogFilterCriteria(
-            mediaType = mediaType,
+            mediaType = effectiveMediaType,
             personQuery = personQuery,
             studioQuery = studioQuery,
             genres = genres,
-            languages = languages,
-            ratingFilterEnabled = ratingFilterEnabled,
+            languages = effectiveLanguages,
+            ratingFilterEnabled = effectiveRatingEnabled,
             minRating = minRating,
             maxRating = maxRating,
-            yearFilterEnabled = yearFilterEnabled,
+            yearFilterEnabled = effectiveYearEnabled,
             minYear = minYear,
             maxYear = maxYear,
             sortBy = sortBy,

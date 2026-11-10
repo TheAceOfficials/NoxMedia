@@ -232,7 +232,7 @@ fun CatalogEditorSheet(
             sortAscending = sortAscending,
             keywords = semanticKeywords
         )
-        val tempCatalog = CatalogDefinition(name = "Preview", filter = tempFilter)
+        val tempCatalog = CatalogDefinition(name = "Preview", isAiPowered = isAiPowered, filter = tempFilter)
         viewModel.filterMediaForCatalog(tempCatalog, personFilmographyIds, companyFilmographyIds).size
     }
 

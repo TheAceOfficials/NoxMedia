@@ -763,42 +763,25 @@ class CatalogRepository(
                 if (!hasLang) return@filter false
             }
 
-            // Genres match (multi-select combo: item must match all selected genres)
-            if (genresLower.isNotEmpty()) {
-                val overviewLower = group.overview?.lowercase().orEmpty()
-                val titleLower = group.title.lowercase()
-                val hasAllGenres = genresLower.all { g ->
-                    val cleanG = g.trim().lowercase()
-                    when {
-                        cleanG == "anime" -> group.type == "anime" || overviewLower.contains("anime") || group.items.any { it.fileName.contains("anime", true) }
-                        cleanG in listOf("animation", "animated") -> group.type == "anime" || overviewLower.contains("animation") || overviewLower.contains("animated")
-                        cleanG in listOf("science fiction", "sci-fi", "scifi") -> overviewLower.contains("sci-fi") || overviewLower.contains("science fiction") || titleLower.contains("sci-fi")
-                        cleanG in listOf("time travel") -> overviewLower.contains("time travel") || titleLower.contains("time travel") || group.items.any { it.fileName.contains("time travel", true) }
-                        cleanG in listOf("mystery") -> overviewLower.contains("mystery") || titleLower.contains("mystery") || group.items.any { it.fileName.contains("mystery", true) }
-                        cleanG in listOf("murder") -> overviewLower.contains("murder") || titleLower.contains("murder") || group.items.any { it.fileName.contains("murder", true) }
-                        cleanG in listOf("horror") -> overviewLower.contains("horror") || titleLower.contains("horror") || group.items.any { it.fileName.contains("horror", true) }
-                        cleanG in listOf("thriller") -> overviewLower.contains("thriller") || titleLower.contains("thriller") || group.items.any { it.fileName.contains("thriller", true) }
-                        cleanG in listOf("crime") -> overviewLower.contains("crime") || titleLower.contains("crime") || group.items.any { it.fileName.contains("crime", true) }
-                        else -> overviewLower.contains(cleanG) || titleLower.contains(cleanG) || group.items.any { it.fileName.contains(cleanG, ignoreCase = true) }
+            // Semantic & Genre matching
+            if (safeCatalog.isAiPowered) {
+                val semanticTerms = (genresLower + keywordsLower).distinct()
+                if (semanticTerms.isNotEmpty()) {
+                    val matchesSemantic = semanticTerms.any { term ->
+                        matchesCatalogTerm(term, group)
                     }
+                    if (!matchesSemantic) return@filter false
                 }
-                if (!hasAllGenres) return@filter false
-            }
-
-            // Keywords / Semantic match (e.g. 4k, cyberpunk, time travel)
-            if (keywordsLower.isNotEmpty()) {
-                val overviewLower = group.overview?.lowercase().orEmpty()
-                val titleLower = group.title.lowercase()
-                val hasKeyword = keywordsLower.any { kw ->
-                    when (kw) {
-                        "4k", "2160p", "uhd" -> group.has4K
-                        "imax" -> group.hasIMAX
-                        "remux" -> group.hasRemux
-                        "hdr", "dolby vision", "dv" -> group.hasHdrDv
-                        else -> titleLower.contains(kw) || overviewLower.contains(kw) || group.items.any { it.fileName.contains(kw, ignoreCase = true) }
-                    }
+            } else {
+                // Manual catalog matching
+                if (genresLower.isNotEmpty()) {
+                    val hasGenre = genresLower.any { g -> matchesCatalogTerm(g, group) }
+                    if (!hasGenre) return@filter false
                 }
-                if (!hasKeyword) return@filter false
+                if (keywordsLower.isNotEmpty()) {
+                    val hasKeyword = keywordsLower.any { kw -> matchesCatalogTerm(kw, group) }
+                    if (!hasKeyword) return@filter false
+                }
             }
 
             true
@@ -810,6 +793,34 @@ class CatalogRepository(
             CatalogSortBy.RATING -> if (f.sortAscending) filtered.sortedBy { it.rating } else filtered.sortedByDescending { it.rating }
             CatalogSortBy.YEAR -> if (f.sortAscending) filtered.sortedBy { it.year?.toIntOrNull() ?: 0 } else filtered.sortedByDescending { it.year?.toIntOrNull() ?: 0 }
             CatalogSortBy.TITLE -> if (f.sortAscending) filtered.sortedBy { it.title.lowercase() } else filtered.sortedByDescending { it.title.lowercase() }
+        }
+    }
+
+    private fun matchesCatalogTerm(term: String, group: MediaGroup): Boolean {
+        val clean = term.trim().lowercase()
+        if (clean.isBlank()) return false
+        val overviewLower = (group.overview ?: group.items.firstOrNull { !it.overview.isNullOrBlank() }?.overview)?.lowercase().orEmpty()
+        val titleLower = group.title.lowercase()
+
+        return when (clean) {
+            "4k", "2160p", "uhd" -> group.has4K
+            "1080p", "fhd" -> group.has1080p
+            "720p", "hd" -> group.has720p
+            "imax" -> group.hasIMAX
+            "remux" -> group.hasRemux
+            "hdr", "dolby vision", "dv", "dovi" -> group.hasHdrDv
+            "anime" -> group.type == "anime" || overviewLower.contains("anime") || group.items.any { it.fileName.contains("anime", true) }
+            "animation", "animated" -> group.type == "anime" || overviewLower.contains("animation") || overviewLower.contains("animated")
+            "science fiction", "sci-fi", "scifi" -> overviewLower.contains("sci-fi") || overviewLower.contains("science fiction") || titleLower.contains("sci-fi") || group.items.any { it.fileName.contains("sci-fi", true) }
+            "time travel" -> overviewLower.contains("time travel") || titleLower.contains("time travel") || group.items.any { it.fileName.contains("time travel", true) }
+            else -> {
+                if (clean.length < 3) {
+                    val r = Regex("""(?i)\b${Regex.escape(clean)}\b""")
+                    r.containsMatchIn(titleLower) || r.containsMatchIn(overviewLower) || group.items.any { r.containsMatchIn(it.fileName) }
+                } else {
+                    titleLower.contains(clean) || overviewLower.contains(clean) || group.items.any { it.fileName.contains(clean, ignoreCase = true) }
+                }
+            }
         }
     }
 }

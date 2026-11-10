@@ -1619,7 +1619,13 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
         val cfg = _config.value
         val provider = if (cfg.aiProvider.equals("openrouter", ignoreCase = true)) AiProvider.OPENROUTER else AiProvider.GEMINI
         val apiKey = if (provider == AiProvider.OPENROUTER) cfg.openRouterApiKey else cfg.geminiApiKey
-        return catalogAiService.generateCatalog(prompt, provider, apiKey)
+        val libraryTitles = mediaGroups.value.asSequence()
+            .map { it.title.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .take(50)
+            .toList()
+        return catalogAiService.generateCatalog(prompt, provider, apiKey, libraryTitles)
     }
 
     suspend fun verifyAiKey(provider: AiProvider, apiKey: String): Result<String> {
