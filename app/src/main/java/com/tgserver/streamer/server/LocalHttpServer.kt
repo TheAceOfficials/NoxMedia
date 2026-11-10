@@ -192,21 +192,21 @@ class LocalHttpServer(
             mapOf(
                 "type" to "movie",
                 "id" to "tg_movies",
-                "name" to "NoxMedia",
+                "name" to "Recently Added",
                 "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
                 "extraSupported" to listOf("search", "skip")
             ),
             mapOf(
                 "type" to "series",
                 "id" to "tg_series",
-                "name" to "NoxMedia",
+                "name" to "Recently Added",
                 "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
                 "extraSupported" to listOf("search", "skip")
             ),
             mapOf(
                 "type" to "series",
                 "id" to "tg_anime",
-                "name" to "NoxMedia Anime",
+                "name" to "Recently Added Anime",
                 "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
                 "extraSupported" to listOf("search", "skip")
             )
@@ -281,6 +281,12 @@ class LocalHttpServer(
             } catch (_: Exception) { "" }
         } else ""
 
+        val skip = if (uri.contains("skip=")) {
+            try {
+                uri.substringAfter("skip=").substringBefore(".json").substringBefore("&").toIntOrNull() ?: 0
+            } catch (_: Exception) { 0 }
+        } else 0
+
         // Check if requesting custom catalog: /catalog/{type}/cat_{id}...
         if (uri.contains("/cat_") || uri.contains("cat_")) {
             val catId = uri.substringAfter("cat_").substringBefore("/").substringBefore(".json")
@@ -302,7 +308,9 @@ class LocalHttpServer(
                     filtered = filtered.filter { it.type == "series" || it.type == "anime" }
                 }
 
-                val metasArray = filtered.map { group ->
+                val pagedGroups = if (skip > 0) filtered.drop(skip).take(100) else filtered.take(100)
+
+                val metasArray = pagedGroups.map { group ->
                     val firstItem = group.items.firstOrNull()
                     val poster = group.posterUrl ?: firstItem?.posterUrl ?: posterService.resolvePoster(
                         group.title,
@@ -331,7 +339,7 @@ class LocalHttpServer(
         }
 
         val isSeries = uri.contains("/series/")
-        val isAnime = uri.contains("tg_anime")
+        val isAnime = uri.contains("tg_anime") || uri.contains("anime")
 
         var mediaList = tgClient.getAllMedia().filter { !it.isHidden }.filter { item ->
             val isItemSeries = item.type == "series" || item.type == "anime" || (item.season != null && item.episode != null)
@@ -352,14 +360,41 @@ class LocalHttpServer(
             }
         }
 
-        // For series, group by title so multiple episodes show as a single series card
+        // Recently Added Sorting:
+        // For series & anime: group by show and sort by newest added episode (dateAdded desc, messageId desc)
+        // For movies: sort by dateAdded desc, messageId desc
         val distinctShows = if (isSeries || isAnime) {
-            mediaList.distinctBy { it.title.lowercase().trim() }
+            mediaList.groupBy {
+                val cleanTitle = it.title.trim().lowercase()
+                when {
+                    !it.imdbId.isNullOrBlank() -> "imdb_${it.imdbId}"
+                    it.tmdbId != null && it.tmdbId!! > 0 -> "tmdb_${it.tmdbId}"
+                    it.kitsuId != null && it.kitsuId!! > 0 -> "kitsu_${it.kitsuId}"
+                    else -> cleanTitle
+                }
+            }.values.map { epList ->
+                val maxDate = epList.maxOfOrNull { it.dateAdded } ?: 0L
+                val maxMsg = epList.maxOfOrNull { it.messageId } ?: 0
+                val rep = epList.maxByOrNull { ep ->
+                    (if (!ep.posterUrl.isNullOrBlank()) 1000 else 0) +
+                    (if (!ep.imdbId.isNullOrBlank()) 500 else 0) +
+                    (if (!ep.overview.isNullOrBlank()) 100 else 0)
+                } ?: epList.first()
+                Triple(rep, maxDate, maxMsg)
+            }.sortedWith(
+                compareByDescending<Triple<MediaItem, Long, Int>> { it.second }
+                    .thenByDescending { it.third }
+            ).map { it.first }
         } else {
-            mediaList
+            mediaList.sortedWith(
+                compareByDescending<MediaItem> { it.dateAdded }
+                    .thenByDescending { it.messageId }
+            )
         }
 
-        val metasArray = distinctShows.map { item ->
+        val pagedShows = if (skip > 0) distinctShows.drop(skip).take(100) else distinctShows.take(100)
+
+        val metasArray = pagedShows.map { item ->
             val poster = item.posterUrl ?: posterService.resolvePoster(
                 item.title,
                 config.customPosterUrl,
