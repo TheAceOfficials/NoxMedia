@@ -192,21 +192,21 @@ class LocalHttpServer(
             mapOf(
                 "type" to "movie",
                 "id" to "tg_movies",
-                "name" to "Recently Added",
+                "name" to "New on NoxMedia",
                 "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
                 "extraSupported" to listOf("search", "skip")
             ),
             mapOf(
                 "type" to "series",
                 "id" to "tg_series",
-                "name" to "Recently Added",
+                "name" to "New on NoxMedia",
                 "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
                 "extraSupported" to listOf("search", "skip")
             ),
             mapOf(
                 "type" to "series",
                 "id" to "tg_anime",
-                "name" to "Recently Added Anime",
+                "name" to "New Anime on NoxMedia",
                 "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
                 "extraSupported" to listOf("search", "skip")
             )
