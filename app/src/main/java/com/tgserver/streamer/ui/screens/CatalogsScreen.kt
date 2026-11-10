@@ -409,7 +409,7 @@ fun CatalogsScreen(viewModel: MainAppViewModel) {
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(bottom = 24.dp)
+                .padding(bottom = 86.dp)
         ) {
             Row(
                 modifier = Modifier

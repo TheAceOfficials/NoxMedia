@@ -90,8 +90,8 @@ private data class NavItemData(
 private val NAV_TABS = listOf(
     NavItemData(AppTab.HOME, Icons.Filled.Home, Icons.Outlined.Home),
     NavItemData(AppTab.LIBRARY, Icons.Filled.VideoLibrary, Icons.Outlined.VideoLibrary),
-    NavItemData(AppTab.CATALOGS, Icons.Filled.CollectionsBookmark, Icons.Outlined.CollectionsBookmark),
     NavItemData(AppTab.CHANNELS, Icons.Filled.Hub, Icons.Outlined.Hub),
+    NavItemData(AppTab.CATALOGS, Icons.Filled.CollectionsBookmark, Icons.Outlined.CollectionsBookmark),
     NavItemData(AppTab.SETTINGS, Icons.Filled.Settings, Icons.Outlined.Settings)
 )
 
@@ -161,9 +161,9 @@ fun AppRootScreen(viewModel: MainAppViewModel) {
                 ) { tab ->
                     when (tab) {
                         AppTab.HOME -> HomeScreen(viewModel = viewModel)
-                        AppTab.CATALOGS -> CatalogsScreen(viewModel = viewModel)
                         AppTab.LIBRARY -> LibraryScreen(viewModel = viewModel)
                         AppTab.CHANNELS -> ChannelsScreen(viewModel = viewModel)
+                        AppTab.CATALOGS -> CatalogsScreen(viewModel = viewModel)
                         AppTab.SETTINGS -> SettingsScreen(viewModel = viewModel)
                     }
                 }
