@@ -69,6 +69,7 @@ private val NdotFont = FontFamily(Font(R.font.ndot))
 @Composable
 fun HomeScreen(viewModel: MainAppViewModel) {
     val telemetry by viewModel.telemetry.collectAsState()
+    val config by viewModel.config.collectAsState()
     val media by viewModel.media.collectAsState()
     val mediaGroups by viewModel.mediaGroups.collectAsState()
     val catalogs by viewModel.catalogs.collectAsState()
