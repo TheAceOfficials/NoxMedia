@@ -122,10 +122,72 @@ class CatalogAiService(
         }
     }
 
-    private fun callGemini(prompt: String, systemInstruction: String, apiKey: String): String {
-        // Try gemini-2.0-flash, fallback to gemini-1.5-flash if needed
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey"
+    @Volatile
+    private var cachedResolvedModel: String? = null
 
+    private val geminiPriorityModels = listOf(
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-lite",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite"
+    )
+
+    private fun resolveActiveGeminiModel(apiKey: String): String {
+        cachedResolvedModel?.let { return it }
+
+        try {
+            val listUrl = "https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey"
+            val req = Request.Builder().url(listUrl).get().build()
+            val resp = httpClient.newCall(req).execute()
+            if (resp.isSuccessful) {
+                val body = resp.body?.string().orEmpty()
+                val json = JsonParser.parseString(body).asJsonObject
+                val modelsArr = json.getAsJsonArray("models")
+                if (modelsArr != null && modelsArr.size() > 0) {
+                    val supportedModels = mutableListOf<String>()
+                    for (m in modelsArr) {
+                        val mObj = m.asJsonObject
+                        val name = mObj.get("name")?.asString.orEmpty().removePrefix("models/")
+                        val methods = mObj.getAsJsonArray("supportedGenerationMethods")?.map { it.asString } ?: emptyList()
+                        if (methods.contains("generateContent")) {
+                            supportedModels.add(name)
+                        }
+                    }
+
+                    for (cand in geminiPriorityModels) {
+                        val match = supportedModels.firstOrNull { it.equals(cand, ignoreCase = true) || it.startsWith(cand, ignoreCase = true) }
+                        if (match != null) {
+                            cachedResolvedModel = match
+                            Log.i(TAG, "Resolved Gemini model via ListModels: $match")
+                            return match
+                        }
+                    }
+
+                    val anyFlash = supportedModels.firstOrNull { it.contains("flash", ignoreCase = true) }
+                    if (anyFlash != null) {
+                        cachedResolvedModel = anyFlash
+                        return anyFlash
+                    }
+
+                    val anyGen = supportedModels.firstOrNull()
+                    if (anyGen != null) {
+                        cachedResolvedModel = anyGen
+                        return anyGen
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to query Gemini ListModels: ${e.message}")
+        }
+
+        val fallback = "gemini-2.5-flash"
+        cachedResolvedModel = fallback
+        return fallback
+    }
+
+    private fun callGemini(prompt: String, systemInstruction: String, apiKey: String): String {
         val requestBodyJson = JsonObject().apply {
             val contentsArr = com.google.gson.JsonArray().apply {
                 val userContent = JsonObject().apply {
@@ -148,33 +210,54 @@ class CatalogAiService(
             add("generationConfig", genConfig)
         }
 
-        val request = Request.Builder()
-            .url(url)
-            .post(requestBodyJson.toString().toRequestBody(jsonMediaType))
-            .build()
-
-        val response = httpClient.newCall(request).execute()
-        val bodyString = response.body?.string().orEmpty()
-
-        if (!response.isSuccessful) {
-            // If 2.0-flash returned 404/unsupported, try 1.5-flash
-            if (response.code == 404 || response.code == 400) {
-                val fallbackUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"
-                val fallbackReq = Request.Builder()
-                    .url(fallbackUrl)
-                    .post(requestBodyJson.toString().toRequestBody(jsonMediaType))
-                    .build()
-                val fallbackResp = httpClient.newCall(fallbackReq).execute()
-                val fallbackBody = fallbackResp.body?.string().orEmpty()
-                if (!fallbackResp.isSuccessful) {
-                    throw Exception("Gemini API error (${fallbackResp.code}): $fallbackBody")
-                }
-                return extractGeminiText(fallbackBody)
+        // Build candidate cascade: resolved model first, then priority models
+        val candidateModels = mutableListOf<String>()
+        val discovered = resolveActiveGeminiModel(apiKey)
+        if (discovered.isNotBlank()) {
+            candidateModels.add(discovered)
+        }
+        for (m in geminiPriorityModels) {
+            if (!candidateModels.contains(m)) {
+                candidateModels.add(m)
             }
-            throw Exception("Gemini API error (${response.code}): $bodyString")
         }
 
-        return extractGeminiText(bodyString)
+        var lastError: Exception? = null
+
+        for (model in candidateModels) {
+            val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+            val request = Request.Builder()
+                .url(url)
+                .post(requestBodyJson.toString().toRequestBody(jsonMediaType))
+                .build()
+
+            try {
+                val response = httpClient.newCall(request).execute()
+                val bodyString = response.body?.string().orEmpty()
+
+                if (response.isSuccessful) {
+                    cachedResolvedModel = model
+                    return extractGeminiText(bodyString)
+                }
+
+                // If 404 (model not found) or 400 (not supported for generateContent), try next model in cascade
+                if (response.code == 404 || response.code == 400) {
+                    Log.w(TAG, "Gemini model '$model' returned HTTP ${response.code}, trying next model in cascade...")
+                    lastError = Exception("Gemini API error (${response.code}) on '$model': $bodyString")
+                    continue
+                }
+
+                // If 429 (rate limit) or 403 (invalid key / permission), fail fast
+                throw Exception("Gemini API error (${response.code}): $bodyString")
+            } catch (e: Exception) {
+                if (e.message?.contains("Gemini API error (429)") == true || e.message?.contains("Gemini API error (403)") == true) {
+                    throw e
+                }
+                lastError = e
+            }
+        }
+
+        throw lastError ?: Exception("All candidate Gemini models failed to generate content.")
     }
 
     private fun extractGeminiText(responseBody: String): String {
