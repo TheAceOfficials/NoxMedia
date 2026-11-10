@@ -101,7 +101,6 @@ fun AppRootScreen(viewModel: MainAppViewModel) {
     val apiCreds by viewModel.apiCredentials.collectAsState()
     val session by viewModel.session.collectAsState()
     val syncProgress by viewModel.cloudSyncProgress.collectAsState()
-    val config by viewModel.config.collectAsState()
     val haptic = LocalHapticFeedback.current
 
     val hasCredentials = apiCreds.first > 0 && apiCreds.second.isNotBlank()
@@ -170,8 +169,7 @@ fun AppRootScreen(viewModel: MainAppViewModel) {
                 }
             }
 
-            // Smooth ambient bottom scrim (preserves rich artwork luminance when dynamic dock reflection is active)
-            val dockReflectionActive = config.dockReflectionEnabled
+            // Smooth ambient bottom scrim to gracefully dissolve scrolling cards before reaching the dock
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -179,32 +177,22 @@ fun AppRootScreen(viewModel: MainAppViewModel) {
                     .align(Alignment.BottomCenter)
                     .background(
                         Brush.verticalGradient(
-                            colors = if (dockReflectionActive) {
-                                listOf(
-                                    Color.Transparent,
-                                    Color(0x18000000),
-                                    Color(0x48000000),
-                                    Color(0x94000000)
-                                )
-                            } else {
-                                listOf(
-                                    Color.Transparent,
-                                    Color(0x3B000000),
-                                    Color(0x94000000),
-                                    Color(0xE8000000)
-                                )
-                            }
+                            colors = listOf(
+                                Color.Transparent,
+                                Color(0x3B000000),
+                                Color(0x94000000),
+                                Color(0xE8000000)
+                            )
                         )
                     )
             )
 
-            // Minimalist Floating Glassmorphic Dock (True Floating Island with Dynamic Reflected Light)
+            // Minimalist Floating Glassmorphic Dock (True Floating Island, Zero Side Box)
             MinimalFloatingNavDock(
                 currentTab = selectedTab,
                 avatarUrl = session.avatarUrl,
                 userInitials = session.initials,
                 onTabSelected = { viewModel.selectTab(it) },
-                dockReflectionEnabled = dockReflectionActive,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
@@ -329,8 +317,7 @@ private fun MinimalFloatingNavDock(
     avatarUrl: String?,
     userInitials: String,
     onTabSelected: (AppTab) -> Unit,
-    modifier: Modifier = Modifier,
-    dockReflectionEnabled: Boolean = true
+    modifier: Modifier = Modifier
 ) {
     val haptic = LocalHapticFeedback.current
     val density = LocalDensity.current
@@ -393,40 +380,23 @@ private fun MinimalFloatingNavDock(
                     ambientColor = Color(0x66000000)
                 )
                 .clip(RoundedCornerShape(27.dp))
-                // Layer 1: Smoked Obsidian Base (Translucent when reflection enabled, solid when disabled)
+                // Layer 1: Dense Smoked Obsidian Frosted Base (stops text bleed-through)
                 .background(
-                    if (dockReflectionEnabled) {
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color(0x70141622), // 44% translucent smoked obsidian at top for light absorption
-                                Color(0x9E0C0D14)  // 62% smoked glass at bottom
-                            )
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xF7151722),
+                            Color(0xFD0D0E14)
                         )
-                    } else {
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color(0xF7151722),
-                                Color(0xFD0D0E14)
-                            )
-                        )
-                    }
+                    )
                 )
                 // Layer 2: Frosted Specular Sheen (mimics frosted glass catching ambient light)
                 .background(
                     Brush.verticalGradient(
-                        colors = if (dockReflectionEnabled) {
-                            listOf(
-                                Color(0x32FFFFFF),
-                                Color(0x10FFFFFF),
-                                Color(0x00FFFFFF)
-                            )
-                        } else {
-                            listOf(
-                                Color(0x28FFFFFF),
-                                Color(0x0CFFFFFF),
-                                Color(0x00FFFFFF)
-                            )
-                        }
+                        colors = listOf(
+                            Color(0x28FFFFFF),
+                            Color(0x0CFFFFFF),
+                            Color(0x00FFFFFF)
+                        )
                     )
                 )
                 // Layer 3: Glass Bevel Outer Border (metallic light-catching top edge)
@@ -434,19 +404,11 @@ private fun MinimalFloatingNavDock(
                     BorderStroke(
                         1.2.dp,
                         Brush.verticalGradient(
-                            colors = if (dockReflectionEnabled) {
-                                listOf(
-                                    Color(0x70FFFFFF), // Ultra-clean specular top lip
-                                    Color(0x28FFFFFF),
-                                    Color(0x0AFFFFFF)
-                                )
-                            } else {
-                                listOf(
-                                    Color(0x55FFFFFF),
-                                    Color(0x20FFFFFF),
-                                    Color(0x08FFFFFF)
-                                )
-                            }
+                            colors = listOf(
+                                Color(0x55FFFFFF),
+                                Color(0x20FFFFFF),
+                                Color(0x08FFFFFF)
+                            )
                         )
                     ),
                     shape = RoundedCornerShape(27.dp)
@@ -490,66 +452,25 @@ private fun MinimalFloatingNavDock(
                     )
                 }
         ) {
-            // Netflix-Style Reflected Light Top Edge:
-            // Dynamic glowing junction catching colors and luminance from artwork passing behind
-            if (dockReflectionEnabled) {
-                // Layer A: Soft diffuse top refraction lip (absorbs and reflects artwork luminance across threshold)
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(5.5.dp)
-                        .padding(horizontal = 14.dp)
-                        .align(Alignment.TopCenter)
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    Color(0x45FFFFFF),
-                                    Color(0x15FFFFFF),
-                                    Color.Transparent
-                                )
+            // Subtle frosted glass top specular reflection line
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .padding(horizontal = 24.dp)
+                    .align(Alignment.TopCenter)
+                    .background(
+                        Brush.horizontalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color(0x30FFFFFF),
+                                Color(0x60FFFFFF),
+                                Color(0x30FFFFFF),
+                                Color.Transparent
                             )
                         )
-                )
-                // Layer B: Razor-sharp specular light reflection filament (vibrant glowing edge line)
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(1.5.dp)
-                        .padding(horizontal = 18.dp)
-                        .align(Alignment.TopCenter)
-                        .background(
-                            Brush.horizontalGradient(
-                                colors = listOf(
-                                    Color.Transparent,
-                                    Color(0x55FFFFFF),
-                                    Color(0x95FFFFFF),
-                                    Color(0x55FFFFFF),
-                                    Color.Transparent
-                                )
-                            )
-                        )
-                )
-            } else {
-                // Classic static top specular sheen (zero-gpu lightweight)
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(1.dp)
-                        .padding(horizontal = 24.dp)
-                        .align(Alignment.TopCenter)
-                        .background(
-                            Brush.horizontalGradient(
-                                colors = listOf(
-                                    Color.Transparent,
-                                    Color(0x30FFFFFF),
-                                    Color(0x60FFFFFF),
-                                    Color(0x30FFFFFF),
-                                    Color.Transparent
-                                )
-                            )
-                        )
-                )
-            }
+                    )
+            )
 
             val usableWidthPx = (barWidthPx - 2 * horizontalPaddingPx).coerceAtLeast(1f)
             val slotWidthPx = usableWidthPx / NAV_TABS.size

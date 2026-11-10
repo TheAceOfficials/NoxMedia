@@ -99,8 +99,7 @@ class StreamerForegroundService : Service() {
             receiveBetaUpdates = prefs.getBoolean("receive_beta_updates", false),
             animeMetadataPreference = prefs.getString("anime_metadata_preference", "seasonal") ?: "seasonal",
             backupDestination = prefs.getString("backup_destination", "") ?: "",
-            cloudSyncLibrary = prefs.getBoolean("cloud_sync_library", true),
-            dockReflectionEnabled = prefs.getBoolean("dock_reflection_enabled", true)
+            cloudSyncLibrary = prefs.getBoolean("cloud_sync_library", true)
         )
     }
 

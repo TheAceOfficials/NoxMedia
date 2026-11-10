@@ -481,8 +481,7 @@ data class ServerConfig(
     var cloudSyncLibrary: Boolean = true,
     var aiProvider: String = "gemini",
     var geminiApiKey: String = "",
-    var openRouterApiKey: String = "",
-    var dockReflectionEnabled: Boolean = true
+    var openRouterApiKey: String = ""
 )
 
 data class AuthSession(

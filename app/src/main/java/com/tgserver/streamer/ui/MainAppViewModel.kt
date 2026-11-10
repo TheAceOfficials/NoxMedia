@@ -1323,8 +1323,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             cloudSyncLibrary = prefs.getBoolean("cloud_sync_library", true),
             aiProvider = prefs.getString("ai_provider", "gemini") ?: "gemini",
             geminiApiKey = prefs.getString("gemini_api_key", "") ?: "",
-            openRouterApiKey = prefs.getString("openrouter_api_key", "") ?: "",
-            dockReflectionEnabled = prefs.getBoolean("dock_reflection_enabled", true)
+            openRouterApiKey = prefs.getString("openrouter_api_key", "") ?: ""
         )
     }
 
@@ -1358,7 +1357,6 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             putString("ai_provider", cfg.aiProvider)
             putString("gemini_api_key", cfg.geminiApiKey)
             putString("openrouter_api_key", cfg.openRouterApiKey)
-            putBoolean("dock_reflection_enabled", cfg.dockReflectionEnabled)
             apply()
         }
         _config.value = cfg
@@ -1553,11 +1551,6 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             updateManager.resetUpdateState()
         }
         checkForAppUpdate(manual = false)
-    }
-
-    fun updateDockReflection(enabled: Boolean) {
-        val updated = _config.value.copy(dockReflectionEnabled = enabled)
-        saveStoredConfig(updated)
     }
 
     // --- Custom Catalogs & AI Engine ---
@@ -1905,7 +1898,6 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             put("aiProvider", cfg.aiProvider)
             put("geminiApiKey", cfg.geminiApiKey)
             put("openRouterApiKey", cfg.openRouterApiKey)
-            put("dockReflectionEnabled", cfg.dockReflectionEnabled)
             val lifetimeTrafficBytes = com.tgserver.streamer.server.StreamTrafficStats.getLifetimeBytes()
             put("lifetimeTrafficBytes", lifetimeTrafficBytes)
         }
@@ -1972,8 +1964,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                     cloudSyncLibrary = settingsObj.optBoolean("cloudSyncLibrary", cur.cloudSyncLibrary),
                     aiProvider = settingsObj.optString("aiProvider", cur.aiProvider),
                     geminiApiKey = settingsObj.optString("geminiApiKey", cur.geminiApiKey),
-                    openRouterApiKey = settingsObj.optString("openRouterApiKey", cur.openRouterApiKey),
-                    dockReflectionEnabled = settingsObj.optBoolean("dockReflectionEnabled", cur.dockReflectionEnabled)
+                    openRouterApiKey = settingsObj.optString("openRouterApiKey", cur.openRouterApiKey)
                 )
                 saveStoredConfig(updated)
                 if (rawDest.isNotBlank()) {
