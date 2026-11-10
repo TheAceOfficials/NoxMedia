@@ -140,8 +140,9 @@ _dc_semaphores: Dict[int, asyncio.Semaphore] = {}
 # System architecture detection (32-bit vs 64-bit)
 IS_32BIT: bool = (sys.maxsize <= 2**31 - 1)
 
-# 32-bit Multi-Session MTProto Connection Pool (3 distinct TCP sockets to reach 3.5-4.5 MB/s throughput for high-bitrate 4K streaming without LOS GC pressure)
+# Multi-Session MTProto Connection Pool (3 distinct TCP sockets per DC for high-throughput streaming without single-socket head-of-line blocking)
 _POOL_SIZE_32BIT = 3
+_POOL_SIZE_64BIT = 3
 _dc_session_pools: Dict[int, asyncio.Queue] = {}
 _pool_init_lock = asyncio.Lock()
 
@@ -150,7 +151,8 @@ async def _get_dc_pool(dc_id: int) -> asyncio.Queue:
         async with _pool_init_lock:
             if dc_id not in _dc_session_pools:
                 q = asyncio.Queue()
-                for idx in range(_POOL_SIZE_32BIT):
+                pool_size = _POOL_SIZE_32BIT if IS_32BIT else _POOL_SIZE_64BIT
+                for idx in range(pool_size):
                     q.put_nowait(idx)
                 _dc_session_pools[dc_id] = q
     return _dc_session_pools[dc_id]
@@ -1416,96 +1418,7 @@ async def _fetch_chunk_bytes(client: Client, chat_id: int, msg_id: int, file_id_
     location = _get_location_from_file_id(file_id_obj)
     dc_id = file_id_obj.dc_id
 
-    if not IS_32BIT:
-        # Strictly maintain 64-bit Build 254 baseline: single session with 2 concurrent RPCs
-        dc_sem = _get_dc_semaphore(dc_id)
-        tries = 0
-        while tries < 3:
-            t_start = time.time()
-            session = None
-            try:
-                async with dc_sem:
-                    session = await _get_media_session(client, dc_id, 0)
-                    r = await asyncio.wait_for(
-                        session.invoke(
-                            raw.functions.upload.GetFile(
-                                location=location,
-                                offset=offset,
-                                limit=limit
-                            ),
-                            timeout=14.0
-                        ),
-                        timeout=15.0
-                    )
-                elapsed_ms = int((time.time() - t_start) * 1000)
-
-                chunk_bytes = None
-                if isinstance(r, raw.types.upload.File):
-                    chunk_bytes = r.bytes
-                elif isinstance(r, raw.types.upload.FileCdnRedirect):
-                    cdn_session = Session(
-                        client, r.dc_id, await Auth(client, r.dc_id, await client.storage.test_mode()).create(),
-                        await client.storage.test_mode(), is_media=True, is_cdn=True
-                    )
-                    try:
-                        await cdn_session.start()
-                        r2 = await cdn_session.invoke(
-                            raw.functions.upload.GetCdnFile(
-                                file_token=r.file_token,
-                                offset=offset,
-                                limit=limit
-                            ),
-                            timeout=14.0
-                        )
-                        from pyrogram.crypto import aes
-                        decrypted_chunk = aes.ctr256_decrypt(
-                            r2.bytes,
-                            r.encryption_key,
-                            bytearray(r.encryption_iv[:-4] + (offset // 16).to_bytes(4, "big"))
-                        )
-                        chunk_bytes = decrypted_chunk
-                    finally:
-                        await cdn_session.stop()
-                else:
-                    chunk_bytes = getattr(r, "bytes", None)
-
-                if chunk_bytes is not None:
-                    speed_mb = (len(chunk_bytes) / (1024 * 1024)) / max(0.001, (elapsed_ms / 1000.0))
-                    _log_stream(f"Chunk[off={offset // (1024*1024)}MB]: fetched {len(chunk_bytes)//1024}KB in {elapsed_ms}ms from DC{dc_id} ({speed_mb:.1f} MB/s)", "I")
-                    return chunk_bytes
-                return None
-            except asyncio.CancelledError:
-                raise
-            except (asyncio.TimeoutError, TimeoutError):
-                tries += 1
-                if tries < 2:
-                    _log_stream(f"⚠️ SLOW CHUNK: Chunk[off={offset // (1024*1024)}MB] took >14s on DC{dc_id} (try {tries}/3). Retrying on active session...", "W")
-                    await asyncio.sleep(0.1)
-                else:
-                    _log_stream(f"⚠️ PACKET LOSS / TIMEOUT: Chunk[off={offset // (1024*1024)}MB] timed out on DC{dc_id} (try {tries}/3). Resetting socket...", "W")
-                    await _reset_media_session(client, dc_id, bad_session=session, session_idx=0)
-                    await asyncio.sleep(0.3)
-            except Exception as e:
-                err_str = str(e)
-                if "FILE_REFERENCE" in err_str or "file_reference" in err_str.lower():
-                    _file_id_cache.pop((chat_id, msg_id), None)
-                    refreshed = await _resolve_file_id(client, chat_id, msg_id)
-                    if refreshed:
-                        file_id_obj = refreshed
-                        location = _get_location_from_file_id(refreshed)
-                elif "FloodWait" in type(e).__name__ or "flood" in err_str.lower():
-                    m = re.search(r'(\d+)', err_str)
-                    w = int(m.group(1)) if m else 3
-                    _log_stream(f"⚠️ FLOOD WAIT: Sleeping {w}s on DC{dc_id}", "W")
-                    await asyncio.sleep(w + 0.5)
-                elif any(x in err_str for x in ["AuthKey", "SessionRevoked", "ConnectionReset", "BrokenPipe", "Bad file descriptor", "OSError"]):
-                    _log_stream(f"⚠️ SOCKET ERROR: {err_str} on DC{dc_id}, resetting socket...", "W")
-                    await _reset_media_session(client, dc_id, bad_session=session, session_idx=0)
-                tries += 1
-                await asyncio.sleep(0.2)
-        return None
-
-    # --- 32-bit: Multi-Session Socket Striping via Dynamic Connection Pool (4 distinct TCP sockets) ---
+    # Multi-Session Socket Striping via Dynamic Connection Pool (3 distinct TCP sockets per DC)
     pool = await _get_dc_pool(dc_id)
     session_idx = await pool.get()
     try:
@@ -1845,9 +1758,8 @@ class VirtualStreamSession:
             else:
                 next_seq_to_emit = 0
 
-            # On 32-bit playback streams: eagerly fetch Chunk 1 into cushion before releasing full control
-            # so queue always has >= 2MB head start
-            if IS_32BIT and next_seq_to_emit == 1 and total_tasks > 1 and not self._closed:
+            # Fast-Start Cushion: eagerly fetch Chunk 1 alongside Chunk 0 so queue always has >= 2MB head start
+            if next_seq_to_emit == 1 and total_tasks > 1 and not self._closed:
                 t1_info = self.tasks[1]
                 t1_task = asyncio.create_task(self._fetch_task_slice(t1_info))
                 # Wait briefly (up to 1.2s) for Chunk 1 to form cushion, but don't block player if it takes longer
@@ -1859,10 +1771,8 @@ class VirtualStreamSession:
                 except (asyncio.TimeoutError, Exception):
                     pass
 
-            # Worker Concurrency:
-            # On 64-bit: strictly 2 workers for continuous pipelining (Build 254 baseline).
-            # On 32-bit: 3 workers across 3 striped MTProto sessions to saturate 3.5-4.5 MB/s for 4K streaming without LOS GC pauses.
-            MAX_IN_FLIGHT = 3 if IS_32BIT else 2
+            # Worker Concurrency: 3 workers across 3 striped MTProto sessions
+            MAX_IN_FLIGHT = 3
             next_task_idx = next_seq_to_emit
             completed_chunks: Dict[int, bytes] = {}
             active_tasks_map: Dict[asyncio.Task, int] = {}
@@ -2513,12 +2423,12 @@ def prewarm_media_session(api_id: int, api_hash: str, session_str: str, dc_id: i
             try:
                 _log_stream(f"prewarm_media_session: pre-warming DC{dc} MTProto session...")
                 await _get_media_session(client, dc, 0)
-                if IS_32BIT:
-                    for s_idx in range(1, _POOL_SIZE_32BIT):
-                        try:
-                            await _get_media_session(client, dc, s_idx)
-                        except Exception as e:
-                            _log_stream(f"prewarm_media_session: notice warming DC{dc} s{s_idx}: {e}", "W")
+                pool_size = _POOL_SIZE_32BIT if IS_32BIT else _POOL_SIZE_64BIT
+                for s_idx in range(1, pool_size):
+                    try:
+                        await _get_media_session(client, dc, s_idx)
+                    except Exception as e:
+                        _log_stream(f"prewarm_media_session: notice warming DC{dc} s{s_idx}: {e}", "W")
                 _log_stream(f"prewarm_media_session: DC{dc} sessions ready ✓")
             except Exception as e:
                 _log_stream(f"prewarm_media_session: DC{dc} warming notice: {e}", "W")
