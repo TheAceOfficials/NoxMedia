@@ -1623,7 +1623,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             .map { it.title.trim() }
             .filter { it.isNotBlank() }
             .distinct()
-            .take(50)
+            .take(600)
             .toList()
         return catalogAiService.generateCatalog(prompt, provider, apiKey, libraryTitles)
     }

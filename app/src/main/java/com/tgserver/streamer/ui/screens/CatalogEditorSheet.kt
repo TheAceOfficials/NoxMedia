@@ -107,6 +107,7 @@ fun CatalogEditorSheet(
     var sortBy by remember { mutableStateOf(initialFilter.sortBy) }
     var sortAscending by remember { mutableStateOf(initialFilter.sortAscending) }
     var semanticKeywords by remember { mutableStateOf(initialFilter.keywords) }
+    var curatedTitles by remember { mutableStateOf(initialFilter.curatedTitles) }
 
     // UI state for expandable sections
     var isAiExpanded by remember { mutableStateOf(hasAiKey && initialCatalog == null) }
@@ -230,7 +231,8 @@ fun CatalogEditorSheet(
             maxYear = maxYear,
             sortBy = sortBy,
             sortAscending = sortAscending,
-            keywords = semanticKeywords
+            keywords = semanticKeywords,
+            curatedTitles = curatedTitles
         )
         val tempCatalog = CatalogDefinition(name = "Preview", isAiPowered = isAiPowered, filter = tempFilter)
         viewModel.filterMediaForCatalog(tempCatalog, personFilmographyIds, companyFilmographyIds).size
@@ -318,7 +320,8 @@ fun CatalogEditorSheet(
                                 maxYear = maxYear,
                                 sortBy = sortBy,
                                 sortAscending = sortAscending,
-                                keywords = semanticKeywords
+                                keywords = semanticKeywords,
+                                curatedTitles = curatedTitles
                             )
                             val finalCatalog = (initialCatalog ?: CatalogDefinition(name = finalName)).copy(
                                 name = finalName,
@@ -578,6 +581,7 @@ fun CatalogEditorSheet(
                                                         sortBy = generated.filter.sortBy
                                                         sortAscending = generated.filter.sortAscending
                                                         semanticKeywords = generated.filter.keywords
+                                                        curatedTitles = generated.filter.curatedTitles
                                                         isAdvancedExpanded = true // reveal populated controls
                                                     },
                                                     onFailure = { err ->

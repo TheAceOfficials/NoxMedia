@@ -96,6 +96,7 @@ class CatalogAiService(
                   "mediaType": "all" | "movie" | "series",
                   "personQuery": "string (Actor or Director name ONLY if explicitly requested, else empty \"\")",
                   "studioQuery": "string (Studio or Platform name like 'HBO', 'Netflix', 'Studio Ghibli', 'A24', 'Marvel' ONLY if requested, else empty \"\")",
+                  "curatedTitles": ["string"] (CRITICAL: From the user's library titles listed below, return ONLY the titles that genuinely fit this catalog request. DO NOT include unrelated titles like Sci-Fi, Superheroes, Animation, or Family films unless they strictly fit the requested concept!),
                   "genres": ["string"] (Standard TMDB genres: Action, Adventure, Animation, Comedy, Crime, Documentary, Drama, Family, Fantasy, History, Horror, Music, Mystery, Romance, Science Fiction, Thriller, War, Western),
                   "languages": ["string"] (CRITICAL: MUST BE empty [] unless the user explicitly demanded a specific language or audio in their prompt!),
                   "ratingFilterEnabled": boolean (CRITICAL: MUST BE false unless the user explicitly requested high/top rating or minimum score!),
@@ -106,22 +107,23 @@ class CatalogAiService(
                   "maxYear": integer (e.g. 1999 if '90s', else 2030),
                   "sortBy": "RATING" | "RECENT" | "YEAR" | "TITLE",
                   "sortAscending": boolean,
-                  "keywords": ["string"] (CRITICAL: Provide 5 to 10 rich semantic keywords, synonyms, tropes, and plot concepts describing the theme. E.g. for 'Murder Mystery': ["murder", "mystery", "detective", "investigation", "whodunit", "homicide", "suspect", "sleuth", "crime scene"])
+                  "keywords": ["string"] (CRITICAL: Provide 5 to 8 specific semantic keywords, synonyms, tropes, and concepts describing the theme. E.g. for 'Murder Mystery like Fear Street': ["slasher", "fear street", "serial killer", "murder mystery", "whodunit", "masked killer"]. DO NOT use generic words like 'fear', 'like', 'movie', 'good')
                 }
 
                 STRICT RULES:
-                1. languages: Default to [] (empty array). NEVER add English, Hindi, or any language unless the user prompt explicitly requested it.
-                2. ratingFilterEnabled: Default to false. Only true if user prompt asked for top rated / minimum score.
-                3. yearFilterEnabled: Default to false. Only true if user prompt specified a year, decade, or release time.
-                4. mediaType: Default to "all". Set to "movie" only if prompt specifies movie/film. Set to "series" only if prompt specifies series/show/anime.
-                5. keywords: Generate diverse, powerful semantic keywords so newly added items matching this concept are automatically categorized without calling the AI API again.
+                1. curatedTitles: Carefully analyze the user's library titles provided in the prompt. Select only genuine matches.
+                2. languages: Default to [] (empty array). NEVER add English, Hindi, or any language unless the user prompt explicitly requested it.
+                3. ratingFilterEnabled: Default to false. Only true if user prompt asked for top rated / minimum score.
+                4. yearFilterEnabled: Default to false. Only true if user prompt specified a year, decade, or release time.
+                5. mediaType: Default to "all". Set to "movie" only if prompt specifies movie/film. Set to "series" only if prompt specifies series/show/anime.
+                6. keywords: Specific thematic keywords only. Do not use generic stop words.
             """.trimIndent()
 
             val promptWithContext = buildString {
-                append("User Catalog Request: \"").append(prompt.trim()).append("\"\n")
+                append("User Catalog Request: \"").append(prompt.trim()).append("\"\n\n")
                 if (librarySample.isNotEmpty()) {
-                    append("\nReference - Sample titles currently in user's library (use to understand user's library and optimize keywords):\n")
-                    append(librarySample.take(50).joinToString(", "))
+                    append("USER'S FULL MEDIA LIBRARY TITLES (Carefully evaluate each title below and select only genuine matches for this catalog into 'curatedTitles'):\n")
+                    append(librarySample.joinToString("\n") { "- $it" })
                     append("\n")
                 }
             }
@@ -399,20 +401,17 @@ class CatalogAiService(
         }
         val sortAscending = obj.get("sortAscending")?.asBoolean ?: false
 
-        val keywords = mutableListOf<String>()
-        obj.getAsJsonArray("keywords")?.forEach {
-            val k = it.asString.trim().lowercase()
-            if (k.isNotBlank() && !keywords.contains(k)) keywords.add(k)
+        val curatedTitles = mutableListOf<String>()
+        obj.getAsJsonArray("curatedTitles")?.forEach {
+            val t = it.asString.trim()
+            if (t.isNotBlank() && !curatedTitles.contains(t)) curatedTitles.add(t)
         }
 
-        // Add prompt's thematic words to keywords so they are never missed
-        val promptWords = originalPrompt.split(" ", "-", "_", "/", ",", ".")
-            .map { it.trim().lowercase() }
-            .filter { it.length >= 3 && it !in listOf("the", "and", "for", "with", "from", "movie", "movies", "series", "show", "shows", "film", "films") }
-        for (pw in promptWords) {
-            if (!keywords.contains(pw)) {
-                keywords.add(pw)
-            }
+        val keywords = mutableListOf<String>()
+        val stopWords = setOf("the", "and", "for", "with", "from", "movie", "movies", "series", "show", "shows", "film", "films", "like", "similar", "vibe", "vibes", "style", "about", "best", "good", "such", "some", "type", "watch", "fear", "story", "life", "time", "world", "man", "woman", "people", "steer", "into", "their", "that", "this")
+        obj.getAsJsonArray("keywords")?.forEach {
+            val k = it.asString.trim().lowercase()
+            if (k.length >= 3 && k !in stopWords && !keywords.contains(k)) keywords.add(k)
         }
 
         // --- STRICT GUARD RAILS ---
@@ -463,7 +462,8 @@ class CatalogAiService(
             maxYear = maxYear,
             sortBy = sortBy,
             sortAscending = sortAscending,
-            keywords = keywords
+            keywords = keywords,
+            curatedTitles = curatedTitles
         )
 
         return GeneratedCatalogResult(title = title, filter = filter)

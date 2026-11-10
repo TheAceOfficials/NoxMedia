@@ -43,7 +43,8 @@ data class CatalogFilterCriteria(
     val maxYear: Int = 2026,
     val sortBy: CatalogSortBy = CatalogSortBy.RECENT,
     val sortAscending: Boolean = false,
-    val keywords: List<String> = emptyList() // Semantic keywords for AI or overview search
+    val keywords: List<String> = emptyList(), // Semantic keywords for AI or overview search
+    val curatedTitles: List<String> = emptyList() // Exact matching titles curated by AI from library
 )
 
 /**

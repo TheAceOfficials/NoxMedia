@@ -765,13 +765,35 @@ class CatalogRepository(
 
             // Semantic & Genre matching
             if (safeCatalog.isAiPowered) {
-                val semanticTerms = (genresLower + keywordsLower).distinct()
-                if (semanticTerms.isNotEmpty()) {
-                    val matchesSemantic = semanticTerms.any { term ->
-                        matchesCatalogTerm(term, group)
-                    }
-                    if (!matchesSemantic) return@filter false
+                val groupTitleClean = group.title.trim().lowercase()
+                val isCurated = f.curatedTitles.any { ct ->
+                    val ctClean = ct.trim().lowercase()
+                    if (ctClean.isBlank()) false
+                    else groupTitleClean == ctClean || groupTitleClean.contains(ctClean) || ctClean.contains(groupTitleClean)
                 }
+
+                if (isCurated) {
+                    return@filter true
+                }
+
+                // If AI curated specific titles from the library and this item was not picked:
+                if (f.curatedTitles.isNotEmpty()) {
+                    val isNewlyAdded = group.dateAdded > safeCatalog.createdAt
+                    if (!isNewlyAdded) {
+                        return@filter false
+                    }
+                }
+
+                // For newly added items or catalogs without curated list: require both genre and keyword match
+                val matchesGenre = if (genresLower.isNotEmpty()) {
+                    genresLower.any { g -> matchesCatalogTerm(g, group) }
+                } else true
+
+                val matchesKeyword = if (keywordsLower.isNotEmpty()) {
+                    keywordsLower.any { kw -> matchesCatalogTerm(kw, group) }
+                } else true
+
+                if (!matchesGenre || !matchesKeyword) return@filter false
             } else {
                 // Manual catalog matching
                 if (genresLower.isNotEmpty()) {
