@@ -1832,7 +1832,8 @@ class VirtualStreamSession:
                 await self.queue.put(None)
                 return
 
-            # Fast-Start: Fetch Chunk 0 alone first so player gets initial bytes instantly with 100% bandwidth
+            # Fast-Start Cushion: Fetch Chunk 0 first, and on 32-bit immediately pipeline Chunk 1
+            # so the player starts with a guaranteed cushion and never drains queue to 0
             t0_info = self.tasks[0]
             slice0 = await self._fetch_task_slice(t0_info)
             if self._closed:
@@ -1844,6 +1845,20 @@ class VirtualStreamSession:
             else:
                 next_seq_to_emit = 0
 
+            # On 32-bit playback streams: eagerly fetch Chunk 1 into cushion before releasing full control
+            # so queue always has >= 2MB head start
+            if IS_32BIT and next_seq_to_emit == 1 and total_tasks > 1 and not self._closed:
+                t1_info = self.tasks[1]
+                t1_task = asyncio.create_task(self._fetch_task_slice(t1_info))
+                # Wait briefly (up to 1.2s) for Chunk 1 to form cushion, but don't block player if it takes longer
+                try:
+                    slice1 = await asyncio.wait_for(asyncio.shield(t1_task), timeout=1.2)
+                    if slice1:
+                        await self.queue.put(slice1)
+                        next_seq_to_emit = 2
+                except (asyncio.TimeoutError, Exception):
+                    pass
+
             # Worker Concurrency:
             # On 64-bit: strictly 2 workers for continuous pipelining (Build 254 baseline).
             # On 32-bit: 2 workers across 2 striped MTProto sessions to eliminate Large Object Space (LOS) GC pauses.
@@ -1852,6 +1867,12 @@ class VirtualStreamSession:
             completed_chunks: Dict[int, bytes] = {}
             active_tasks_map: Dict[asyncio.Task, int] = {}
             task_retries: Dict[int, int] = {}
+
+            # If t1_task is still in flight from cushion attempt, attach it
+            if 't1_task' in locals() and not t1_task.done() and next_seq_to_emit == 1:
+                self.active_tasks.add(t1_task)
+                active_tasks_map[t1_task] = 1
+                next_task_idx = 2
 
             while (next_seq_to_emit < total_tasks) and not self._closed:
                 # Flow control & Abandoned stream check:
@@ -2477,7 +2498,7 @@ def reset_session_and_cache() -> str:
 
 def prewarm_media_session(api_id: int, api_hash: str, session_str: str, dc_id: int = 0) -> str:
     """
-    Pre-warm the MTProto media session for the given DC (default: same DC as the user account).
+    Pre-warm the MTProto media sessions for key datacenters (target DC, home DC, and DC4/DC5).
     Call this at app startup (after login, before first stream) to eliminate the 8-24 second
     cold-start delay that occurs when the first stream request has to authenticate a fresh session.
 
@@ -2485,20 +2506,32 @@ def prewarm_media_session(api_id: int, api_hash: str, session_str: str, dc_id: i
     """
     async def _async_prewarm():
         client = await _get_connected_stream_client(int(api_id), str(api_hash), str(session_str))
-        target_dc = int(dc_id) if int(dc_id) > 0 else await client.storage.dc_id()
-        _log_stream(f"prewarm_media_session: pre-warming DC{target_dc} MTProto session...")
-        await _get_media_session(client, target_dc, 0)
-        if IS_32BIT:
-            for s_idx in range(1, _POOL_SIZE_32BIT):
-                try:
-                    await _get_media_session(client, target_dc, s_idx)
-                except Exception as e:
-                    _log_stream(f"prewarm_media_session: notice warming s{s_idx}: {e}", "W")
-        _log_stream(f"prewarm_media_session: DC{target_dc} sessions ready ✓")
+        home_dc = await client.storage.dc_id()
+        target_dc = int(dc_id) if int(dc_id) > 0 else home_dc
+
+        # Pre-warm target DC and popular media DCs (DC4 and DC5 where most videos reside)
+        dcs_to_warm = [target_dc]
+        for dc in (4, 5):
+            if dc not in dcs_to_warm:
+                dcs_to_warm.append(dc)
+
+        for dc in dcs_to_warm:
+            try:
+                _log_stream(f"prewarm_media_session: pre-warming DC{dc} MTProto session...")
+                await _get_media_session(client, dc, 0)
+                if IS_32BIT:
+                    for s_idx in range(1, _POOL_SIZE_32BIT):
+                        try:
+                            await _get_media_session(client, dc, s_idx)
+                        except Exception as e:
+                            _log_stream(f"prewarm_media_session: notice warming DC{dc} s{s_idx}: {e}", "W")
+                _log_stream(f"prewarm_media_session: DC{dc} sessions ready ✓")
+            except Exception as e:
+                _log_stream(f"prewarm_media_session: DC{dc} warming notice: {e}", "W")
         return target_dc
 
     try:
-        warmed_dc = run_async(_async_prewarm(), timeout=30)
+        warmed_dc = run_async(_async_prewarm(), timeout=35)
         return json.dumps({"status": "ok", "dc_id": warmed_dc})
     except Exception as e:
         _log_stream(f"prewarm_media_session: warning — {e}", "W")
