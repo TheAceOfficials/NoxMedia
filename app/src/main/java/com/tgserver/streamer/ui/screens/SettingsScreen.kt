@@ -37,6 +37,8 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -122,10 +124,13 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
     var aiProviderInput by remember(config.aiProvider) { mutableStateOf(config.aiProvider) }
     var geminiKeyInput by remember(config.geminiApiKey) { mutableStateOf(config.geminiApiKey) }
     var openRouterKeyInput by remember(config.openRouterApiKey) { mutableStateOf(config.openRouterApiKey) }
+    var isGeminiKeyVisible by remember { mutableStateOf(false) }
+    var isOpenRouterKeyVisible by remember { mutableStateOf(false) }
     var isVerifyingAiKey by remember { mutableStateOf(false) }
     var aiKeyError by remember { mutableStateOf<String?>(null) }
     var aiKeySuccess by remember { mutableStateOf<String?>(null) }
     var expandedWhatsNew by remember { mutableStateOf(false) }
+    var showBetaInfo by remember { mutableStateOf(false) }
     var showArtworkInfo by remember { mutableStateOf(false) }
     var showServerEngineInfo by remember { mutableStateOf(false) }
     var showRemoteAccessInfo by remember { mutableStateOf(false) }
@@ -498,12 +503,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                                     fontFamily = FontFamily.Monospace,
                                     letterSpacing = 0.5.sp
                                 )
-                                NothingDotBadge(
-                                    text = "VERIFIED ✓",
-                                    dotColor = StatusGreen,
-                                    textColor = StatusGreen,
-                                    backgroundColor = Color(0x1F34C759)
-                                )
+                                AppleVerifiedBadge()
                             }
 
                             NothingPillButton(
@@ -588,12 +588,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                                     fontFamily = FontFamily.Monospace,
                                     letterSpacing = 0.5.sp
                                 )
-                                NothingDotBadge(
-                                    text = "VERIFIED ✓",
-                                    dotColor = StatusGreen,
-                                    textColor = StatusGreen,
-                                    backgroundColor = Color(0x1F34C759)
-                                )
+                                AppleVerifiedBadge()
                             }
 
                             NothingPillButton(
@@ -1000,10 +995,24 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                             aiKeySuccess = null
                         },
                         label = "GEMINI API KEY",
-                        badgeText = "FREE TIER",
                         placeholder = "Paste Gemini API Key from Google AI Studio",
                         isMonospace = true,
                         singleLine = true,
+                        visualTransformation = if (isGeminiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        trailingIcon = {
+                            IconButton(
+                                onClick = { isGeminiKeyVisible = !isGeminiKeyVisible },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isGeminiKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = if (isGeminiKeyVisible) "Hide API key" else "Show API key",
+                                    tint = Color(0xFFA0A3B0),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        },
                         isError = aiKeyError != null,
                         errorMessage = aiKeyError
                     )
@@ -1023,10 +1032,24 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                             aiKeySuccess = null
                         },
                         label = "OPENROUTER API KEY",
-                        badgeText = "MULTI MODEL",
                         placeholder = "Paste OpenRouter API Key",
                         isMonospace = true,
                         singleLine = true,
+                        visualTransformation = if (isOpenRouterKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        trailingIcon = {
+                            IconButton(
+                                onClick = { isOpenRouterKeyVisible = !isOpenRouterKeyVisible },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isOpenRouterKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = if (isOpenRouterKeyVisible) "Hide API key" else "Show API key",
+                                    tint = Color(0xFFA0A3B0),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        },
                         isError = aiKeyError != null,
                         errorMessage = aiKeyError
                     )
@@ -2590,37 +2613,76 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 Spacer(modifier = Modifier.height(10.dp))
 
                 // Beta Channel Enrollment Toggle
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                        Text(
-                            text = "Early Beta Access",
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Developer recommends the stable release for everyday use. Beta versions may contain unexpected bugs, crashes, or UI glitches.",
-                            color = TextSecondary,
-                            fontSize = 10.5.sp,
-                            lineHeight = 14.sp
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "Early Beta Access",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(18.dp)
+                                    .clip(CircleShape)
+                                    .background(if (showBetaInfo) Color(0x33A855F7) else Color(0x1AFFFFFF))
+                                    .clickable { showBetaInfo = !showBetaInfo },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Info,
+                                    contentDescription = "Beta channel info",
+                                    tint = if (showBetaInfo) Color(0xFFA855F7) else Color(0xFF9CA3AF),
+                                    modifier = Modifier.size(12.dp)
+                                )
+                            }
+                        }
+
+                        Switch(
+                            checked = config.receiveBetaUpdates,
+                            onCheckedChange = { viewModel.updateReceiveBetaUpdates(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = Color(0xFFA855F7),
+                                uncheckedThumbColor = Color.Gray,
+                                uncheckedTrackColor = Color(0xFF1E1F27)
+                            )
                         )
                     }
 
-                    Switch(
-                        checked = config.receiveBetaUpdates,
-                        onCheckedChange = { viewModel.updateReceiveBetaUpdates(it) },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = Color(0xFFA855F7),
-                            uncheckedThumbColor = Color.Gray,
-                            uncheckedTrackColor = Color(0xFF1E1F27)
-                        )
-                    )
+                    AnimatedVisibility(
+                        visible = showBetaInfo,
+                        enter = fadeIn(tween(150)) + expandVertically(),
+                        exit = fadeOut(tween(120)) + shrinkVertically()
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF13141B))
+                                .border(0.5.dp, Color(0xFF242735), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 10.dp, vertical = 8.dp)
+                        ) {
+                            Text(
+                                text = "Developer recommends the stable release for everyday use. Beta versions may contain unexpected bugs, crashes, or UI glitches.",
+                                color = Color(0xFF9CA3AF),
+                                fontSize = 10.5.sp,
+                                lineHeight = 14.5.sp
+                            )
+                        }
+                    }
                 }
 
                 // ==================== WHAT'S NEW SECTION ====================
@@ -3373,6 +3435,39 @@ private fun AccountDetailRow(
                 }
             }
         }
+    }
+}
+
+/**
+ * Minimal Apple-style verified badge with micro checkmark and translucent mint pill.
+ */
+@Composable
+private fun AppleVerifiedBadge(
+    modifier: Modifier = Modifier,
+    text: String = "Verified"
+) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(Color(0x1834C759))
+            .border(0.5.dp, Color(0x3834C759), RoundedCornerShape(6.dp))
+            .padding(horizontal = 7.dp, vertical = 2.5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(3.5.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Default.Check,
+            contentDescription = null,
+            tint = Color(0xFF34C759),
+            modifier = Modifier.size(11.dp)
+        )
+        Text(
+            text = text,
+            color = Color(0xFF34C759),
+            fontSize = 10.5.sp,
+            fontWeight = FontWeight.Medium,
+            letterSpacing = 0.1.sp
+        )
     }
 }
 
