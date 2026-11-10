@@ -55,18 +55,40 @@ class LocalHttpServer(
     private val serverScope = CoroutineScope(Dispatchers.IO)
 
     @Volatile private var cachedMediaGroups: List<com.tgserver.streamer.data.model.MediaGroup> = emptyList()
-    @Volatile private var cachedMediaTimestamp: Long = 0L
     @Volatile private var cachedMediaSize: Int = -1
 
     private fun getMediaGroupsCached(): List<com.tgserver.streamer.data.model.MediaGroup> {
         val all = tgClient.getAllMedia()
-        val now = System.currentTimeMillis()
-        if (now - cachedMediaTimestamp < 10000L && cachedMediaSize == all.size && cachedMediaGroups.isNotEmpty()) {
+        if (all.isEmpty()) return emptyList()
+
+        if (cachedMediaSize == all.size && cachedMediaGroups.isNotEmpty()) {
             return cachedMediaGroups
         }
+
+        // Fast load from precomputed on-disk cache if memory cache is empty (~10-20ms instead of 5000ms)
+        if (cachedMediaGroups.isEmpty()) {
+            try {
+                val groupCacheFile = java.io.File(context.filesDir, "media_groups_cache.json")
+                if (groupCacheFile.exists()) {
+                    val json = groupCacheFile.readText()
+                    if (json.isNotBlank()) {
+                        val type = object : com.google.gson.reflect.TypeToken<List<com.tgserver.streamer.data.model.MediaGroup>>() {}.type
+                        val list: List<com.tgserver.streamer.data.model.MediaGroup>? = gson.fromJson(json, type)
+                        val valid = list?.filterNotNull()?.filter { it.key != null && it.items != null } ?: emptyList()
+                        if (valid.isNotEmpty()) {
+                            cachedMediaGroups = valid
+                            cachedMediaSize = all.size
+                            return valid
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to load precomputed media_groups_cache.json: ${e.message}")
+            }
+        }
+
         val groups = all.toMediaGroups()
         cachedMediaGroups = groups
-        cachedMediaTimestamp = now
         cachedMediaSize = all.size
         return groups
     }
@@ -242,8 +264,14 @@ class LocalHttpServer(
             )
         )
 
+        val allGroupsForManifest = getMediaGroupsCached()
+
         // Inject dynamic custom catalogs
         customCatalogs.forEach { cat ->
+            val matched = if (allGroupsForManifest.isNotEmpty()) catalogRepo.filterMediaForCatalog(cat, allGroupsForManifest) else emptyList()
+            val hasMovies = matched.isEmpty() || matched.any { it.type == "movie" }
+            val hasSeries = matched.isEmpty() || matched.any { it.type == "series" || it.type == "anime" }
+
             when (cat.filter.mediaType) {
                 "movie" -> {
                     catalogEntries.add(
@@ -268,24 +296,28 @@ class LocalHttpServer(
                     )
                 }
                 else -> { // "all"
-                    catalogEntries.add(
-                        mapOf(
-                            "type" to "movie",
-                            "id" to "cat_${cat.id}",
-                            "name" to cat.name,
-                            "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
-                            "extraSupported" to listOf("search", "skip")
+                    if (hasMovies) {
+                        catalogEntries.add(
+                            mapOf(
+                                "type" to "movie",
+                                "id" to "cat_${cat.id}",
+                                "name" to if (hasSeries) "${cat.name} (Movies)" else cat.name,
+                                "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
+                                "extraSupported" to listOf("search", "skip")
+                            )
                         )
-                    )
-                    catalogEntries.add(
-                        mapOf(
-                            "type" to "series",
-                            "id" to "cat_${cat.id}",
-                            "name" to cat.name,
-                            "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
-                            "extraSupported" to listOf("search", "skip")
+                    }
+                    if (hasSeries) {
+                        catalogEntries.add(
+                            mapOf(
+                                "type" to "series",
+                                "id" to "cat_${cat.id}",
+                                "name" to if (hasMovies) "${cat.name} (Series)" else cat.name,
+                                "extra" to listOf(mapOf("name" to "search", "isRequired" to false), mapOf("name" to "skip")),
+                                "extraSupported" to listOf("search", "skip")
+                            )
                         )
-                    )
+                    }
                 }
             }
         }
@@ -355,39 +387,35 @@ class LocalHttpServer(
                 val isMovieReq = uri.contains("/movie/") || uri.contains("/movie:") || uri.contains("movie")
                 val isSeriesReq = uri.contains("/series/") || uri.contains("/series:") || uri.contains("series")
                 if (isMovieReq && !isSeriesReq) {
-                    filtered = filtered.filter { it.type == "movie" }
+                    val moviesOnly = filtered.filter { it.type == "movie" }
+                    // Fallback to full catalog if user has no movie titles, avoiding empty screen
+                    filtered = if (moviesOnly.isNotEmpty() || catalog.filter.mediaType == "movie") moviesOnly else filtered
                 } else if (isSeriesReq && !isMovieReq) {
-                    filtered = filtered.filter { it.type == "series" || it.type == "anime" }
+                    val seriesOnly = filtered.filter { it.type == "series" || it.type == "anime" }
+                    filtered = if (seriesOnly.isNotEmpty() || catalog.filter.mediaType == "series") seriesOnly else filtered
                 }
 
                 val pagedGroups = if (skip > 0) filtered.drop(skip).take(100) else filtered.take(100)
+                val reqStremioType = if (isMovieReq && !isSeriesReq) "movie" else if (isSeriesReq && !isMovieReq) "series" else null
 
                 val metasArray = pagedGroups.map { group ->
                     val firstItem = group.items.firstOrNull()
-                    val poster = group.posterUrl
-                        ?: firstItem?.posterUrl
+                    val poster = group.posterUrl?.takeIf { it.isNotBlank() }
+                        ?: group.items.firstOrNull { !it.posterUrl.isNullOrBlank() }?.posterUrl
+                        ?: firstItem?.posterUrl?.takeIf { it.isNotBlank() }
                         ?: posterService.getCachedPoster(group.title)
+                        ?: posterService.resolvePoster(
+                            group.title,
+                            config.customPosterUrl,
+                            config.customPosterApiKey,
+                            config.tmdbApiKey,
+                            config.tvdbApiKey
+                        )?.also { resolved ->
+                            firstItem?.posterUrl = resolved
+                        }
                         ?: "https://images.metahub.space/poster/medium/placeholder/img"
 
-                    // Asynchronously resolve poster if missing without blocking HTTP thread
-                    if (group.posterUrl.isNullOrBlank() && firstItem?.posterUrl.isNullOrBlank()) {
-                        serverScope.launch {
-                            try {
-                                val resolved = posterService.resolvePoster(
-                                    group.title,
-                                    config.customPosterUrl,
-                                    config.customPosterApiKey,
-                                    config.tmdbApiKey,
-                                    config.tvdbApiKey
-                                )
-                                if (!resolved.isNullOrBlank()) {
-                                    firstItem?.posterUrl = resolved
-                                }
-                            } catch (_: Exception) {}
-                        }
-                    }
-
-                    val stremioType = if (group.type == "series" || group.type == "anime") "series" else "movie"
+                    val stremioType = reqStremioType ?: (if (group.type == "series" || group.type == "anime") "series" else "movie")
                     val metaId = when {
                         !group.imdbId.isNullOrBlank() -> group.imdbId
                         firstItem != null && firstItem.id.isNotBlank() -> firstItem.id
