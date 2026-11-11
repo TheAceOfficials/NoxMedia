@@ -39,6 +39,7 @@ class JellyfinBridge(
     private val localIpProvider: () -> String
 ) {
     private val gson = Gson()
+    private val rootHexPathRegex = Regex("/[0-9a-fA-F]{32}")
 
     // Canonical 32-character hexadecimal GUIDs (standard Jellyfin format "N")
     val serverId = "48b6c8d76c67429bbad58923a1a9e871"
@@ -229,7 +230,7 @@ class JellyfinBridge(
         return try {
             when {
                 // Root landing / server handshake / sign-in picker
-                lowerUri == "/" || lowerUri == "" || lowerUri == "/login" || lowerUri.matches(Regex("/[0-9a-fA-F]{32}")) -> {
+                lowerUri == "/" || lowerUri == "" || lowerUri == "/login" || lowerUri.matches(rootHexPathRegex) -> {
                     handleSystemInfo(localIp, config.port, isPublic = true)
                 }
 
