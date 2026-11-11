@@ -99,7 +99,11 @@ class StreamerForegroundService : Service() {
             receiveBetaUpdates = prefs.getBoolean("receive_beta_updates", false),
             animeMetadataPreference = prefs.getString("anime_metadata_preference", "seasonal") ?: "seasonal",
             backupDestination = prefs.getString("backup_destination", "") ?: "",
-            cloudSyncLibrary = prefs.getBoolean("cloud_sync_library", true)
+            cloudSyncLibrary = prefs.getBoolean("cloud_sync_library", true),
+            aiProvider = prefs.getString("ai_provider", "gemini") ?: "gemini",
+            geminiApiKey = prefs.getString("gemini_api_key", "") ?: "",
+            openRouterApiKey = prefs.getString("openrouter_api_key", "") ?: "",
+            jellyfinBridgeEnabled = prefs.getBoolean("jellyfin_bridge_enabled", false)
         )
     }
 
