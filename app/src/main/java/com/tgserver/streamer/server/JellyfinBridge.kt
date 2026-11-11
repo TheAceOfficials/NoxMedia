@@ -938,8 +938,8 @@ class JellyfinBridge(
                     val repo = catalogRepoProvider?.invoke()
                     val allGroups = allMedia.toMediaGroups()
                     val filteredGroups = repo?.filterMediaForCatalog(cat, allGroups) ?: allGroups
-                    filteredGroups.map { group ->
-                        val item = group.primaryMediaItem
+                    filteredGroups.mapNotNull { group ->
+                        val item = group.items.firstOrNull() ?: return@mapNotNull null
                         toJellyfinItem(item, localIp, port, isSeriesOverview = (isSeries(item) || isAnime(item)))
                     }
                 } else {
@@ -1201,7 +1201,7 @@ class JellyfinBridge(
             all.filter {
                 isMovie(it) && (it.id == item.id ||
                     (!item.imdbId.isNullOrBlank() && it.imdbId == item.imdbId) ||
-                    (!item.tmdbId.isNullOrBlank() && it.tmdbId == item.tmdbId) ||
+                    (item.tmdbId != null && it.tmdbId == item.tmdbId) ||
                     (it.title.equals(item.title, ignoreCase = true) && it.year == item.year))
             }
         } else {
@@ -1226,11 +1226,8 @@ class JellyfinBridge(
             val (vStream, aStream) = resolveMediaStreams(ver)
 
             val qualityLabel = buildString {
-                if (ver.quality.isNotBlank() && ver.quality != "Unknown") append(ver.quality)
-                if (ver.resolution?.isNotBlank() == true) {
-                    if (isNotEmpty()) append(" • ")
-                    append(ver.resolution)
-                }
+                val q = if (ver.qualityBadge.isNotBlank() && ver.qualityBadge != "Unknown") ver.qualityBadge else ver.quality
+                if (q.isNotBlank() && q != "Unknown") append(q)
                 val sz = formatBytes(ver.sizeBytes)
                 if (sz.isNotBlank()) {
                     if (isNotEmpty()) append(" ($sz)") else append(sz)
