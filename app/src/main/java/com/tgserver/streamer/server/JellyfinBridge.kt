@@ -5,8 +5,6 @@ import com.google.gson.Gson
 import com.google.gson.JsonParser
 import com.tgserver.streamer.data.model.MediaItem
 import com.tgserver.streamer.data.model.ServerConfig
-import com.tgserver.streamer.data.model.toMediaGroups
-import com.tgserver.streamer.data.repository.CatalogRepository
 import com.tgserver.streamer.posters.SpatialPosterService
 import com.tgserver.streamer.telegram.TelegramClientManager
 import fi.iki.elonen.NanoHTTPD
@@ -38,8 +36,7 @@ class JellyfinBridge(
     private val tgClient: TelegramClientManager,
     private val posterService: SpatialPosterService,
     private val configProvider: () -> ServerConfig,
-    private val localIpProvider: () -> String,
-    private val catalogRepoProvider: (() -> CatalogRepository)? = null
+    private val localIpProvider: () -> String
 ) {
     private val gson = Gson()
 
@@ -108,16 +105,6 @@ class JellyfinBridge(
         if (clean == libMoviesHex) return "lib_movies"
         if (clean == libSeriesHex) return "lib_series"
         if (clean == libAnimeHex) return "lib_anime"
-
-        // Support custom and AI catalogs
-        val customCats = catalogRepoProvider?.invoke()?.getCatalogs() ?: emptyList()
-        for (cat in customCats) {
-            val raw = "cat_${cat.id}"
-            if (toHexId(raw) == clean) {
-                hexToIdMap[clean] = raw
-                return raw
-            }
-        }
 
         if (clean.length == 32 && clean.all { it in '0'..'9' || it in 'a'..'f' }) {
             val all = tgClient.getAllMedia()
@@ -189,7 +176,6 @@ class JellyfinBridge(
      * Identifies whether an incoming HTTP request URI belongs to the Jellyfin/Emby namespace.
      */
     fun isJellyfinUri(uri: String): Boolean {
-        if (uri.startsWith("/jellyfin", ignoreCase = true)) return true
         val u = uri.removePrefix("/emby").trimEnd('/').lowercase()
         return u.startsWith("/system") ||
                 u.startsWith("/users") ||
@@ -223,15 +209,7 @@ class JellyfinBridge(
         method: Method,
         headers: Map<String, String>
     ): Response {
-        var cleanUri = uri
-        if (cleanUri.startsWith("/jellyfin", ignoreCase = true)) {
-            cleanUri = cleanUri.substring("/jellyfin".length)
-        }
-        if (cleanUri.startsWith("/emby", ignoreCase = true)) {
-            cleanUri = cleanUri.substring("/emby".length)
-        }
-        cleanUri = cleanUri.trimEnd('/')
-        if (cleanUri.isBlank()) cleanUri = "/"
+        val cleanUri = uri.removePrefix("/emby").trimEnd('/')
         val lowerUri = cleanUri.lowercase()
         val params = session.parameters.mapValues { it.value.firstOrNull() ?: "" }
         val localIp = localIpProvider()
@@ -241,11 +219,6 @@ class JellyfinBridge(
 
         return try {
             when {
-                // Root landing / server handshake / sign-in picker
-                lowerUri == "/" || lowerUri == "" || lowerUri == "/login" || lowerUri.matches(Regex("/[0-9a-fA-F]{32}")) -> {
-                    handleSystemInfo(localIp, config.port, isPublic = true)
-                }
-
                 // ================= 1. Handshake & System Info =================
                 lowerUri == "/system/info/public" -> {
                     handleSystemInfo(localIp, config.port, isPublic = true)
@@ -682,7 +655,7 @@ class JellyfinBridge(
     }
 
     private fun handleVirtualFolders(): Response {
-        val folders = mutableListOf(
+        val folders = listOf(
             mapOf(
                 "Name" to "Movies",
                 "Locations" to listOf("/media/movies"),
@@ -711,29 +684,6 @@ class JellyfinBridge(
                 "RefreshStatus" to "Idle"
             )
         )
-
-        // Inject active Custom & AI-Powered Catalogs as Jellyfin Virtual Folders
-        val customCats = catalogRepoProvider?.invoke()?.getCatalogs()?.filter { !it.isHidden } ?: emptyList()
-        for (cat in customCats) {
-            val hex = toHexId("cat_${cat.id}")
-            val colType = when (cat.filter.mediaType.lowercase()) {
-                "movie" -> "movies"
-                "series", "anime" -> "tvshows"
-                else -> "mixed"
-            }
-            folders.add(
-                mapOf(
-                    "Name" to cat.name,
-                    "Locations" to listOf("/media/${cat.id}"),
-                    "CollectionType" to colType,
-                    "ItemId" to hex,
-                    "Guid" to hex,
-                    "RefreshProgress" to 0,
-                    "RefreshStatus" to "Idle"
-                )
-            )
-        }
-
         return jsonResponse(folders)
     }
 
@@ -743,7 +693,7 @@ class JellyfinBridge(
         val seriesCount = all.filter { isSeries(it) }.distinctBy { it.title.lowercase().trim() }.size
         val animeCount = all.filter { isAnime(it) }.distinctBy { it.title.lowercase().trim() }.size
 
-        val views = mutableListOf(
+        val views = listOf(
             mapOf(
                 "Name" to "Movies",
                 "ServerId" to serverId,
@@ -802,49 +752,6 @@ class JellyfinBridge(
                 "BackdropImageTags" to emptyList<String>()
             )
         )
-
-        // Inject active Custom & AI-Powered Catalogs as Jellyfin UserViews
-        val customCats = catalogRepoProvider?.invoke()?.getCatalogs()?.filter { !it.isHidden } ?: emptyList()
-        if (customCats.isNotEmpty()) {
-            val allGroups = all.toMediaGroups()
-            val repo = catalogRepoProvider?.invoke()
-            for (cat in customCats) {
-                val hex = toHexId("cat_${cat.id}")
-                val colType = when (cat.filter.mediaType.lowercase()) {
-                    "movie" -> "movies"
-                    "series", "anime" -> "tvshows"
-                    else -> "mixed"
-                }
-                val count = if (repo != null && allGroups.isNotEmpty()) {
-                    repo.filterMediaForCatalog(cat, allGroups).size
-                } else {
-                    0
-                }
-
-                views.add(
-                    mapOf(
-                        "Name" to cat.name,
-                        "ServerId" to serverId,
-                        "Id" to hex,
-                        "CollectionType" to colType,
-                        "Type" to "CollectionFolder",
-                        "IsFolder" to true,
-                        "CanDelete" to false,
-                        "CanDownload" to false,
-                        "UserData" to mapOf(
-                            "UnplayedItemCount" to count,
-                            "PlaybackPositionTicks" to 0L,
-                            "PlayCount" to 0,
-                            "IsFavorite" to false,
-                            "Played" to false
-                        ),
-                        "ImageTags" to mapOf("Primary" to hex),
-                        "BackdropImageTags" to emptyList<String>()
-                    )
-                )
-            }
-        }
-
         return jsonResponse(mapOf("Items" to views, "TotalRecordCount" to views.size, "StartIndex" to 0))
     }
 
@@ -928,23 +835,6 @@ class JellyfinBridge(
                 allMedia.filter { isAnime(it) }
                     .distinctBy { it.title.lowercase().trim() }
                     .map { toJellyfinItem(it, localIp, port, isSeriesOverview = (it.season != null || it.episode != null || it.type == "series" || it.type == "anime")) }
-            }
-
-            // 4. Custom & AI-Powered Catalogs Folder / View
-            rawParentId.startsWith("cat_") -> {
-                val catId = rawParentId.removePrefix("cat_")
-                val cat = catalogRepoProvider?.invoke()?.getCatalogs()?.firstOrNull { it.id == catId }
-                if (cat != null) {
-                    val repo = catalogRepoProvider?.invoke()
-                    val allGroups = allMedia.toMediaGroups()
-                    val filteredGroups = repo?.filterMediaForCatalog(cat, allGroups) ?: allGroups
-                    filteredGroups.mapNotNull { group ->
-                        val item = group.items.firstOrNull() ?: return@mapNotNull null
-                        toJellyfinItem(item, localIp, port, isSeriesOverview = (isSeries(item) || isAnime(item)))
-                    }
-                } else {
-                    emptyList()
-                }
             }
 
             // 4. Inside a Series (e.g. parentId is series_loki) -> Return Seasons (unless episodes requested)
@@ -1184,83 +1074,41 @@ class JellyfinBridge(
         )
     }
 
-    private fun formatBytes(bytes: Long): String {
-        if (bytes <= 0) return ""
-        val gb = bytes.toDouble() / (1024.0 * 1024.0 * 1024.0)
-        return if (gb >= 1.0) {
-            String.format(Locale.US, "%.1f GB", gb)
-        } else {
-            val mb = bytes.toDouble() / (1024.0 * 1024.0)
-            String.format(Locale.US, "%.0f MB", mb)
-        }
-    }
-
-    private fun buildMediaSourcesForItem(item: MediaItem, localIp: String, port: Int): List<Map<String, Any?>> {
-        val all = tgClient.getAllMedia().filter { !it.isHidden }
-        val matching: List<MediaItem> = if (isMovie(item)) {
-            all.filter {
-                isMovie(it) && (it.id == item.id ||
-                    (!item.imdbId.isNullOrBlank() && it.imdbId == item.imdbId) ||
-                    (item.tmdbId != null && it.tmdbId == item.tmdbId) ||
-                    (it.title.equals(item.title, ignoreCase = true) && it.year == item.year))
-            }
-        } else {
-            all.filter {
-                (isSeries(it) || isAnime(it)) && (it.id == item.id ||
-                    (it.title.equals(item.title, ignoreCase = true) && (it.season ?: 1) == (item.season ?: 1) && (it.episode ?: 1) == (item.episode ?: 1)))
-            }
-        }
-
-        val versions = if (matching.isNotEmpty()) matching.distinctBy { it.id } else listOf(item)
-        return versions.map { ver ->
-            val hexId = toHexId(ver.id)
-            val rawFileName = if (ver.fileName.isNotBlank()) ver.fileName else "${ver.title}.mkv"
-            val safeFileName = try {
-                URLEncoder.encode(rawFileName, "UTF-8").replace("+", "%20")
-            } catch (_: Exception) {
-                "video.mkv"
-            }
-            val streamUrl = "http://$localIp:$port/stream/video/${ver.channelId}/${ver.id}/$safeFileName"
-            val durationTicks = if (ver.durationSeconds > 0) ver.durationSeconds.toLong() * 10_000_000L else 3600L * 10_000_000L
-            val ext = rawFileName.substringAfterLast(".", "mkv").lowercase()
-            val (vStream, aStream) = resolveMediaStreams(ver)
-
-            val qualityLabel = buildString {
-                val q = if (ver.qualityBadge.isNotBlank() && ver.qualityBadge != "Unknown") ver.qualityBadge else ver.quality
-                if (q.isNotBlank() && q != "Unknown") append(q)
-                val sz = formatBytes(ver.sizeBytes)
-                if (sz.isNotBlank()) {
-                    if (isNotEmpty()) append(" ($sz)") else append(sz)
-                }
-                if (isEmpty()) append(ver.title)
-            }
-
-            mapOf(
-                "Id" to hexId,
-                "Name" to qualityLabel,
-                "Path" to streamUrl,
-                "Protocol" to "Http",
-                "Container" to ext,
-                "Size" to ver.sizeBytes,
-                "RunTimeTicks" to durationTicks,
-                "SupportsDirectPlay" to true,
-                "SupportsDirectStream" to true,
-                "SupportsTranscoding" to false,
-                "DirectStreamUrl" to streamUrl,
-                "MediaStreams" to listOf(vStream, aStream)
-            )
-        }
-    }
-
     private fun handlePlaybackInfo(itemId: String, localIp: String, port: Int): Response {
         val item = findMedia(itemId)
         if (item == null) {
             return jsonResponse(mapOf("MediaSources" to emptyList<Any>()))
         }
 
-        val mediaSources = buildMediaSourcesForItem(item, localIp, port)
+        val hexId = toHexId(item.id)
+        val rawFileName = if (item.fileName.isNotBlank()) item.fileName else "${item.title}.mkv"
+        val safeFileName = try {
+            URLEncoder.encode(rawFileName, "UTF-8").replace("+", "%20")
+        } catch (_: Exception) {
+            "video.mkv"
+        }
+        val streamUrl = "http://$localIp:$port/stream/video/${item.channelId}/${item.id}/$safeFileName"
+        val durationTicks = if (item.durationSeconds > 0) item.durationSeconds.toLong() * 10_000_000L else 3600L * 10_000_000L
+        val ext = rawFileName.substringAfterLast(".", "mkv").lowercase()
+
+        val (videoStream, audioStream) = resolveMediaStreams(item)
+        val mediaSource = mapOf(
+            "Id" to hexId,
+            "Name" to item.title,
+            "Path" to streamUrl,
+            "Protocol" to "Http",
+            "Container" to ext,
+            "Size" to item.sizeBytes,
+            "RunTimeTicks" to durationTicks,
+            "SupportsDirectPlay" to true,
+            "SupportsDirectStream" to true,
+            "SupportsTranscoding" to false,
+            "DirectStreamUrl" to streamUrl,
+            "MediaStreams" to listOf(videoStream, audioStream)
+        )
+
         val result = mapOf(
-            "MediaSources" to mediaSources,
+            "MediaSources" to listOf(mediaSource),
             "PlaySessionId" to toHexId("session_${item.id}")
         )
         return jsonResponse(result)
@@ -1627,9 +1475,24 @@ class JellyfinBridge(
         }
 
         if (!isSeriesOverview) {
-            val mediaSources = buildMediaSourcesForItem(item, localIp, port)
+            val (videoStream, audioStream) = resolveMediaStreams(item)
             map["Path"] = streamUrl
-            map["MediaSources"] = mediaSources
+            map["MediaSources"] = listOf(
+                mapOf(
+                    "Id" to hexId,
+                    "Name" to item.title,
+                    "Path" to streamUrl,
+                    "Protocol" to "Http",
+                    "Container" to ext,
+                    "Size" to item.sizeBytes,
+                    "RunTimeTicks" to durationTicks,
+                    "SupportsDirectPlay" to true,
+                    "SupportsDirectStream" to true,
+                    "SupportsTranscoding" to false,
+                    "DirectStreamUrl" to streamUrl,
+                    "MediaStreams" to listOf(videoStream, audioStream)
+                )
+            )
         }
 
         return map

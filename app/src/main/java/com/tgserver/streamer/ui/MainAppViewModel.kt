@@ -1323,8 +1323,7 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             cloudSyncLibrary = prefs.getBoolean("cloud_sync_library", true),
             aiProvider = prefs.getString("ai_provider", "gemini") ?: "gemini",
             geminiApiKey = prefs.getString("gemini_api_key", "") ?: "",
-            openRouterApiKey = prefs.getString("openrouter_api_key", "") ?: "",
-            jellyfinBridgeEnabled = prefs.getBoolean("jellyfin_bridge_enabled", false)
+            openRouterApiKey = prefs.getString("openrouter_api_key", "") ?: ""
         )
     }
 
@@ -1358,7 +1357,6 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             putString("ai_provider", cfg.aiProvider)
             putString("gemini_api_key", cfg.geminiApiKey)
             putString("openrouter_api_key", cfg.openRouterApiKey)
-            putBoolean("jellyfin_bridge_enabled", cfg.jellyfinBridgeEnabled)
             apply()
         }
         _config.value = cfg
@@ -1542,13 +1540,6 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
             "✓ Alexa Voice Control disabled"
         }
         Toast.makeText(getApplication(), msg, Toast.LENGTH_LONG).show()
-    }
-
-    fun updateJellyfinBridgeEnabled(enabled: Boolean) {
-        val updated = _config.value.copy(jellyfinBridgeEnabled = enabled)
-        saveStoredConfig(updated)
-        val msg = if (enabled) "✓ Jellyfin & Infuse bridge enabled" else "✓ Jellyfin bridge disabled"
-        Toast.makeText(getApplication(), msg, Toast.LENGTH_SHORT).show()
     }
 
     fun updateReceiveBetaUpdates(enabled: Boolean) {
