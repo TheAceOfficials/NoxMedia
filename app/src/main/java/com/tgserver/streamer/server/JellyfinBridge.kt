@@ -716,7 +716,7 @@ class JellyfinBridge(
         val customCats = catalogRepoProvider?.invoke()?.getCatalogs()?.filter { !it.isHidden } ?: emptyList()
         for (cat in customCats) {
             val hex = toHexId("cat_${cat.id}")
-            val colType = when (cat.type.lowercase()) {
+            val colType = when (cat.filter.mediaType.lowercase()) {
                 "movie" -> "movies"
                 "series", "anime" -> "tvshows"
                 else -> "mixed"
@@ -810,7 +810,7 @@ class JellyfinBridge(
             val repo = catalogRepoProvider?.invoke()
             for (cat in customCats) {
                 val hex = toHexId("cat_${cat.id}")
-                val colType = when (cat.type.lowercase()) {
+                val colType = when (cat.filter.mediaType.lowercase()) {
                     "movie" -> "movies"
                     "series", "anime" -> "tvshows"
                     else -> "mixed"
