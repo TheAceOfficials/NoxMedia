@@ -19,6 +19,7 @@ val AccentApple = Color(0xFFFFFFFF)                 // Crisp Pure White
 val AccentSilver = Color(0xFFE4E4E7)                // Liquid Silver
 val AccentYellow = Color(0xFFFFD600)                // Tactile Yellow Accent (Nothing style)
 val AccentBlue = Color(0xFF0A84FF)
+val AccentPurple = Color(0xFFA855F7)
 val StatusGreen = Color(0xFF34C759)
 val StatusAmber = Color(0xFFFF9F0A)
 val StatusRed = Color(0xFFFF453A)

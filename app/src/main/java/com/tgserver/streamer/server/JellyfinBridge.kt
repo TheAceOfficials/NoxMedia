@@ -1124,10 +1124,10 @@ class JellyfinBridge(
                 if (q.isNotBlank() && q != "Unknown") append(q)
                 val sz = ver.formattedSize
                 if (sz.isNotBlank() && sz != "0 MB") {
-                    if (isNotEmpty()) append(" • ")
+                    if (length > 0) append(" • ")
                     append(sz)
                 }
-                if (isEmpty()) append(ver.title)
+                if (length == 0) append(ver.title)
             }
 
             mapOf(
