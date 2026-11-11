@@ -176,6 +176,7 @@ class JellyfinBridge(
      * Identifies whether an incoming HTTP request URI belongs to the Jellyfin/Emby namespace.
      */
     fun isJellyfinUri(uri: String): Boolean {
+        if (uri.startsWith("/jellyfin", ignoreCase = true)) return true
         val u = uri.removePrefix("/emby").trimEnd('/').lowercase()
         return u.startsWith("/system") ||
                 u.startsWith("/users") ||
@@ -209,7 +210,15 @@ class JellyfinBridge(
         method: Method,
         headers: Map<String, String>
     ): Response {
-        val cleanUri = uri.removePrefix("/emby").trimEnd('/')
+        var cleanUri = uri
+        if (cleanUri.startsWith("/jellyfin", ignoreCase = true)) {
+            cleanUri = cleanUri.substring("/jellyfin".length)
+        }
+        if (cleanUri.startsWith("/emby", ignoreCase = true)) {
+            cleanUri = cleanUri.substring("/emby".length)
+        }
+        cleanUri = cleanUri.trimEnd('/')
+        if (cleanUri.isBlank()) cleanUri = "/"
         val lowerUri = cleanUri.lowercase()
         val params = session.parameters.mapValues { it.value.firstOrNull() ?: "" }
         val localIp = localIpProvider()
@@ -219,6 +228,11 @@ class JellyfinBridge(
 
         return try {
             when {
+                // Root landing / server handshake / sign-in picker
+                lowerUri == "/" || lowerUri == "" || lowerUri == "/login" || lowerUri.matches(Regex("/[0-9a-fA-F]{32}")) -> {
+                    handleSystemInfo(localIp, config.port, isPublic = true)
+                }
+
                 // ================= 1. Handshake & System Info =================
                 lowerUri == "/system/info/public" -> {
                     handleSystemInfo(localIp, config.port, isPublic = true)
@@ -1074,41 +1088,73 @@ class JellyfinBridge(
         )
     }
 
+    private fun buildMediaSourcesForItem(item: MediaItem, localIp: String, port: Int): List<Map<String, Any?>> {
+        val all = tgClient.getAllMedia().filter { !it.isHidden }
+        val matching: List<MediaItem> = if (isMovie(item)) {
+            all.filter {
+                isMovie(it) && (it.id == item.id ||
+                    (!item.imdbId.isNullOrBlank() && it.imdbId == item.imdbId) ||
+                    (item.tmdbId != null && it.tmdbId == item.tmdbId) ||
+                    (it.title.equals(item.title, ignoreCase = true) && it.year == item.year))
+            }
+        } else {
+            all.filter {
+                (isSeries(it) || isAnime(it)) && (it.id == item.id ||
+                    (it.title.equals(item.title, ignoreCase = true) && (it.season ?: 1) == (item.season ?: 1) && (it.episode ?: 1) == (item.episode ?: 1)))
+            }
+        }
+
+        val versions = if (matching.isNotEmpty()) matching.distinctBy { it.id } else listOf(item)
+        return versions.map { ver ->
+            val hexId = toHexId(ver.id)
+            val rawFileName = if (ver.fileName.isNotBlank()) ver.fileName else "${ver.title}.mkv"
+            val safeFileName = try {
+                URLEncoder.encode(rawFileName, "UTF-8").replace("+", "%20")
+            } catch (_: Exception) {
+                "video.mkv"
+            }
+            val streamUrl = "http://$localIp:$port/stream/video/${ver.channelId}/${ver.id}/$safeFileName"
+            val durationTicks = if (ver.durationSeconds > 0) ver.durationSeconds.toLong() * 10_000_000L else 3600L * 10_000_000L
+            val ext = rawFileName.substringAfterLast(".", "mkv").lowercase()
+            val (vStream, aStream) = resolveMediaStreams(ver)
+
+            val qualityLabel = buildString {
+                val q = if (ver.qualityBadge.isNotBlank() && ver.qualityBadge != "Unknown") ver.qualityBadge else ver.quality
+                if (q.isNotBlank() && q != "Unknown") append(q)
+                val sz = ver.formattedSize
+                if (sz.isNotBlank() && sz != "0 MB") {
+                    if (isNotEmpty()) append(" • ")
+                    append(sz)
+                }
+                if (isEmpty()) append(ver.title)
+            }
+
+            mapOf(
+                "Id" to hexId,
+                "Name" to qualityLabel,
+                "Path" to streamUrl,
+                "Protocol" to "Http",
+                "Container" to ext,
+                "Size" to ver.sizeBytes,
+                "RunTimeTicks" to durationTicks,
+                "SupportsDirectPlay" to true,
+                "SupportsDirectStream" to true,
+                "SupportsTranscoding" to false,
+                "DirectStreamUrl" to streamUrl,
+                "MediaStreams" to listOf(vStream, aStream)
+            )
+        }
+    }
+
     private fun handlePlaybackInfo(itemId: String, localIp: String, port: Int): Response {
         val item = findMedia(itemId)
         if (item == null) {
             return jsonResponse(mapOf("MediaSources" to emptyList<Any>()))
         }
 
-        val hexId = toHexId(item.id)
-        val rawFileName = if (item.fileName.isNotBlank()) item.fileName else "${item.title}.mkv"
-        val safeFileName = try {
-            URLEncoder.encode(rawFileName, "UTF-8").replace("+", "%20")
-        } catch (_: Exception) {
-            "video.mkv"
-        }
-        val streamUrl = "http://$localIp:$port/stream/video/${item.channelId}/${item.id}/$safeFileName"
-        val durationTicks = if (item.durationSeconds > 0) item.durationSeconds.toLong() * 10_000_000L else 3600L * 10_000_000L
-        val ext = rawFileName.substringAfterLast(".", "mkv").lowercase()
-
-        val (videoStream, audioStream) = resolveMediaStreams(item)
-        val mediaSource = mapOf(
-            "Id" to hexId,
-            "Name" to item.title,
-            "Path" to streamUrl,
-            "Protocol" to "Http",
-            "Container" to ext,
-            "Size" to item.sizeBytes,
-            "RunTimeTicks" to durationTicks,
-            "SupportsDirectPlay" to true,
-            "SupportsDirectStream" to true,
-            "SupportsTranscoding" to false,
-            "DirectStreamUrl" to streamUrl,
-            "MediaStreams" to listOf(videoStream, audioStream)
-        )
-
+        val mediaSources = buildMediaSourcesForItem(item, localIp, port)
         val result = mapOf(
-            "MediaSources" to listOf(mediaSource),
+            "MediaSources" to mediaSources,
             "PlaySessionId" to toHexId("session_${item.id}")
         )
         return jsonResponse(result)
@@ -1475,24 +1521,9 @@ class JellyfinBridge(
         }
 
         if (!isSeriesOverview) {
-            val (videoStream, audioStream) = resolveMediaStreams(item)
+            val mediaSources = buildMediaSourcesForItem(item, localIp, port)
             map["Path"] = streamUrl
-            map["MediaSources"] = listOf(
-                mapOf(
-                    "Id" to hexId,
-                    "Name" to item.title,
-                    "Path" to streamUrl,
-                    "Protocol" to "Http",
-                    "Container" to ext,
-                    "Size" to item.sizeBytes,
-                    "RunTimeTicks" to durationTicks,
-                    "SupportsDirectPlay" to true,
-                    "SupportsDirectStream" to true,
-                    "SupportsTranscoding" to false,
-                    "DirectStreamUrl" to streamUrl,
-                    "MediaStreams" to listOf(videoStream, audioStream)
-                )
-            )
+            map["MediaSources"] = mediaSources
         }
 
         return map
