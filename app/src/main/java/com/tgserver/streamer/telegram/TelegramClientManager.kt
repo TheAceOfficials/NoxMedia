@@ -3038,22 +3038,30 @@ class TelegramClientManager(private val context: Context) {
                 return
             }
 
-            val isUserSeek = !sameOffset
-            StreamLog.w(TAG, "[$platform][$clientKey] Active stream superseded ($prevStart -> $startByte, age=${now - prevStartTime}ms): instantly terminating previous stream $prevStreamId (isSeek=$isUserSeek)")
-            try {
-                bridge.callAttr("close_stream", prevStreamId, false)
-                StreamLog.i(TAG, "[$platform][$clientKey] Previous stream $prevStreamId terminated successfully (isSeek=$isUserSeek)")
-            } catch (ce: Exception) {
-                StreamLog.w(TAG, "[$platform][$clientKey] Notice closing superseded stream $prevStreamId: ${ce.message}")
-            }
-            state.activePlaybackStreamId = null
+            // Differentiate normal sequential range buffering from a true user seek:
+            // Infuse, AVPlayer, and Safari download in sequential HTTP 206 chunks (e.g. 0-10MB, 10-20MB, etc.).
+            // If the player is reading forward sequentially within 50MB, do NOT kill the previous stream!
+            val isSequentialForward = prevStart != null && startByte >= prevStart && (startByte - prevStart) <= 50_000_000L
+            if (isSequentialForward) {
+                StreamLog.i(TAG, "[$platform][$clientKey] Sequential forward stream read ($prevStart -> $startByte, delta=${startByte - (prevStart ?: 0L)} bytes): keeping stream $prevStreamId alive")
+            } else {
+                val isUserSeek = !sameOffset
+                StreamLog.w(TAG, "[$platform][$clientKey] Active stream superseded by seek ($prevStart -> $startByte, age=${now - prevStartTime}ms): instantly terminating previous stream $prevStreamId (isSeek=$isUserSeek)")
+                try {
+                    bridge.callAttr("close_stream", prevStreamId, false)
+                    StreamLog.i(TAG, "[$platform][$clientKey] Previous stream $prevStreamId terminated successfully (isSeek=$isUserSeek)")
+                } catch (ce: Exception) {
+                    StreamLog.w(TAG, "[$platform][$clientKey] Notice closing superseded stream $prevStreamId: ${ce.message}")
+                }
+                state.activePlaybackStreamId = null
 
-            // Also terminate any active Lavf demux stream on seek / supersession!
-            state.activeLavfFullStreamId?.let { prevLavf ->
-                StreamLog.w(TAG, "[$platform][$clientKey] Playback supersession: terminating background Lavf stream $prevLavf")
-                try { bridge.callAttr("close_stream", prevLavf, false) } catch (_: Exception) {}
+                // Also terminate any active Lavf demux stream on seek / supersession!
+                state.activeLavfFullStreamId?.let { prevLavf ->
+                    StreamLog.w(TAG, "[$platform][$clientKey] Playback supersession: terminating background Lavf stream $prevLavf")
+                    try { bridge.callAttr("close_stream", prevLavf, false) } catch (_: Exception) {}
+                }
+                state.activeLavfFullStreamId = null
             }
-            state.activeLavfFullStreamId = null
         }
     }
 
