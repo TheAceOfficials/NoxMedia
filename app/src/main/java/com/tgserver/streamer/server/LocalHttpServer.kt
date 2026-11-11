@@ -170,9 +170,8 @@ class LocalHttpServer(
                 uri.startsWith("/stream/video/") -> handleVideoStream(session, uri, headers)
 
                 // 3. Jellyfin & Emby API Emulation Endpoints (Infuse, Jellyfin TV, Swiftfin, Findroid)
-                config.jellyfinBridgeEnabled && uri.startsWith("/jellyfin") -> jellyfinBridge.handle(session, uri, method, headers)
-                config.jellyfinBridgeEnabled && jellyfinBridge.isJellyfinUri(normUri) -> jellyfinBridge.handle(session, normUri, method, headers)
-                config.jellyfinBridgeEnabled && jellyfinBridge.isJellyfinUri(uri) -> jellyfinBridge.handle(session, uri, method, headers)
+                jellyfinBridge.isJellyfinUri(normUri) -> jellyfinBridge.handle(session, normUri, method, headers)
+                jellyfinBridge.isJellyfinUri(uri) -> jellyfinBridge.handle(session, uri, method, headers)
 
                 // 4. Management REST APIs for Stitch UI
                 uri == "/api/status" -> handleGetStatus()
@@ -1491,8 +1490,7 @@ class LocalHttpServer(
             addProperty("port", config.port)
             addProperty("localIp", localIp)
             addProperty("manifestUrl", "http://$localIp:${config.port}/manifest.json")
-            addProperty("jellyfinUrl", "http://$localIp:${config.port}/jellyfin")
-            addProperty("jellyfinEnabled", config.jellyfinBridgeEnabled)
+            addProperty("jellyfinUrl", "http://$localIp:${config.port}")
             addProperty("uptimeSeconds", uptimeSeconds)
             addProperty("uptimeFormatted", formatUptime(uptimeSeconds))
             addProperty("memoryUsedMb", usedMem)
