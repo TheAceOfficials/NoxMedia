@@ -38,6 +38,10 @@ class JellyfinBridge(
     private val configProvider: () -> ServerConfig,
     private val localIpProvider: () -> String
 ) {
+    companion object {
+        const val SERVER_VERSION = "10.10.7"
+    }
+
     private val gson = Gson()
     private val rootHexPathRegex = Regex("/[0-9a-fA-F]{32}")
     private val seriesSlugCleanRegex = Regex("[^a-z0-9]")
@@ -474,7 +478,7 @@ class JellyfinBridge(
         val info = mutableMapOf<String, Any?>(
             "LocalAddress" to "http://$localIp:$port",
             "ServerName" to "NoxMedia",
-            "Version" to "10.10.3",
+            "Version" to SERVER_VERSION,
             "ProductName" to "Jellyfin Server",
             "OperatingSystem" to "Linux",
             "Id" to serverId,
@@ -515,7 +519,7 @@ class JellyfinBridge(
             "EnableMetrics" to false,
             "EnableNormalizedItemByNameIds" to true,
             "IsPortAuthorized" to true,
-            "QuickConnectAvailable" to true,
+            "QuickConnectAvailable" to false,
             "EnableCaseSensitiveItemIds" to true,
             "DisableLiveTvChannelUserDataName" to true,
             "MetadataPath" to "/metadata",
@@ -1735,13 +1739,13 @@ class JellyfinBridge(
     private fun jsonResponse(data: Any, status: Response.Status = Response.Status.OK): Response {
         val json = gson.toJson(data)
         val resp = NanoHTTPD.newFixedLengthResponse(status, "application/json; charset=utf-8", json)
-        resp.addHeader("X-Application-Version", "10.10.3")
+        resp.addHeader("X-Application-Version", SERVER_VERSION)
         return resp
     }
 
     private fun noContentResponse(): Response {
         val resp = NanoHTTPD.newFixedLengthResponse(Response.Status.NO_CONTENT, "text/plain", "")
-        resp.addHeader("X-Application-Version", "10.10.3")
+        resp.addHeader("X-Application-Version", SERVER_VERSION)
         return resp
     }
 }
