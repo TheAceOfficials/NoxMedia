@@ -1092,14 +1092,21 @@ class JellyfinBridge(
                     val seasonHex = toHexId(seasonRawId)
                     mapOf(
                         "Name" to "Season $s",
+                        "SeasonName" to "Season $s",
                         "ServerId" to serverId,
                         "Id" to seasonHex,
                         "SeriesId" to seriesHex,
                         "SeriesName" to showTitle,
                         "SeriesPrimaryImageTag" to seriesHex,
+                        "ParentLogoItemId" to seriesHex,
+                        "ParentLogoImageTag" to seriesHex,
+                        "ParentBackdropItemId" to seriesHex,
+                        "ParentBackdropImageTags" to listOf(seriesHex),
+                        "BackdropImageTags" to listOf(seriesHex),
                         "IndexNumber" to s,
                         "Type" to "Season",
                         "IsFolder" to true,
+                        "LocationType" to "FileSystem",
                         "UserData" to mapOf(
                             "UnplayedItemCount" to episodes.count { (it.season ?: 1) == s },
                             "PlaybackPositionTicks" to 0L,
@@ -1107,7 +1114,7 @@ class JellyfinBridge(
                             "IsFavorite" to false,
                             "Played" to false
                         ),
-                        "ImageTags" to mapOf("Primary" to seriesHex)
+                        "ImageTags" to mapOf("Primary" to seriesHex, "Thumb" to seriesHex)
                     )
                 }
                 val total = seasonItems.size
@@ -1138,7 +1145,7 @@ class JellyfinBridge(
                 val sorted = episodes.sortedWith(compareBy({ it.season ?: 1 }, { it.episode ?: 1 }))
                 val total = sorted.size
                 val paged = sorted.drop(startIndex).take(limit)
-                    .map { toJellyfinItem(it, localIp, port, isSeriesOverview = false, includeMediaSources = false, isInfuse = isInfuse) }
+                    .map { toJellyfinItem(it, localIp, port, isSeriesOverview = false, includeMediaSources = true, isInfuse = isInfuse) }
                 return jsonResponse(mapOf("Items" to paged, "TotalRecordCount" to total, "StartIndex" to startIndex))
             }
 
@@ -1177,14 +1184,21 @@ class JellyfinBridge(
             val seasonHex = toHexId(seasonRawId)
             mapOf(
                 "Name" to "Season $s",
+                "SeasonName" to "Season $s",
                 "ServerId" to serverId,
                 "Id" to seasonHex,
                 "SeriesId" to seriesHex,
                 "SeriesName" to showTitle,
                 "SeriesPrimaryImageTag" to seriesHex,
+                "ParentLogoItemId" to seriesHex,
+                "ParentLogoImageTag" to seriesHex,
+                "ParentBackdropItemId" to seriesHex,
+                "ParentBackdropImageTags" to listOf(seriesHex),
+                "BackdropImageTags" to listOf(seriesHex),
                 "IndexNumber" to s,
                 "Type" to "Season",
                 "IsFolder" to true,
+                "LocationType" to "FileSystem",
                 "UserData" to mapOf(
                     "UnplayedItemCount" to episodes.count { (it.season ?: 1) == s },
                     "PlaybackPositionTicks" to 0L,
@@ -1192,7 +1206,7 @@ class JellyfinBridge(
                     "IsFavorite" to false,
                     "Played" to false
                 ),
-                "ImageTags" to mapOf("Primary" to seriesHex)
+                "ImageTags" to mapOf("Primary" to seriesHex, "Thumb" to seriesHex)
             )
         }
         return jsonResponse(mapOf("Items" to seasonList, "TotalRecordCount" to seasonList.size, "StartIndex" to 0))
@@ -1204,8 +1218,21 @@ class JellyfinBridge(
             episodes = episodes.filter { (it.season ?: 1) == seasonNum }
         }
         val epList = episodes.sortedWith(compareBy({ it.season ?: 1 }, { it.episode ?: 1 }))
-            .map { toJellyfinItem(it, localIp, port, isSeriesOverview = false, includeMediaSources = false, isInfuse = isInfuse) }
+            .map { toJellyfinItem(it, localIp, port, isSeriesOverview = false, includeMediaSources = true, isInfuse = isInfuse) }
         return jsonResponse(mapOf("Items" to epList, "TotalRecordCount" to epList.size, "StartIndex" to 0))
+    }
+
+    private fun isSeriesHex(itemId: String): Boolean {
+        val cleanId = itemId.replace("-", "").lowercase().trim()
+        val all = tgClient.getAllMedia().filter { !it.isHidden }
+        return all.any { toHexId(getSeriesId(it)) == cleanId }
+    }
+
+    private fun isSeriesOverviewId(itemId: String): Boolean {
+        val rawId = fromHexId(itemId)
+        val cleanId = itemId.replace("-", "").lowercase().trim()
+        if (rawId.startsWith("series_") && !rawId.contains("_s")) return true
+        return isSeriesHex(cleanId)
     }
 
     private fun handleGetSingleItem(itemId: String, localIp: String, port: Int, isInfuse: Boolean = false): Response {
@@ -1273,14 +1300,21 @@ class JellyfinBridge(
             return jsonResponse(
                 mapOf(
                     "Name" to "Season $seasonNum",
+                    "SeasonName" to "Season $seasonNum",
                     "ServerId" to serverId,
                     "Id" to seasonHex,
                     "SeriesId" to seriesHex,
                     "SeriesName" to showTitle,
                     "SeriesPrimaryImageTag" to seriesHex,
+                    "ParentLogoItemId" to seriesHex,
+                    "ParentLogoImageTag" to seriesHex,
+                    "ParentBackdropItemId" to seriesHex,
+                    "ParentBackdropImageTags" to listOf(seriesHex),
+                    "BackdropImageTags" to listOf(seriesHex),
                     "IndexNumber" to seasonNum,
                     "Type" to "Season",
                     "IsFolder" to true,
+                    "LocationType" to "FileSystem",
                     "UserData" to mapOf(
                         "UnplayedItemCount" to episodes.count { (it.season ?: 1) == seasonNum },
                         "PlaybackPositionTicks" to 0L,
@@ -1288,15 +1322,14 @@ class JellyfinBridge(
                         "IsFavorite" to false,
                         "Played" to false
                     ),
-                    "ImageTags" to mapOf("Primary" to seriesHex)
+                    "ImageTags" to mapOf("Primary" to seriesHex, "Thumb" to seriesHex)
                 )
             )
         }
 
         // 3. Series item: check if rawId starts with series_ or matches a series hex or episodes found
-        val isSeriesHex = allShows.any { toHexId(getSeriesId(it)) == cleanId }
-        if ((rawId.startsWith("series_") && !rawId.contains("_s")) || isSeriesHex) {
-            val episodes = getEpisodesForSeries(if (isSeriesHex) cleanId else rawId)
+        if (isSeriesOverviewId(itemId)) {
+            val episodes = getEpisodesForSeries(if (isSeriesHex(itemId)) cleanId else rawId)
             val match = episodes.firstOrNull() ?: allShows.firstOrNull { toHexId(getSeriesId(it)) == cleanId }
             if (match != null) {
                 return jsonResponse(toJellyfinItem(match, localIp, port, isSeriesOverview = true, isInfuse = isInfuse))
@@ -1444,37 +1477,65 @@ class JellyfinBridge(
     private fun handleImageRedirect(itemId: String, imageType: String, isInfuse: Boolean = false): Response {
         val item = findMedia(itemId) ?: getEpisodesForSeries(itemId).firstOrNull()
         val config = configProvider()
+        val title = item?.title ?: getSeriesTitleFromId(itemId)
 
-        if (isInfuse) {
-            if (imageType.equals("Backdrop", ignoreCase = true)) {
-                val bUrl = item?.backdropUrl
-                if (!bUrl.isNullOrBlank()) {
-                    val resp = NanoHTTPD.newFixedLengthResponse(Response.Status.REDIRECT, "text/plain", "")
-                    resp.addHeader("Location", bUrl)
-                    resp.addHeader("Cache-Control", "public, max-age=86400, immutable")
-                    return resp
-                } else {
-                    // Let Infuse scrape authentic 16:9 backdrop from TMDB
-                    return NanoHTTPD.newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "Backdrop Not Found")
-                }
+        // 1. Logo / ClearArt Image Redirect (Transparent PNG title treatment)
+        if (imageType.equals("Logo", ignoreCase = true) || imageType.equals("Art", ignoreCase = true)) {
+            val resolvedLogo = if (title.isNotBlank()) {
+                posterService.resolveLogo(title, item?.imdbId, item?.tmdbId, config.tmdbApiKey)
+            } else null
+            if (!resolvedLogo.isNullOrBlank()) {
+                val resp = NanoHTTPD.newFixedLengthResponse(Response.Status.REDIRECT, "text/plain", "")
+                resp.addHeader("Location", resolvedLogo)
+                resp.addHeader("Cache-Control", "public, max-age=86400, immutable")
+                return resp
             }
-            if (imageType.equals("Logo", ignoreCase = true) || imageType.equals("Thumb", ignoreCase = true) || imageType.equals("Art", ignoreCase = true)) {
-                // Let Infuse fetch clearart / logo / episode thumbs directly via TMDB
-                return NanoHTTPD.newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "Not Found")
-            }
+            return NanoHTTPD.newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "Logo Not Found")
         }
 
-        // Fast resolution for series, anime, seasons, or episodes: inherit poster from show
-        val showPoster = if (item != null && (isSeries(item) || isAnime(item))) {
-            tgClient.getAllMedia().firstOrNull {
-                it.title.equals(item.title, ignoreCase = true) && !it.posterUrl.isNullOrBlank()
-            }?.posterUrl
-        } else null
+        // 2. Backdrop Image Redirect (16:9 fanart background)
+        if (imageType.equals("Backdrop", ignoreCase = true)) {
+            val resolvedBackdrop = item?.backdropUrl
+                ?: (if (title.isNotBlank()) posterService.resolveBackdrop(title, item?.imdbId, item?.tmdbId, config.tmdbApiKey) else null)
+            val targetUrl = resolvedBackdrop ?: "https://images.metahub.space/background/medium/placeholder/img"
+            val resp = NanoHTTPD.newFixedLengthResponse(Response.Status.REDIRECT, "text/plain", "")
+            resp.addHeader("Location", targetUrl)
+            resp.addHeader("Cache-Control", "public, max-age=86400, immutable")
+            return resp
+        }
 
-        val poster = if (imageType.equals("Backdrop", ignoreCase = true)) {
-            item?.backdropUrl ?: item?.posterUrl ?: showPoster
+        // 3. Thumb Image Redirect (Episode screenshot / still or show backdrop)
+        val isEp = item != null && (isSeries(item) || isAnime(item)) && item.episode != null
+        if (imageType.equals("Thumb", ignoreCase = true)) {
+            val thumbUrl = if (isEp) {
+                item.episodeThumbnailUrl
+                    ?: posterService.resolveEpisodeStill(item.title, item.tmdbId, item.season ?: 1, item.episode ?: 1, config.tmdbApiKey)
+                    ?: item.backdropUrl
+            } else {
+                item?.backdropUrl
+            }
+            val targetUrl = thumbUrl ?: item?.posterUrl ?: "https://images.metahub.space/background/medium/placeholder/img"
+            val resp = NanoHTTPD.newFixedLengthResponse(Response.Status.REDIRECT, "text/plain", "")
+            resp.addHeader("Location", targetUrl)
+            resp.addHeader("Cache-Control", "public, max-age=86400, immutable")
+            return resp
+        }
+
+        // 4. Primary Image Redirect (Episode still if Episode, or 2:3 vertical poster if Movie/Show)
+        val targetUrl = if (isEp) {
+            item.episodeThumbnailUrl
+                ?: posterService.resolveEpisodeStill(item.title, item.tmdbId, item.season ?: 1, item.episode ?: 1, config.tmdbApiKey)
+                ?: item.backdropUrl
+                ?: item.posterUrl
+                ?: "https://images.metahub.space/poster/medium/placeholder/img"
         } else {
-            item?.posterUrl ?: showPoster ?: if (item != null) {
+            val showPoster = if (item != null && (isSeries(item) || isAnime(item))) {
+                tgClient.getAllMedia().firstOrNull {
+                    it.title.equals(item.title, ignoreCase = true) && !it.posterUrl.isNullOrBlank()
+                }?.posterUrl
+            } else null
+
+            val poster = item?.posterUrl ?: showPoster ?: if (item != null) {
                 val resolved = posterService.resolvePoster(
                     item.title,
                     config.customPosterUrl,
@@ -1488,9 +1549,10 @@ class JellyfinBridge(
                 }
                 resolved
             } else null
+
+            poster ?: "https://images.metahub.space/poster/medium/placeholder/img"
         }
 
-        val targetUrl = poster ?: "https://images.metahub.space/poster/medium/placeholder/img"
         val resp = NanoHTTPD.newFixedLengthResponse(Response.Status.REDIRECT, "text/plain", "")
         resp.addHeader("Location", targetUrl)
         resp.addHeader("Cache-Control", "public, max-age=86400, immutable")
@@ -1718,7 +1780,7 @@ class JellyfinBridge(
     ): Map<String, Any?> {
         val isSer = isSeries(item)
         val isAni = isAnime(item)
-        val rawItemId = if ((isSer || isAni) && isSeriesOverview) getSeriesId(item) else item.id
+        val rawItemId = if (isSeriesOverview) getSeriesId(item) else item.id
         val hexId = toHexId(rawItemId)
 
         val rawFileName = if (item.fileName.isNotBlank()) item.fileName else "${item.title}.mkv"
@@ -1733,8 +1795,8 @@ class JellyfinBridge(
         val ext = rawFileName.substringAfterLast(".", "mkv").lowercase()
 
         val displayName = when {
-            (isSer || isAni) && isSeriesOverview -> item.title
-            (isSer || isAni) && item.episode != null -> item.episodeTitle ?: "Episode ${item.episode}"
+            isSeriesOverview -> item.title
+            (isSer || isAni || item.episode != null) && item.episode != null -> item.episodeTitle ?: "Episode ${item.episode}"
             else -> item.title
         }
 
@@ -1749,7 +1811,12 @@ class JellyfinBridge(
             providerIds["Kitsu"] = item.kitsuId.toString()
         }
 
-        val backdropTags = if (isInfuse && item.backdropUrl.isNullOrBlank()) emptyList<String>() else listOf(hexId)
+        val imageTags = mutableMapOf(
+            "Primary" to hexId,
+            "Thumb" to hexId,
+            "Logo" to hexId,
+            "Art" to hexId
+        )
 
         val map = mutableMapOf<String, Any?>(
             "Name" to displayName,
@@ -1775,31 +1842,30 @@ class JellyfinBridge(
                 "Played" to false,
                 "UnplayedItemCount" to 0
             ),
-            "ImageTags" to mapOf("Primary" to hexId),
-            "BackdropImageTags" to backdropTags,
+            "ImageTags" to imageTags,
+            "BackdropImageTags" to listOf(hexId),
             "MediaType" to "Video"
         )
 
-        if ((isSer || isAni) && isSeriesOverview) {
+        if (isSeriesOverview) {
             val epCount = precomputedEpisodeCount ?: getEpisodesForSeries(rawItemId).size
             val sCount = precomputedSeasonCount ?: 1
             map["Type"] = "Series"
             map["IsFolder"] = true
             map["CollectionType"] = "tvshows"
             map["Status"] = "Continuing"
-            map["AirDays"] = emptyList<String>()
+            map["AirDays"] = listOf("Monday")
             map["DisplayPreferencesId"] = hexId
             map["ChildCount"] = sCount
             map["SeasonCount"] = sCount
             map["EpisodeCount"] = epCount
             map["RecursiveItemCount"] = epCount
-            // Series folders are not direct video files; removing these enables TV Show / Anime UI in Infuse & clients
+            map["RunTimeTicks"] = 36000000000L
+            map["CanDownload"] = true
+            map["SupportsDirectPlay"] = true
+            map["SupportsDirectStream"] = true
             map.remove("MediaType")
             map.remove("Container")
-            map.remove("RunTimeTicks")
-            map.remove("SupportsDirectPlay")
-            map.remove("SupportsDirectStream")
-            map.remove("CanDownload")
             map.remove("Path")
             map.remove("MediaSources")
             map["UserData"] = mapOf(
@@ -1809,7 +1875,7 @@ class JellyfinBridge(
                 "Played" to false,
                 "UnplayedItemCount" to epCount
             )
-        } else if (isSer || isAni) {
+        } else if (isSer || isAni || item.episode != null || item.season != null) {
             val seriesRawId = getSeriesId(item)
             val sNum = item.season ?: 1
             val epNum = item.episode ?: 1
@@ -1827,16 +1893,11 @@ class JellyfinBridge(
             map["SeriesPrimaryImageTag"] = seriesHex
             map["SeasonPrimaryImageTag"] = seriesHex
             map["ParentLogoItemId"] = seriesHex
+            map["ParentLogoImageTag"] = seriesHex
             map["ParentBackdropItemId"] = seriesHex
-            if (isInfuse) {
-                if (item.backdropUrl.isNullOrBlank()) {
-                    map["ParentBackdropImageTags"] = emptyList<String>()
-                } else {
-                    map["ParentBackdropImageTags"] = listOf(seriesHex)
-                }
-            } else {
-                map["ParentBackdropImageTags"] = listOf(seriesHex)
-            }
+            map["ParentBackdropImageTags"] = listOf(seriesHex)
+            map["BackdropImageTags"] = listOf(seriesHex)
+            map["ImageTags"] = mapOf("Primary" to hexId, "Thumb" to hexId)
         } else {
             map["Type"] = "Movie"
             map["IsFolder"] = false
