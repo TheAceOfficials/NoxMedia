@@ -39,7 +39,7 @@ class JellyfinBridge(
     private val localIpProvider: () -> String
 ) {
     companion object {
-        const val SERVER_VERSION = "10.10.7"
+        const val SERVER_VERSION = "12.0.0"
     }
 
     private val gson = Gson()

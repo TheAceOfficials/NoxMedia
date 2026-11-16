@@ -497,10 +497,10 @@ class MainAppViewModel(application: Application) : AndroidViewModel(application)
                 val sessionBytes = if (isRunning) com.tgserver.streamer.server.StreamTrafficStats.getSessionBytes() else 0L
                 val allTimeBytes = com.tgserver.streamer.server.StreamTrafficStats.getLifetimeBytes()
 
-                // True Cloud Sync for all-time usage: auto-push when traffic changes significantly (25MB+) or streaming session ends
-                if ((allTimeBytes - lastSyncedLifetimeBytes >= 25L * 1024L * 1024L) || (wasRunning && !isRunning && allTimeBytes > lastSyncedLifetimeBytes)) {
+                // True Cloud Sync for all-time usage: auto-push only when server is turned off/stopped, not during active streaming
+                if (wasRunning && !isRunning && allTimeBytes > lastSyncedLifetimeBytes) {
                     lastSyncedLifetimeBytes = allTimeBytes
-                    triggerAutoCloudBackupDebounced(5000L)
+                    triggerAutoCloudBackupDebounced(1000L)
                 }
                 wasRunning = isRunning
 
