@@ -45,6 +45,9 @@ class JellyfinBridge(
     private val gson = Gson()
     private val rootHexPathRegex = Regex("/[0-9a-fA-F]{32}")
     private val seriesSlugCleanRegex = Regex("[^a-z0-9]")
+    // Season IDs always end with _s<digits> e.g. series_lucifer_s1, series_lucifer_s2
+    // This pattern must NOT match plain series IDs like series_scissor_seven or series_steins_gate
+    private val seasonSuffixRegex = Regex("_s(\\d+)$")
 
     // Canonical 32-character hexadecimal GUIDs (standard Jellyfin format "N")
     val serverId = "48b6c8d76c67429bbad58923a1a9e871"
@@ -223,6 +226,14 @@ class JellyfinBridge(
         return !isAnime(item) && !isSeries(item)
     }
 
+    /** Returns true only for real season raw IDs: series_{slug}_s{digits} */
+    private fun isSeasonRawId(raw: String): Boolean =
+        raw.startsWith("series_") && seasonSuffixRegex.containsMatchIn(raw)
+
+    /** Returns true for series overview IDs: series_{slug} (no season suffix) */
+    private fun isSeriesRawId(raw: String): Boolean =
+        raw.startsWith("series_") && !seasonSuffixRegex.containsMatchIn(raw)
+
     /**
      * Identifies whether an incoming HTTP request URI belongs to the Jellyfin/Emby namespace.
      */
@@ -369,7 +380,7 @@ class JellyfinBridge(
                 lowerUri.contains("/shows/") && lowerUri.contains("/episodes") -> {
                     val seriesId = extractSegmentBetween(cleanUri, "shows/", "/episodes").substringBefore("/")
                     val seasonNum = getParam(params, "season", "Season", "seasonNumber", "SeasonNumber", "seasonId", "SeasonId")
-                        .let { s -> s.toIntOrNull() ?: fromHexId(s).substringAfterLast("_s").toIntOrNull() }
+                        .let { s -> s.toIntOrNull() ?: seasonSuffixRegex.find(fromHexId(s))?.groupValues?.getOrNull(1)?.toIntOrNull() }
                     handleShowEpisodes(seriesId, seasonNum, localIp, config.port, isInfuse)
                 }
                 lowerUri.startsWith("/seasons") -> {
@@ -379,7 +390,7 @@ class JellyfinBridge(
                 lowerUri.startsWith("/episodes") -> {
                     val seriesId = getParam(params, "seriesId", "SeriesId", "seriesID", "id", "Id")
                     val seasonNum = getParam(params, "season", "Season", "seasonNumber", "SeasonNumber", "seasonId", "SeasonId")
-                        .let { s -> s.toIntOrNull() ?: fromHexId(s).substringAfterLast("_s").toIntOrNull() }
+                        .let { s -> s.toIntOrNull() ?: seasonSuffixRegex.find(fromHexId(s))?.groupValues?.getOrNull(1)?.toIntOrNull() }
                     handleShowEpisodes(seriesId, seasonNum, localIp, config.port, isInfuse)
                 }
                 (lowerUri.startsWith("/shows/") || (lowerUri.contains("/shows/") && !lowerUri.contains("/seasons") && !lowerUri.contains("/episodes") && !lowerUri.contains("/nextup"))) && !lowerUri.contains("/images") -> {
@@ -1015,7 +1026,7 @@ class JellyfinBridge(
                             "ImageTags" to mapOf("Primary" to libAnimeHex)
                         )
                     }
-                    raw.startsWith("series_") && !raw.contains("_s") -> {
+                    isSeriesRawId(raw) -> {
                         val episodes = getEpisodesForSeries(raw)
                         val match = episodes.firstOrNull() ?: allMedia.firstOrNull { isSeries(it) || isAnime(it) }
                         match?.let { toJellyfinItem(it, localIp, port, isSeriesOverview = true, includeMediaSources = false, isInfuse = isInfuse) }
@@ -1047,11 +1058,10 @@ class JellyfinBridge(
             }
         }
 
-        val isParentSeason = effectiveRawSeasonId.contains("_s") ||
-                effectiveRawParentId.contains("_s")
+        val isParentSeason = isSeasonRawId(effectiveRawSeasonId) || isSeasonRawId(effectiveRawParentId)
         val isParentSeries = !isParentSeason && (
-                effectiveRawParentId.startsWith("series_") ||
-                (!seriesIdParam.isNullOrBlank() && fromHexId(seriesIdParam.replace("-","").lowercase().trim()).startsWith("series_"))
+                isSeriesRawId(effectiveRawParentId) ||
+                (!seriesIdParam.isNullOrBlank() && isSeriesRawId(fromHexId(seriesIdParam.replace("-","").lowercase().trim())))
         )
 
         when {
@@ -1167,19 +1177,19 @@ class JellyfinBridge(
             // 5. Inside a Season OR Requesting Episodes for a Series
             isParentSeason ||
             (isParentSeries && includeItemTypes.contains("episode")) ||
-            effectiveRawSeasonId.contains("_s") ||
+            isSeasonRawId(effectiveRawSeasonId) ||
             (effectiveRawParentId.startsWith("series_") && includeItemTypes.contains("episode")) ||
             includeItemTypes.contains("episode") -> {
                 val targetId = when {
-                    effectiveRawSeasonId.contains("_s") -> effectiveRawSeasonId
+                    isSeasonRawId(effectiveRawSeasonId) -> effectiveRawSeasonId
                     effectiveRawParentId.startsWith("series_") -> effectiveRawParentId
                     seriesIdParam.isNotBlank() -> seriesIdParam
                     cleanParentId.isNotBlank() -> cleanParentId
                     else -> effectiveParentId
                 }
-                val seasonNum = if (targetId.contains("_s")) {
-                    targetId.substringAfter("_s").toIntOrNull()
-                } else seasonIdParam.toIntOrNull() ?: fromHexId(seasonIdParam).substringAfterLast("_s").toIntOrNull()
+                val seasonNum = seasonSuffixRegex.find(targetId)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                    ?: seasonIdParam.toIntOrNull()
+                    ?: seasonSuffixRegex.find(fromHexId(seasonIdParam))?.groupValues?.getOrNull(1)?.toIntOrNull()
 
                 var episodes = getEpisodesForSeries(targetId)
                 if (seasonNum != null) {
@@ -1217,7 +1227,7 @@ class JellyfinBridge(
 
     private fun handleShowSeasons(seriesId: String, localIp: String, port: Int, isInfuse: Boolean = false): Response {
         val episodes = getEpisodesForSeries(seriesId)
-        val rawSeriesId = episodes.firstOrNull()?.let { getSeriesId(it) } ?: fromHexId(seriesId).substringBefore("_s")
+        val rawSeriesId = episodes.firstOrNull()?.let { getSeriesId(it) } ?: fromHexId(seriesId).replace(seasonSuffixRegex, "")
         val seriesHex = toHexId(rawSeriesId)
         val showTitle = episodes.firstOrNull()?.title ?: getSeriesTitleFromId(seriesId)
         val seasons = episodes.mapNotNull { it.season ?: 1 }.distinct().sorted()
@@ -1269,7 +1279,7 @@ class JellyfinBridge(
     private fun isSeriesHex(itemId: String): Boolean {
         val cleanId = itemId.replace("-", "").lowercase().trim()
         val raw = fromHexId(cleanId)
-        if (raw.startsWith("series_") && !raw.contains("_s")) return true
+        if (isSeriesRawId(raw)) return true
         val all = tgClient.getAllMedia().filter { !it.isHidden && (isSeries(it) || isAnime(it)) }
         return all.any { toHexId(getSeriesId(it)) == cleanId }
     }
@@ -1277,7 +1287,7 @@ class JellyfinBridge(
     private fun isSeriesOverviewId(itemId: String): Boolean {
         val rawId = fromHexId(itemId)
         val cleanId = itemId.replace("-", "").lowercase().trim()
-        if (rawId.startsWith("series_") && !rawId.contains("_s")) return true
+        if (isSeriesRawId(rawId)) return true
         return isSeriesHex(cleanId)
     }
 
@@ -1323,11 +1333,11 @@ class JellyfinBridge(
             )
         }
 
-        // 2. Season item: check if rawId has _s or cleanId matches a season hex
+        // 2. Season item: check if rawId is a season ID or cleanId matches a season hex
         val allShows = tgClient.getAllMedia().filter { !it.isHidden && (isSeries(it) || isAnime(it)) }
-        val seasonMatch = if (rawId.startsWith("series_") && rawId.contains("_s")) {
-            val seriesRawId = rawId.substringBefore("_s")
-            val seasonNum = rawId.substringAfter("_s").toIntOrNull() ?: 1
+        val seasonMatch = if (isSeasonRawId(rawId)) {
+            val seriesRawId = rawId.replace(seasonSuffixRegex, "")
+            val seasonNum = seasonSuffixRegex.find(rawId)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 1
             Pair(seriesRawId, seasonNum)
         } else {
             allShows.firstNotNullOfOrNull { item ->
@@ -1678,7 +1688,8 @@ class JellyfinBridge(
 
     private fun getSeriesTitleFromId(seriesId: String): String {
         val raw = fromHexId(seriesId)
-        val slug = raw.removePrefix("series_").substringBefore("_s")
+        val rawSeries = raw.replace(seasonSuffixRegex, "")
+        val slug = rawSeries.removePrefix("series_")
         val all = tgClient.getAllMedia()
         val match = all.firstOrNull { getSeriesSlug(it) == slug }
         return match?.title ?: slug.replace("_", " ")
@@ -1686,18 +1697,21 @@ class JellyfinBridge(
 
     private fun getEpisodesForSeries(seriesOrSeasonId: String): List<MediaItem> {
         val clean = seriesOrSeasonId.replace("-", "").lowercase().trim()
+        if (clean.isBlank()) return emptyList()
+
         val all = tgClient.getAllMedia().filter { !it.isHidden && (isSeries(it) || isAnime(it)) }
+        val raw = fromHexId(clean)
 
-        val isHex = clean.length == 32 && clean.all { it in '0'..'9' || it in 'a'..'f' }
-        val raw = if (isHex) fromHexId(seriesOrSeasonId) else seriesOrSeasonId
-
-        // 1. Instant match by raw slug or title (No MD5)
+        // 1. Strip season suffix (_s1, _s2, etc.) to get base series slug
+        val rawWithoutSeason = raw.replace(seasonSuffixRegex, "")
         val targetSlug = when {
-            raw.startsWith("series_") -> raw.removePrefix("series_").substringBefore("_s")
-            clean.startsWith("series_") -> clean.removePrefix("series_").substringBefore("_s")
-            else -> raw.substringBefore("_s")
+            rawWithoutSeason.startsWith("series_") -> rawWithoutSeason.removePrefix("series_")
+            clean.startsWith("series_") -> clean.replace(seasonSuffixRegex, "").removePrefix("series_")
+            else -> rawWithoutSeason
         }
-        if (targetSlug.isNotBlank() && !isHex) {
+
+        // 2. Instant O(N) match by series slug or title (NO MD5)
+        if (targetSlug.isNotBlank() && targetSlug != clean) {
             val slugMatches = all.filter { getSeriesSlug(it) == targetSlug }
             if (slugMatches.isNotEmpty()) return slugMatches
 
@@ -1706,7 +1720,16 @@ class JellyfinBridge(
             if (titleMatches.isNotEmpty()) return titleMatches
         }
 
-        // 2. Direct hex match on series ID or season ID (Only if input is hex)
+        // 3. Direct match on item ID (in case an episode ID/hex was passed)
+        val matchingItem = all.firstOrNull { it.id == raw || it.id == clean }
+        if (matchingItem != null) {
+            val showSlug = getSeriesSlug(matchingItem)
+            val slugMatches = all.filter { getSeriesSlug(it) == showSlug }
+            if (slugMatches.isNotEmpty()) return slugMatches
+        }
+
+        // 4. Fallback hex match (only if not found by slug)
+        val isHex = clean.length == 32 && clean.all { it in '0'..'9' || it in 'a'..'f' }
         if (isHex) {
             val hexMatch = all.filter { toHexId(getSeriesId(it)) == clean }
             if (hexMatch.isNotEmpty()) return hexMatch
@@ -1715,19 +1738,10 @@ class JellyfinBridge(
                 val sNum = item.season ?: 1
                 toHexId("${getSeriesId(item)}_s$sNum") == clean
             }
-            if (seasonHexMatch.isNotEmpty()) return seasonHexMatch
-
-            if (targetSlug.isNotBlank() && targetSlug != clean) {
-                val slugMatches = all.filter { getSeriesSlug(it) == targetSlug }
-                if (slugMatches.isNotEmpty()) return slugMatches
+            if (seasonHexMatch.isNotEmpty()) {
+                val showSlug = getSeriesSlug(seasonHexMatch.first())
+                return all.filter { getSeriesSlug(it) == showSlug }
             }
-        }
-
-        // 3. If seriesOrSeasonId matches a single item's ID or hex ID (sibling episodes)
-        val matchingItem = all.firstOrNull { it.id == raw || it.id == clean }
-        if (matchingItem != null) {
-            val titleMatches = all.filter { it.title.equals(matchingItem.title, ignoreCase = true) }
-            if (titleMatches.isNotEmpty()) return titleMatches
         }
 
         return emptyList()
@@ -1961,8 +1975,10 @@ class JellyfinBridge(
         )
 
         if (isSeriesOverview) {
-            val epCount = precomputedEpisodeCount ?: getEpisodesForSeries(rawItemId).size
-            val sCount = precomputedSeasonCount ?: 1
+            val eps = if (precomputedEpisodeCount != null && precomputedSeasonCount != null) null else getEpisodesForSeries(rawItemId)
+            val epCount = precomputedEpisodeCount ?: eps?.size ?: 1
+            val computedSeasons = eps?.mapNotNull { it.season ?: 1 }?.distinct()?.size ?: 1
+            val sCount = precomputedSeasonCount ?: if (computedSeasons > 0) computedSeasons else 1
             map["Type"] = "Series"
             map["IsFolder"] = true
             map["Status"] = "Continuing"
