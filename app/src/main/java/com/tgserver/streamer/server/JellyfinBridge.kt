@@ -840,6 +840,19 @@ class JellyfinBridge(
                 (includeItemTypes.contains("series") && !includeItemTypes.contains("movie"))
         val isAnimeView = cleanParentId == libAnimeHex || rawParentId == "lib_anime"
 
+        if (isInfuse) {
+            val items = when {
+                isSeriesView -> allMedia.filter { isSeries(it) }.sortedByDescending { it.dateAdded }
+                isAnimeView -> allMedia.filter { isAnime(it) }.sortedByDescending { it.dateAdded }
+                isMoviesView -> allMedia.filter { isMovie(it) }.sortedByDescending { it.dateAdded }
+                else -> allMedia.sortedByDescending { it.dateAdded }
+            }
+            val latest = items.take(limit).map {
+                toJellyfinItem(it, localIp, port, isSeriesOverview = false, includeMediaSources = true, isInfuse = true)
+            }
+            return jsonResponse(latest)
+        }
+
         val latestItems: List<Map<String, Any?>> = when {
             isMoviesView -> {
                 allMedia.filter { isMovie(it) }
@@ -995,6 +1008,33 @@ class JellyfinBridge(
         val effectiveRawParentId = if (effectiveParentId.isNotBlank()) fromHexId(effectiveParentId) else ""
         val effectiveSeasonId = if (seasonIdParam.isNotBlank()) seasonIdParam else effectiveParentId
         val effectiveRawSeasonId = if (effectiveSeasonId.isNotBlank()) fromHexId(effectiveSeasonId) else ""
+
+        if (isInfuse && idsParam.isBlank()) {
+            val items = when {
+                cleanParentId == libMoviesHex || rawParentId == "lib_movies" -> allMedia.filter { isMovie(it) }
+                cleanParentId == libSeriesHex || rawParentId == "lib_series" -> allMedia.filter { isSeries(it) }
+                cleanParentId == libAnimeHex || rawParentId == "lib_anime" -> allMedia.filter { isAnime(it) }
+                effectiveRawParentId.startsWith("series_") || effectiveRawSeasonId.contains("_s") || seriesIdParam.isNotBlank() -> {
+                    val targetId = when {
+                        effectiveRawSeasonId.contains("_s") -> effectiveRawSeasonId
+                        effectiveRawParentId.startsWith("series_") -> effectiveRawParentId
+                        seriesIdParam.isNotBlank() -> seriesIdParam
+                        cleanParentId.isNotBlank() -> cleanParentId
+                        else -> effectiveParentId
+                    }
+                    getEpisodesForSeries(targetId)
+                }
+                else -> allMedia
+            }
+            val filtered = if (searchTerm.isNotBlank()) {
+                items.filter { it.title.contains(searchTerm, true) || it.fileName.contains(searchTerm, true) }
+            } else items
+            val total = filtered.size
+            val paged = filtered.drop(startIndex).take(limit).map {
+                toJellyfinItem(it, localIp, port, isSeriesOverview = false, includeMediaSources = true, isInfuse = true)
+            }
+            return jsonResponse(mapOf("Items" to paged, "TotalRecordCount" to total, "StartIndex" to startIndex))
+        }
 
         if (searchTerm.isNotBlank()) {
             allMedia = allMedia.filter {
@@ -1497,6 +1537,10 @@ class JellyfinBridge(
     }
 
     private fun handleImageRedirect(itemId: String, imageType: String, isInfuse: Boolean = false): Response {
+        if (isInfuse) {
+            // Let Infuse fetch 100% of its official artwork & metadata independently from TMDB
+            return NanoHTTPD.newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "Not Found")
+        }
         val item = findMedia(itemId) ?: getEpisodesForSeries(itemId).firstOrNull()
         val config = configProvider()
         val title = item?.title ?: getSeriesTitleFromId(itemId)
@@ -1829,6 +1873,28 @@ class JellyfinBridge(
         val durationTicks = if (item.durationSeconds > 0) item.durationSeconds.toLong() * 10_000_000L else 3600L * 10_000_000L
         val yearInt = item.year?.toIntOrNull() ?: 2024
         val ext = rawFileName.substringAfterLast(".", "mkv").lowercase()
+
+        if (isInfuse) {
+            val cleanTitle = rawFileName.substringBeforeLast(".")
+            return mapOf(
+                "Name" to cleanTitle,
+                "ServerId" to serverId,
+                "Id" to hexId,
+                "Type" to "Movie",
+                "IsFolder" to false,
+                "MediaType" to "Video",
+                "Container" to ext,
+                "Path" to streamUrl,
+                "RunTimeTicks" to durationTicks,
+                "Size" to item.sizeBytes,
+                "SupportsDirectPlay" to true,
+                "SupportsDirectStream" to true,
+                "SupportsTranscoding" to false,
+                "ImageTags" to emptyMap<String, String>(),
+                "BackdropImageTags" to emptyList<String>(),
+                "MediaSources" to buildMediaSourcesForItem(item, localIp, port)
+            )
+        }
 
         val displayName = when {
             isSeriesOverview -> item.title
