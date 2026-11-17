@@ -286,6 +286,7 @@ class JellyfinBridge(
         val epCount = show.allEpisodes.size
         val firstEp = show.firstEpisode
         val yearInt = firstEp?.year?.toIntOrNull() ?: 2024
+        val parentLibHex = if (show.isAnime) libAnimeHex else libSeriesHex
 
         val providerIds = mutableMapOf<String, String>()
         firstEp?.imdbId?.takeIf { it.isNotBlank() }?.let { providerIds["Imdb"] = it }
@@ -305,15 +306,16 @@ class JellyfinBridge(
         return mapOf(
             "Name" to show.title,
             "OriginalTitle" to show.title,
+            "SortName" to show.title,
+            "ForcedSortName" to show.title,
             "ServerId" to serverId,
             "Id" to show.seriesHexId,
+            "ParentId" to parentLibHex,
             "Type" to "Series",
             "IsFolder" to true,
             "Status" to "Continuing",
             "AirDays" to listOf("Monday"),
             "DisplayPreferencesId" to show.seriesHexId,
-            "LocationType" to "FileSystem",
-            "Path" to "/TV Shows/${show.title}",
             "ProductionYear" to yearInt,
             "PremiereDate" to "${yearInt}-01-01T00:00:00.0000000Z",
             "Overview" to (firstEp?.overview ?: ""),
@@ -324,10 +326,18 @@ class JellyfinBridge(
             "EpisodeCount" to epCount,
             "RecursiveItemCount" to epCount,
             "PrimaryImageAspectRatio" to 0.6666667,
-            "ImageTags" to imageTags,
-            "BackdropImageTags" to listOf(show.seriesHexId),
+            "SeriesPrimaryImageTag" to show.seriesHexId,
+            "ParentLogoItemId" to show.seriesHexId,
+            "ParentBackdropItemId" to show.seriesHexId,
             "ParentBackdropImageTags" to listOf(show.seriesHexId),
+            "BackdropImageTags" to listOf(show.seriesHexId),
+            "ImageTags" to imageTags,
             "ProviderIds" to providerIds,
+            "CanDelete" to false,
+            "CanDownload" to false,
+            "SupportsDirectPlay" to false,
+            "SupportsDirectStream" to false,
+            "SupportsTranscoding" to false,
             "UserData" to mapOf(
                 "PlaybackPositionTicks" to 0L,
                 "PlayCount" to 0,
@@ -348,15 +358,18 @@ class JellyfinBridge(
         return mapOf(
             "Name" to "Season ${season.seasonNumber}",
             "SeasonName" to "Season ${season.seasonNumber}",
+            "SortName" to "Season ${season.seasonNumber}",
+            "ForcedSortName" to "Season ${season.seasonNumber}",
             "ServerId" to serverId,
             "Id" to season.seasonHexId,
+            "ParentId" to season.seriesHexId,
             "SeriesId" to season.seriesHexId,
             "SeriesName" to season.seriesTitle,
             "IndexNumber" to season.seasonNumber,
             "Type" to "Season",
             "IsFolder" to true,
-            "LocationType" to "FileSystem",
-            "Path" to "/TV Shows/${season.seriesTitle}/Season ${season.seasonNumber}",
+            "ChildCount" to epCount,
+            "RecursiveItemCount" to epCount,
             "PrimaryImageAspectRatio" to 0.6666667,
             "SeriesPrimaryImageTag" to season.seriesHexId,
             "ParentLogoItemId" to season.seriesHexId,
@@ -365,6 +378,11 @@ class JellyfinBridge(
             "ParentBackdropImageTags" to listOf(season.seriesHexId),
             "BackdropImageTags" to listOf(season.seriesHexId),
             "ImageTags" to mapOf("Primary" to season.seriesHexId, "Thumb" to season.seriesHexId),
+            "CanDelete" to false,
+            "CanDownload" to false,
+            "SupportsDirectPlay" to false,
+            "SupportsDirectStream" to false,
+            "SupportsTranscoding" to false,
             "UserData" to mapOf(
                 "UnplayedItemCount" to epCount,
                 "PlaybackPositionTicks" to 0L,
@@ -406,9 +424,13 @@ class JellyfinBridge(
 
         val map = mutableMapOf<String, Any?>(
             "Name" to displayName,
+            "SortName" to displayName,
+            "ForcedSortName" to displayName,
             "ServerId" to serverId,
             "Id" to hexId,
+            "ParentId" to seasonIndex.seasonHexId,
             "Type" to "Episode",
+            "MediaType" to "Video",
             "IsFolder" to false,
             "IndexNumber" to epNum,
             "ParentIndexNumber" to sNum,
@@ -426,6 +448,8 @@ class JellyfinBridge(
             "Container" to ext,
             "LocationType" to "FileSystem",
             "Path" to virtualPath,
+            "DirectStreamUrl" to streamUrl,
+            "CanDelete" to false,
             "CanDownload" to true,
             "SupportsDirectPlay" to true,
             "SupportsDirectStream" to true,
