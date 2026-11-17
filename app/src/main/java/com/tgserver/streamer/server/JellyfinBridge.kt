@@ -62,6 +62,9 @@ class JellyfinBridge(
     private val idToHexMap = ConcurrentHashMap<String, String>()
     private val hexToIdMap = ConcurrentHashMap<String, String>()
 
+    // Track if we've already pre-warmed the hex cache for the current media set
+    @Volatile private var cacheWarmedForSize = -1
+
     init {
         // Register known system IDs
         registerHexId("lib_movies", libMoviesHex)
@@ -69,6 +72,47 @@ class JellyfinBridge(
         registerHexId("lib_anime", libAnimeHex)
         registerHexId("user_nox", defaultUserId)
         registerHexId("server_nox", serverId)
+    }
+
+    /**
+     * Pre-warm the hex ID cache for all current media items so every
+     * subsequent fromHexId / toHexId call is an O(1) map lookup.
+     * Called once per request when the media set has grown.
+     */
+    fun warmHexCache() {
+        val all = tgClient.getAllMedia()
+        if (all.size == cacheWarmedForSize) return   // Already warm for this set
+        for (item in all) {
+            // Item ID
+            val itemHex = idToHexMap.computeIfAbsent(item.id) { key ->
+                val hex = toMd5Hex(key)
+                hexToIdMap.putIfAbsent(hex, key)
+                hex
+            }
+            hexToIdMap.putIfAbsent(itemHex, item.id)
+
+            // Series / Anime IDs
+            if (isSeries(item) || isAnime(item)) {
+                val sRaw = getSeriesId(item)
+                val sHex = idToHexMap.computeIfAbsent(sRaw) { key ->
+                    val hex = toMd5Hex(key)
+                    hexToIdMap.putIfAbsent(hex, key)
+                    hex
+                }
+                hexToIdMap.putIfAbsent(sHex, sRaw)
+
+                // Season IDs (pre-warm for seasons that actually exist in the data)
+                val sNum = item.season ?: 1
+                val seasonRaw = "${sRaw}_s$sNum"
+                val seasonHex = idToHexMap.computeIfAbsent(seasonRaw) { key ->
+                    val hex = toMd5Hex(key)
+                    hexToIdMap.putIfAbsent(hex, key)
+                    hex
+                }
+                hexToIdMap.putIfAbsent(seasonHex, seasonRaw)
+            }
+        }
+        cacheWarmedForSize = all.size
     }
 
     private fun registerHexId(rawId: String, hex32: String) {
@@ -112,6 +156,7 @@ class JellyfinBridge(
         if (clean == libSeriesHex) return "lib_series"
         if (clean == libAnimeHex) return "lib_anime"
 
+        // Cache is cold for this hex — do a targeted lookup (warmHexCache() covers >99% of cases)
         if (clean.length == 32 && clean.all { it in '0'..'9' || it in 'a'..'f' }) {
             val all = tgClient.getAllMedia()
             for (item in all) {
@@ -241,6 +286,9 @@ class JellyfinBridge(
         val isInfuse = isInfuseClient(headers)
 
         StreamLog.i(TAG, "[$method] $cleanUri params=$params (from ${session.remoteIpAddress ?: "unknown"}) [isInfuse=$isInfuse]")
+
+        // Pre-warm hex ID cache once so every fromHexId call in this request is O(1)
+        warmHexCache()
 
         return try {
             when {
@@ -999,15 +1047,11 @@ class JellyfinBridge(
             }
         }
 
-        val isParentSeason = effectiveRawSeasonId.contains("_s") || (
-                cleanParentId.isNotBlank() && cleanParentId != libMoviesHex && cleanParentId != libSeriesHex && cleanParentId != libAnimeHex &&
-                fromHexId(cleanParentId).contains("_s")
-        )
+        val isParentSeason = effectiveRawSeasonId.contains("_s") ||
+                effectiveRawParentId.contains("_s")
         val isParentSeries = !isParentSeason && (
                 effectiveRawParentId.startsWith("series_") ||
-                seriesIdParam.isNotBlank() ||
-                (cleanParentId.isNotBlank() && cleanParentId != libMoviesHex && cleanParentId != libSeriesHex && cleanParentId != libAnimeHex &&
-                 fromHexId(cleanParentId).startsWith("series_"))
+                (!seriesIdParam.isNullOrBlank() && fromHexId(seriesIdParam.replace("-","").lowercase().trim()).startsWith("series_"))
         )
 
         when {
