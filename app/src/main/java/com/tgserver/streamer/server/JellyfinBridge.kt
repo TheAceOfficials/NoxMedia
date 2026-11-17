@@ -1384,6 +1384,22 @@ class JellyfinBridge(
         )
     }
 
+    private fun buildCleanFileName(item: MediaItem): String {
+        val ext = if (item.fileName.contains(".")) item.fileName.substringAfterLast(".").lowercase() else "mkv"
+        val isSer = item.type.equals("series", ignoreCase = true) || isSeries(item) || isAnime(item) || item.season != null || item.episode != null
+        return if (isSer && (item.season != null || item.episode != null)) {
+            val s = (item.season ?: 1).toString().padStart(2, '0')
+            val e = (item.episode ?: 1).toString().padStart(2, '0')
+            val cleanTitle = item.title.replace(Regex("(?i)[._-]"), " ").trim()
+            val yr = if (!item.year.isNullOrBlank() && !cleanTitle.contains(item.year!!)) " (${item.year})" else ""
+            "$cleanTitle$yr S${s}E$e.$ext"
+        } else {
+            val cleanTitle = item.title.replace(Regex("(?i)[._-]"), " ").trim()
+            val yr = if (!item.year.isNullOrBlank() && !cleanTitle.contains(item.year!!)) " (${item.year})" else ""
+            "$cleanTitle$yr.$ext"
+        }
+    }
+
     private fun buildMediaSourcesForItem(item: MediaItem, localIp: String, port: Int): List<Map<String, Any?>> {
         val all = tgClient.getAllMedia().filter { !it.isHidden }
         val matching: List<MediaItem> = if (isMovie(item)) {
@@ -1403,7 +1419,7 @@ class JellyfinBridge(
         val versions = if (matching.isNotEmpty()) matching.distinctBy { it.id } else listOf(item)
         return versions.map { ver ->
             val hexId = toHexId(ver.id)
-            val rawFileName = if (ver.fileName.isNotBlank()) ver.fileName else "${ver.title}.mkv"
+            val rawFileName = buildCleanFileName(ver)
             val safeFileName = try {
                 URLEncoder.encode(rawFileName, "UTF-8").replace("+", "%20")
             } catch (_: Exception) {
@@ -1459,7 +1475,7 @@ class JellyfinBridge(
     private fun handleVideoStreamRedirect(itemId: String, localIp: String, port: Int): Response {
         val item = findMedia(itemId)
         if (item != null) {
-            val rawFileName = if (item.fileName.isNotBlank()) item.fileName else "${item.title}.mkv"
+            val rawFileName = buildCleanFileName(item)
             val safeFileName = try {
                 URLEncoder.encode(rawFileName, "UTF-8").replace("+", "%20")
             } catch (_: Exception) {
@@ -1504,8 +1520,10 @@ class JellyfinBridge(
             return resp
         }
 
+        val isSeriesOverview = isSeriesOverviewId(itemId)
+        val isEp = !isSeriesOverview && item != null && (isSeries(item) || isAnime(item)) && item.episode != null
+
         // 3. Thumb Image Redirect (Episode screenshot / still or show backdrop)
-        val isEp = item != null && (isSeries(item) || isAnime(item)) && item.episode != null
         if (imageType.equals("Thumb", ignoreCase = true)) {
             val thumbUrl = if (isEp) {
                 item.episodeThumbnailUrl
@@ -1535,20 +1553,32 @@ class JellyfinBridge(
                 }?.posterUrl
             } else null
 
-            val poster = item?.posterUrl ?: showPoster ?: if (item != null) {
-                val resolved = posterService.resolvePoster(
-                    item.title,
-                    config.customPosterUrl,
-                    config.customPosterApiKey,
-                    config.tmdbApiKey,
-                    config.tvdbApiKey
-                )
-                if (resolved != null) {
-                    item.posterUrl = resolved
-                    posterService.cachePoster(item.title, resolved)
-                }
-                resolved
-            } else null
+            val poster = if (isSeriesOverview) {
+                showPoster ?: if (title.isNotBlank()) {
+                    posterService.resolvePoster(
+                        title,
+                        config.customPosterUrl,
+                        config.customPosterApiKey,
+                        config.tmdbApiKey,
+                        config.tvdbApiKey
+                    )
+                } else null ?: item?.posterUrl
+            } else {
+                item?.posterUrl ?: showPoster ?: if (item != null) {
+                    val resolved = posterService.resolvePoster(
+                        item.title,
+                        config.customPosterUrl,
+                        config.customPosterApiKey,
+                        config.tmdbApiKey,
+                        config.tvdbApiKey
+                    )
+                    if (resolved != null) {
+                        item.posterUrl = resolved
+                        posterService.cachePoster(item.title, resolved)
+                    }
+                    resolved
+                } else null
+            }
 
             poster ?: "https://images.metahub.space/poster/medium/placeholder/img"
         }
@@ -1783,7 +1813,7 @@ class JellyfinBridge(
         val rawItemId = if (isSeriesOverview) getSeriesId(item) else item.id
         val hexId = toHexId(rawItemId)
 
-        val rawFileName = if (item.fileName.isNotBlank()) item.fileName else "${item.title}.mkv"
+        val rawFileName = buildCleanFileName(item)
         val safeFileName = try {
             URLEncoder.encode(rawFileName, "UTF-8").replace("+", "%20")
         } catch (_: Exception) {
@@ -1852,7 +1882,6 @@ class JellyfinBridge(
             val sCount = precomputedSeasonCount ?: 1
             map["Type"] = "Series"
             map["IsFolder"] = true
-            map["CollectionType"] = "tvshows"
             map["Status"] = "Continuing"
             map["AirDays"] = listOf("Monday")
             map["DisplayPreferencesId"] = hexId
@@ -1860,14 +1889,17 @@ class JellyfinBridge(
             map["SeasonCount"] = sCount
             map["EpisodeCount"] = epCount
             map["RecursiveItemCount"] = epCount
-            map["RunTimeTicks"] = 36000000000L
-            map["CanDownload"] = true
-            map["SupportsDirectPlay"] = true
-            map["SupportsDirectStream"] = true
+            map["PrimaryImageAspectRatio"] = 0.6666667
             map.remove("MediaType")
             map.remove("Container")
             map.remove("Path")
             map.remove("MediaSources")
+            map.remove("RunTimeTicks")
+            map.remove("CanDownload")
+            map.remove("SupportsDirectPlay")
+            map.remove("SupportsDirectStream")
+            map.remove("SupportsTranscoding")
+            map.remove("CollectionType")
             map["UserData"] = mapOf(
                 "PlaybackPositionTicks" to 0L,
                 "PlayCount" to 0,
