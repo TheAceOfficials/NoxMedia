@@ -370,15 +370,21 @@ class JellyfinBridge(
                 }
 
                 // ================= 5. TV Show Hierarchy: Seasons & Episodes =================
-                lowerUri.contains("/shows/nextup") -> {
-                    jsonResponse(mapOf("Items" to emptyList<Any>(), "TotalRecordCount" to 0, "StartIndex" to 0))
+                lowerUri.contains("/shows/nextup") || lowerUri.endsWith("/nextup") -> {
+                    handleShowsNextUp(cleanUri, params, localIp, config.port, isInfuse)
                 }
                 lowerUri.contains("/shows/") && lowerUri.contains("/seasons") -> {
-                    val seriesId = extractSegmentBetween(cleanUri, "shows/", "/seasons").substringBefore("/")
+                    val urlSeriesId = extractSegmentBetween(cleanUri, "shows/", "/seasons").substringBefore("/")
+                    val seriesId = if (urlSeriesId.isBlank() || urlSeriesId.equals("seasons", ignoreCase = true)) {
+                        getParam(params, "seriesId", "SeriesId", "seriesID", "id", "Id")
+                    } else urlSeriesId
                     handleShowSeasons(seriesId, localIp, config.port, isInfuse)
                 }
                 lowerUri.contains("/shows/") && lowerUri.contains("/episodes") -> {
-                    val seriesId = extractSegmentBetween(cleanUri, "shows/", "/episodes").substringBefore("/")
+                    val urlSeriesId = extractSegmentBetween(cleanUri, "shows/", "/episodes").substringBefore("/")
+                    val seriesId = if (urlSeriesId.isBlank() || urlSeriesId.equals("episodes", ignoreCase = true)) {
+                        getParam(params, "seriesId", "SeriesId", "seriesID", "id", "Id")
+                    } else urlSeriesId
                     val seasonNum = getParam(params, "season", "Season", "seasonNumber", "SeasonNumber", "seasonId", "SeasonId")
                         .let { s -> s.toIntOrNull() ?: seasonSuffixRegex.find(fromHexId(s))?.groupValues?.getOrNull(1)?.toIntOrNull() }
                     handleShowEpisodes(seriesId, seasonNum, localIp, config.port, isInfuse)
@@ -1064,10 +1070,128 @@ class JellyfinBridge(
                 (!seriesIdParam.isNullOrBlank() && isSeriesRawId(fromHexId(seriesIdParam.replace("-","").lowercase().trim())))
         )
 
+        val isEpisodeQuery = includeItemTypes.contains("episode")
+        val isSeasonQuery = includeItemTypes.contains("season")
+        val isSeriesQuery = includeItemTypes.contains("series")
+        val isMovieQuery = includeItemTypes.contains("movie")
+
         when {
-            // 1. Movies Folder / View (Deduplicated multi-versions)
+            // 1. Episode queries (Infuse sync, season drill-down, or series episode list)
+            isEpisodeQuery -> {
+                val episodes = when {
+                    isParentSeason || isSeasonRawId(effectiveRawSeasonId) -> {
+                        val targetId = if (isSeasonRawId(effectiveRawSeasonId)) effectiveRawSeasonId else effectiveRawParentId
+                        val sNum = seasonSuffixRegex.find(targetId)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                        val eps = getEpisodesForSeries(targetId)
+                        if (sNum != null) eps.filter { (it.season ?: 1) == sNum } else eps
+                    }
+                    isParentSeries || (!seriesIdParam.isNullOrBlank() && isSeriesRawId(fromHexId(seriesIdParam))) -> {
+                        val targetSeries = if (seriesIdParam.isNotBlank()) seriesIdParam else effectiveParentId
+                        val sNum = seasonIdParam.toIntOrNull()
+                            ?: seasonSuffixRegex.find(fromHexId(seasonIdParam))?.groupValues?.getOrNull(1)?.toIntOrNull()
+                        val eps = getEpisodesForSeries(targetSeries)
+                        if (sNum != null) eps.filter { (it.season ?: 1) == sNum } else eps
+                    }
+                    cleanParentId == libSeriesHex || rawParentId == "lib_series" -> {
+                        allMedia.filter { isSeries(it) }
+                    }
+                    cleanParentId == libAnimeHex || rawParentId == "lib_anime" -> {
+                        allMedia.filter { isAnime(it) && (it.season != null || it.episode != null || it.type == "series" || it.type == "anime") }
+                    }
+                    else -> {
+                        allMedia.filter { isSeries(it) || isAnime(it) }
+                    }
+                }
+                val sorted = episodes.sortedWith(compareBy({ it.title.lowercase() }, { it.season ?: 1 }, { it.episode ?: 1 }))
+                val total = sorted.size
+                val paged = sorted.drop(startIndex).take(limit)
+                    .map { toJellyfinItem(it, localIp, port, isSeriesOverview = false, includeMediaSources = true, isInfuse = isInfuse) }
+                return jsonResponse(mapOf("Items" to paged, "TotalRecordCount" to total, "StartIndex" to startIndex))
+            }
+
+            // 2. Season queries (IncludeItemTypes=Season)
+            isSeasonQuery -> {
+                val targetSeries = if (seriesIdParam.isNotBlank()) seriesIdParam else effectiveParentId
+                if (targetSeries.isNotBlank() && targetSeries != libSeriesHex && targetSeries != libAnimeHex) {
+                    return handleShowSeasons(targetSeries, localIp, port, isInfuse)
+                }
+                val shows = if (cleanParentId == libAnimeHex || rawParentId == "lib_anime") {
+                    allMedia.filter { isAnime(it) }
+                } else {
+                    allMedia.filter { isSeries(it) }
+                }
+                val seasonItems = shows.groupBy { getSeriesSlug(it) }.flatMap { (slug, eps) ->
+                    val seriesRaw = "series_$slug"
+                    val seriesHex = toHexId(seriesRaw)
+                    val showTitle = eps.firstOrNull()?.title ?: slug.replace("_", " ")
+                    val sNums = eps.mapNotNull { it.season ?: 1 }.distinct().sorted()
+                    (if (sNums.isEmpty()) listOf(1) else sNums).map { s ->
+                        val seasonHex = toHexId("${seriesRaw}_s$s")
+                        mapOf(
+                            "Name" to "Season $s",
+                            "SeasonName" to "Season $s",
+                            "ServerId" to serverId,
+                            "Id" to seasonHex,
+                            "SeriesId" to seriesHex,
+                            "SeriesName" to showTitle,
+                            "SeriesPrimaryImageTag" to seriesHex,
+                            "IndexNumber" to s,
+                            "Type" to "Season",
+                            "IsFolder" to true,
+                            "PrimaryImageAspectRatio" to 0.6666667,
+                            "LocationType" to "FileSystem",
+                            "UserData" to mapOf(
+                                "UnplayedItemCount" to eps.count { (it.season ?: 1) == s },
+                                "PlaybackPositionTicks" to 0L,
+                                "PlayCount" to 0,
+                                "IsFavorite" to false,
+                                "Played" to false
+                            ),
+                            "ImageTags" to mapOf("Primary" to seriesHex, "Thumb" to seriesHex)
+                        )
+                    }
+                }
+                val total = seasonItems.size
+                val paged = seasonItems.drop(startIndex).take(limit)
+                return jsonResponse(mapOf("Items" to paged, "TotalRecordCount" to total, "StartIndex" to startIndex))
+            }
+
+            // 3. Parent is a Season -> Return episodes of that season
+            isParentSeason -> {
+                val targetId = if (isSeasonRawId(effectiveRawSeasonId)) effectiveRawSeasonId else effectiveRawParentId
+                val sNum = seasonSuffixRegex.find(targetId)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                val episodes = getEpisodesForSeries(targetId)
+                val filtered = if (sNum != null) episodes.filter { (it.season ?: 1) == sNum } else episodes
+                val sorted = filtered.sortedWith(compareBy({ it.season ?: 1 }, { it.episode ?: 1 }))
+                val total = sorted.size
+                val paged = sorted.drop(startIndex).take(limit)
+                    .map { toJellyfinItem(it, localIp, port, isSeriesOverview = false, includeMediaSources = true, isInfuse = isInfuse) }
+                return jsonResponse(mapOf("Items" to paged, "TotalRecordCount" to total, "StartIndex" to startIndex))
+            }
+
+            // 4. Parent is a Series -> Return Seasons (or episodes if recursive)
+            isParentSeries -> {
+                val targetSeriesId = when {
+                    effectiveRawParentId.startsWith("series_") -> effectiveRawParentId
+                    seriesIdParam.isNotBlank() -> seriesIdParam
+                    cleanParentId.isNotBlank() -> cleanParentId
+                    else -> effectiveParentId
+                }
+                if (recursive) {
+                    val episodes = getEpisodesForSeries(targetSeriesId)
+                    val sorted = episodes.sortedWith(compareBy({ it.season ?: 1 }, { it.episode ?: 1 }))
+                    val total = sorted.size
+                    val paged = sorted.drop(startIndex).take(limit)
+                        .map { toJellyfinItem(it, localIp, port, isSeriesOverview = false, includeMediaSources = true, isInfuse = isInfuse) }
+                    return jsonResponse(mapOf("Items" to paged, "TotalRecordCount" to total, "StartIndex" to startIndex))
+                } else {
+                    return handleShowSeasons(targetSeriesId, localIp, port, isInfuse)
+                }
+            }
+
+            // 5. Movies Folder / View (Deduplicated multi-versions)
             cleanParentId == libMoviesHex || rawParentId == "lib_movies" ||
-                    (cleanParentId.isBlank() && includeItemTypes.contains("movie") && !includeItemTypes.contains("series") && !includeItemTypes.contains("episode")) -> {
+                    (cleanParentId.isBlank() && isMovieQuery && !isSeriesQuery && !isEpisodeQuery) -> {
                 val movies = allMedia.filter { isMovie(it) }.distinctBy { getMovieKey(it) }
                 val total = movies.size
                 val paged = movies.drop(startIndex).take(limit)
@@ -1075,9 +1199,9 @@ class JellyfinBridge(
                 return jsonResponse(mapOf("Items" to paged, "TotalRecordCount" to total, "StartIndex" to startIndex))
             }
 
-            // 2. TV Shows Folder / View (Returns Series overview cards)
+            // 6. TV Shows Folder / View (Returns Series overview cards)
             cleanParentId == libSeriesHex || rawParentId == "lib_series" ||
-                    (cleanParentId.isBlank() && includeItemTypes.contains("series") && !includeItemTypes.contains("movie")) -> {
+                    (cleanParentId.isBlank() && isSeriesQuery && !isMovieQuery) -> {
                 val seriesMedia = allMedia.filter { isSeries(it) }
                 val groupedByTitle = seriesMedia.groupBy { it.title.lowercase().trim() }
                 val uniqueSeries = seriesMedia.distinctBy { it.title.lowercase().trim() }
@@ -1099,7 +1223,7 @@ class JellyfinBridge(
                 return jsonResponse(mapOf("Items" to paged, "TotalRecordCount" to total, "StartIndex" to startIndex))
             }
 
-            // 3. Anime Folder / View
+            // 7. Anime Folder / View
             cleanParentId == libAnimeHex || rawParentId == "lib_anime" -> {
                 val animeMedia = allMedia.filter { isAnime(it) }
                 val groupedByTitle = animeMedia.groupBy { it.title.lowercase().trim() }
@@ -1123,86 +1247,7 @@ class JellyfinBridge(
                 return jsonResponse(mapOf("Items" to paged, "TotalRecordCount" to total, "StartIndex" to startIndex))
             }
 
-            // 4. Inside a Series -> Return Seasons (unless episodes are explicitly requested)
-            isParentSeries && !includeItemTypes.contains("episode") -> {
-                val targetSeriesId = when {
-                    effectiveRawParentId.startsWith("series_") -> effectiveRawParentId
-                    seriesIdParam.isNotBlank() -> seriesIdParam
-                    cleanParentId.isNotBlank() -> cleanParentId
-                    else -> effectiveParentId
-                }
-                val episodes = getEpisodesForSeries(targetSeriesId)
-                val seasons = episodes.mapNotNull { it.season ?: 1 }.distinct().sorted()
-                val effectiveSeasons = if (seasons.isEmpty()) listOf(1) else seasons
-                val firstEp = episodes.firstOrNull()
-                val showTitle = firstEp?.title ?: getSeriesTitleFromId(effectiveRawParentId.ifBlank { targetSeriesId })
-                val seriesRaw = firstEp?.let { getSeriesId(it) } ?: effectiveRawParentId.ifBlank { targetSeriesId }
-                val seriesHex = toHexId(seriesRaw)
-                val seasonItems = effectiveSeasons.map { s ->
-                    val seasonRawId = "${seriesRaw}_s$s"
-                    val seasonHex = toHexId(seasonRawId)
-                    mapOf(
-                        "Name" to "Season $s",
-                        "SeasonName" to "Season $s",
-                        "ServerId" to serverId,
-                        "Id" to seasonHex,
-                        "SeriesId" to seriesHex,
-                        "SeriesName" to showTitle,
-                        "SeriesPrimaryImageTag" to seriesHex,
-                        "ParentLogoItemId" to seriesHex,
-                        "ParentLogoImageTag" to seriesHex,
-                        "ParentBackdropItemId" to seriesHex,
-                        "ParentBackdropImageTags" to listOf(seriesHex),
-                        "BackdropImageTags" to listOf(seriesHex),
-                        "IndexNumber" to s,
-                        "Type" to "Season",
-                        "IsFolder" to true,
-                        "PrimaryImageAspectRatio" to 0.6666667,
-                        "LocationType" to "FileSystem",
-                        "UserData" to mapOf(
-                            "UnplayedItemCount" to episodes.count { (it.season ?: 1) == s },
-                            "PlaybackPositionTicks" to 0L,
-                            "PlayCount" to 0,
-                            "IsFavorite" to false,
-                            "Played" to false
-                        ),
-                        "ImageTags" to mapOf("Primary" to seriesHex, "Thumb" to seriesHex)
-                    )
-                }
-                val total = seasonItems.size
-                val paged = seasonItems.drop(startIndex).take(limit)
-                return jsonResponse(mapOf("Items" to paged, "TotalRecordCount" to total, "StartIndex" to startIndex))
-            }
-
-            // 5. Inside a Season OR Requesting Episodes for a Series
-            isParentSeason ||
-            (isParentSeries && includeItemTypes.contains("episode")) ||
-            isSeasonRawId(effectiveRawSeasonId) ||
-            (effectiveRawParentId.startsWith("series_") && includeItemTypes.contains("episode")) ||
-            includeItemTypes.contains("episode") -> {
-                val targetId = when {
-                    isSeasonRawId(effectiveRawSeasonId) -> effectiveRawSeasonId
-                    effectiveRawParentId.startsWith("series_") -> effectiveRawParentId
-                    seriesIdParam.isNotBlank() -> seriesIdParam
-                    cleanParentId.isNotBlank() -> cleanParentId
-                    else -> effectiveParentId
-                }
-                val seasonNum = seasonSuffixRegex.find(targetId)?.groupValues?.getOrNull(1)?.toIntOrNull()
-                    ?: seasonIdParam.toIntOrNull()
-                    ?: seasonSuffixRegex.find(fromHexId(seasonIdParam))?.groupValues?.getOrNull(1)?.toIntOrNull()
-
-                var episodes = getEpisodesForSeries(targetId)
-                if (seasonNum != null) {
-                    episodes = episodes.filter { (it.season ?: 1) == seasonNum }
-                }
-                val sorted = episodes.sortedWith(compareBy({ it.season ?: 1 }, { it.episode ?: 1 }))
-                val total = sorted.size
-                val paged = sorted.drop(startIndex).take(limit)
-                    .map { toJellyfinItem(it, localIp, port, isSeriesOverview = false, includeMediaSources = true, isInfuse = isInfuse) }
-                return jsonResponse(mapOf("Items" to paged, "TotalRecordCount" to total, "StartIndex" to startIndex))
-            }
-
-            // 6. Global Catalog Query / Fallback
+            // 8. Global Catalog Query / Fallback
             else -> {
                 var filtered = allMedia
                 if (includeItemTypes.isNotEmpty()) {
@@ -1210,9 +1255,9 @@ class JellyfinBridge(
                         val isSer = isSeries(item)
                         val isAni = isAnime(item)
                         when {
-                            isAni -> includeItemTypes.contains("series") || includeItemTypes.contains("movie") || includeItemTypes.contains("episode")
-                            isSer -> includeItemTypes.contains("series") || includeItemTypes.contains("episode")
-                            else -> includeItemTypes.contains("movie")
+                            isAni -> isSeriesQuery || isMovieQuery || isEpisodeQuery
+                            isSer -> isSeriesQuery || isEpisodeQuery
+                            else -> isMovieQuery
                         }
                     }
                 }
@@ -1223,6 +1268,37 @@ class JellyfinBridge(
                 return jsonResponse(mapOf("Items" to paged, "TotalRecordCount" to total, "StartIndex" to startIndex))
             }
         }
+    }
+
+    private fun handleShowsNextUp(
+        cleanUri: String,
+        params: Map<String, String>,
+        localIp: String,
+        port: Int,
+        isInfuse: Boolean = false
+    ): Response {
+        val seriesIdParam = getParam(params, "seriesId", "SeriesId", "id", "Id")
+            .ifBlank { extractSegmentBetween(cleanUri, "shows/", "/nextup").substringBefore("/") }
+            .let { if (it.equals("nextup", ignoreCase = true)) "" else it }
+
+        if (seriesIdParam.isNotBlank()) {
+            val episodes = getEpisodesForSeries(seriesIdParam)
+            val sorted = episodes.sortedWith(compareBy({ it.season ?: 1 }, { it.episode ?: 1 }))
+            val nextEp = sorted.firstOrNull()
+            val items = if (nextEp != null) {
+                listOf(toJellyfinItem(nextEp, localIp, port, isSeriesOverview = false, includeMediaSources = true, isInfuse = isInfuse))
+            } else emptyList()
+            return jsonResponse(mapOf("Items" to items, "TotalRecordCount" to items.size, "StartIndex" to 0))
+        }
+
+        // Global NextUp: 1st episode of each series
+        val all = tgClient.getAllMedia().filter { !it.isHidden && (isSeries(it) || isAnime(it)) }
+        val grouped = all.groupBy { getSeriesSlug(it) }
+        val nextItems = grouped.values.mapNotNull { epList ->
+            epList.sortedWith(compareBy({ it.season ?: 1 }, { it.episode ?: 1 })).firstOrNull()
+        }.take(20).map { toJellyfinItem(it, localIp, port, isSeriesOverview = false, includeMediaSources = true, isInfuse = isInfuse) }
+
+        return jsonResponse(mapOf("Items" to nextItems, "TotalRecordCount" to nextItems.size, "StartIndex" to 0))
     }
 
     private fun handleShowSeasons(seriesId: String, localIp: String, port: Int, isInfuse: Boolean = false): Response {
@@ -1710,13 +1786,16 @@ class JellyfinBridge(
             else -> rawWithoutSeason
         }
 
+        val isHex = clean.length == 32 && clean.all { it in '0'..'9' || it in 'a'..'f' }
+
         // 2. Instant O(N) match by series slug or title (NO MD5)
-        if (targetSlug.isNotBlank() && targetSlug != clean) {
+        if (targetSlug.isNotBlank() && (!isHex || raw != clean)) {
             val slugMatches = all.filter { getSeriesSlug(it) == targetSlug }
             if (slugMatches.isNotEmpty()) return slugMatches
 
-            val fallbackTitle = targetSlug.replace("_", " ")
-            val titleMatches = all.filter { it.title.equals(fallbackTitle, ignoreCase = true) }
+            val titleMatches = all.filter {
+                it.title.lowercase().replace(seriesSlugCleanRegex, "") == targetSlug.replace(seriesSlugCleanRegex, "")
+            }
             if (titleMatches.isNotEmpty()) return titleMatches
         }
 
@@ -1729,7 +1808,6 @@ class JellyfinBridge(
         }
 
         // 4. Fallback hex match (only if not found by slug)
-        val isHex = clean.length == 32 && clean.all { it in '0'..'9' || it in 'a'..'f' }
         if (isHex) {
             val hexMatch = all.filter { toHexId(getSeriesId(it)) == clean }
             if (hexMatch.isNotEmpty()) return hexMatch
@@ -1743,6 +1821,14 @@ class JellyfinBridge(
                 return all.filter { getSeriesSlug(it) == showSlug }
             }
         }
+
+        // 5. Final fallback by direct title or IMDb match
+        val fallbackMatches = all.filter {
+            it.title.equals(clean, ignoreCase = true) ||
+            it.title.equals(raw, ignoreCase = true) ||
+            (!it.imdbId.isNullOrBlank() && (it.imdbId.equals(clean, ignoreCase = true) || it.imdbId.equals(raw, ignoreCase = true)))
+        }
+        if (fallbackMatches.isNotEmpty()) return fallbackMatches
 
         return emptyList()
     }
@@ -1938,12 +2024,15 @@ class JellyfinBridge(
             }
         }
 
+        val hasLogo = (!item.imdbId.isNullOrBlank() && item.imdbId!!.startsWith("tt")) ||
+                posterService.hasCachedLogo(item.title)
         val imageTags = mutableMapOf(
             "Primary" to hexId,
-            "Thumb" to hexId,
-            "Logo" to hexId,
-            "Art" to hexId
+            "Thumb" to hexId
         )
+        if (hasLogo) {
+            imageTags["Logo"] = hexId
+        }
 
         val map = mutableMapOf<String, Any?>(
             "Name" to displayName,
@@ -1955,6 +2044,7 @@ class JellyfinBridge(
             "CommunityRating" to (if (item.rating > 0) item.rating else 8.0),
             "RunTimeTicks" to durationTicks,
             "Container" to ext,
+            "LocationType" to "FileSystem",
             "CanDownload" to true,
             "SupportsDirectPlay" to true,
             "SupportsDirectStream" to true,
@@ -1989,6 +2079,7 @@ class JellyfinBridge(
             map["EpisodeCount"] = epCount
             map["RecursiveItemCount"] = epCount
             map["PrimaryImageAspectRatio"] = 0.6666667
+            map["LocationType"] = "FileSystem"
             map.remove("MediaType")
             map.remove("Container")
             map.remove("Path")
@@ -2029,9 +2120,11 @@ class JellyfinBridge(
             map["ParentBackdropImageTags"] = listOf(seriesHex)
             map["BackdropImageTags"] = listOf(seriesHex)
             map["ImageTags"] = mapOf("Primary" to hexId, "Thumb" to hexId)
+            map["LocationType"] = "FileSystem"
         } else {
             map["Type"] = "Movie"
             map["IsFolder"] = false
+            map["LocationType"] = "FileSystem"
         }
 
         if (!isSeriesOverview) {
