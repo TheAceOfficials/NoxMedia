@@ -249,20 +249,28 @@ class SpatialPosterService {
         // 3. Cinemeta Fallback
         if (cleanQuery.isNotBlank()) {
             try {
-                val encodedTitle = URLEncoder.encode(cleanQuery, "UTF-8")
-                val cinemetaUrl = "https://v3-cinemeta.strem.io/catalog/movie/top/search=$encodedTitle.json"
-                val req = Request.Builder().url(cinemetaUrl).header("User-Agent", "NoxMedia/1.0").build()
-                httpClient.newCall(req).execute().use { resp ->
-                    if (resp.isSuccessful) {
-                        val body = resp.body?.string()
-                        if (!body.isNullOrBlank()) {
-                            val json = JsonParser.parseString(body).asJsonObject
-                            if (json.has("metas") && json.getAsJsonArray("metas").size() > 0) {
-                                val firstMeta = json.getAsJsonArray("metas")[0].asJsonObject
-                                val bg = if (firstMeta.has("background")) firstMeta.get("background").asString else null
-                                if (!bg.isNullOrBlank()) {
-                                    backdropCache[cleanQuery] = bg
-                                    return bg
+                for (cat in listOf("movie", "series")) {
+                    val encodedTitle = URLEncoder.encode(cleanQuery, "UTF-8")
+                    val cinemetaUrl = "https://v3-cinemeta.strem.io/catalog/$cat/top/search=$encodedTitle.json"
+                    val req = Request.Builder().url(cinemetaUrl).header("User-Agent", "NoxMedia/1.0").build()
+                    httpClient.newCall(req).execute().use { resp ->
+                        if (resp.isSuccessful) {
+                            val body = resp.body?.string()
+                            if (!body.isNullOrBlank()) {
+                                val json = JsonParser.parseString(body).asJsonObject
+                                if (json.has("metas") && json.getAsJsonArray("metas").size() > 0) {
+                                    val firstMeta = json.getAsJsonArray("metas")[0].asJsonObject
+                                    val bg = if (firstMeta.has("background") && !firstMeta.get("background").isJsonNull) firstMeta.get("background").asString else null
+                                    if (!bg.isNullOrBlank()) {
+                                        backdropCache[cleanQuery] = bg
+                                        return bg
+                                    }
+                                    val cImdb = if (firstMeta.has("imdb_id") && !firstMeta.get("imdb_id").isJsonNull) firstMeta.get("imdb_id").asString else null
+                                    if (!cImdb.isNullOrBlank() && cImdb.startsWith("tt")) {
+                                        val metahubBg = "https://images.metahub.space/background/medium/$cImdb/img"
+                                        backdropCache[cleanQuery] = metahubBg
+                                        return metahubBg
+                                    }
                                 }
                             }
                         }
@@ -341,20 +349,28 @@ class SpatialPosterService {
         // 3. Cinemeta Logo Fallback
         if (cleanQuery.isNotBlank()) {
             try {
-                val encodedTitle = URLEncoder.encode(cleanQuery, "UTF-8")
-                val cinemetaUrl = "https://v3-cinemeta.strem.io/catalog/movie/top/search=$encodedTitle.json"
-                val req = Request.Builder().url(cinemetaUrl).header("User-Agent", "NoxMedia/1.0").build()
-                httpClient.newCall(req).execute().use { resp ->
-                    if (resp.isSuccessful) {
-                        val body = resp.body?.string()
-                        if (!body.isNullOrBlank()) {
-                            val json = JsonParser.parseString(body).asJsonObject
-                            if (json.has("metas") && json.getAsJsonArray("metas").size() > 0) {
-                                val firstMeta = json.getAsJsonArray("metas")[0].asJsonObject
-                                val lg = if (firstMeta.has("logo")) firstMeta.get("logo").asString else null
-                                if (!lg.isNullOrBlank()) {
-                                    logoCache[cleanQuery] = lg
-                                    return lg
+                for (cat in listOf("movie", "series")) {
+                    val encodedTitle = URLEncoder.encode(cleanQuery, "UTF-8")
+                    val cinemetaUrl = "https://v3-cinemeta.strem.io/catalog/$cat/top/search=$encodedTitle.json"
+                    val req = Request.Builder().url(cinemetaUrl).header("User-Agent", "NoxMedia/1.0").build()
+                    httpClient.newCall(req).execute().use { resp ->
+                        if (resp.isSuccessful) {
+                            val body = resp.body?.string()
+                            if (!body.isNullOrBlank()) {
+                                val json = JsonParser.parseString(body).asJsonObject
+                                if (json.has("metas") && json.getAsJsonArray("metas").size() > 0) {
+                                    val firstMeta = json.getAsJsonArray("metas")[0].asJsonObject
+                                    val lg = if (firstMeta.has("logo") && !firstMeta.get("logo").isJsonNull) firstMeta.get("logo").asString else null
+                                    if (!lg.isNullOrBlank()) {
+                                        logoCache[cleanQuery] = lg
+                                        return lg
+                                    }
+                                    val cImdb = if (firstMeta.has("imdb_id") && !firstMeta.get("imdb_id").isJsonNull) firstMeta.get("imdb_id").asString else null
+                                    if (!cImdb.isNullOrBlank() && cImdb.startsWith("tt")) {
+                                        val metahubLogo = "https://images.metahub.space/logo/medium/$cImdb/img"
+                                        logoCache[cleanQuery] = metahubLogo
+                                        return metahubLogo
+                                    }
                                 }
                             }
                         }

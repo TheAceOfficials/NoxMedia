@@ -430,7 +430,7 @@ class JellyfinBridge(
                     val itemId = extractSegmentBetween(cleanUri, "items/", "/images")
                         .ifBlank { extractSegmentBetween(cleanUri, "shows/", "/images") }
                         .ifBlank { extractSegmentBetween(cleanUri, "seasons/", "/images") }
-                    val imageType = cleanUri.substringAfter("/images/").substringBefore("/")
+                    val imageType = lowerUri.substringAfter("/images/").substringBefore("/")
                     handleImageRedirect(itemId, imageType, isInfuse)
                 }
 
@@ -1406,9 +1406,9 @@ class JellyfinBridge(
         val matching: List<MediaItem> = if (isMovie(item)) {
             all.filter {
                 isMovie(it) && (it.id == item.id ||
-                    (!item.imdbId.isNullOrBlank() && it.imdbId == item.imdbId) ||
-                    (item.tmdbId != null && it.tmdbId == item.tmdbId) ||
-                    (it.title.equals(item.title, ignoreCase = true) && it.year == item.year))
+                    (!item.imdbId.isNullOrBlank() && it.imdbId.equals(item.imdbId, ignoreCase = true)) ||
+                    (item.tmdbId != null && item.tmdbId!! > 0 && it.tmdbId == item.tmdbId) ||
+                    (it.title.equals(item.title, ignoreCase = true) && (it.year.isNullOrBlank() || item.year.isNullOrBlank() || it.year == item.year)))
             }
         } else {
             all.filter {
@@ -1418,7 +1418,12 @@ class JellyfinBridge(
         }
 
         val versions = if (matching.isNotEmpty()) matching.distinctBy { it.id } else listOf(item)
-        return versions.map { ver ->
+        val sortedVersions = versions.sortedWith(
+            compareByDescending<MediaItem> { it.id == item.id }
+                .thenByDescending { if (it.quality.contains("4k", true) || it.qualityBadge.contains("4k", true)) 4 else if (it.quality.contains("1080", true)) 3 else if (it.quality.contains("720", true)) 2 else 1 }
+                .thenByDescending { it.sizeBytes }
+        )
+        return sortedVersions.map { ver ->
             val hexId = toHexId(ver.id)
             val rawFileName = buildCleanFileName(ver)
             val safeFileName = try {
@@ -1442,6 +1447,8 @@ class JellyfinBridge(
                 if (length == 0) append(ver.title)
             }
 
+            val bitrate = if (ver.durationSeconds > 0 && ver.sizeBytes > 0) (ver.sizeBytes * 8) / ver.durationSeconds else 10_000_000L
+
             mapOf(
                 "Id" to hexId,
                 "Name" to qualityLabel,
@@ -1449,6 +1456,7 @@ class JellyfinBridge(
                 "Protocol" to "Http",
                 "Container" to ext,
                 "Size" to ver.sizeBytes,
+                "Bitrate" to bitrate,
                 "RunTimeTicks" to durationTicks,
                 "SupportsDirectPlay" to true,
                 "SupportsDirectStream" to true,
@@ -1512,8 +1520,11 @@ class JellyfinBridge(
 
         // 2. Backdrop Image Redirect (16:9 fanart background)
         if (imageType.equals("Backdrop", ignoreCase = true)) {
-            val resolvedBackdrop = item?.backdropUrl
-                ?: (if (title.isNotBlank()) posterService.resolveBackdrop(title, item?.imdbId, item?.tmdbId, config.tmdbApiKey) else null)
+            val resolvedBackdrop = if (!item?.backdropUrl.isNullOrBlank() && item?.backdropUrl?.contains("/poster/") != true) {
+                item?.backdropUrl
+            } else if (title.isNotBlank()) {
+                posterService.resolveBackdrop(title, item?.imdbId, item?.tmdbId, config.tmdbApiKey)
+            } else null
             val targetUrl = resolvedBackdrop ?: "https://images.metahub.space/background/medium/placeholder/img"
             val resp = NanoHTTPD.newFixedLengthResponse(Response.Status.REDIRECT, "text/plain", "")
             resp.addHeader("Location", targetUrl)
