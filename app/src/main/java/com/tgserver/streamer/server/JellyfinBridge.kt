@@ -286,14 +286,13 @@ class JellyfinBridge(
         val epCount = show.allEpisodes.size
         val firstEp = show.firstEpisode
         val yearInt = firstEp?.year?.toIntOrNull() ?: 2024
-        val durationTicks = if ((firstEp?.durationSeconds ?: 0) > 0) firstEp!!.durationSeconds.toLong() * 10_000_000L else 3600L * 10_000_000L
 
         val providerIds = mutableMapOf<String, String>()
         firstEp?.imdbId?.takeIf { it.isNotBlank() }?.let { providerIds["Imdb"] = it }
         firstEp?.tmdbId?.takeIf { it > 0 }?.let { providerIds["Tmdb"] = it.toString() }
         firstEp?.kitsuId?.takeIf { it > 0 }?.let { providerIds["Kitsu"] = it.toString() }
 
-        val hasLogo = (!firstEp?.imdbId.isNullOrBlank() && firstEp?.imdbId!!.startsWith("tt")) ||
+        val hasLogo = (firstEp?.imdbId?.startsWith("tt") == true) ||
                 posterService.hasCachedLogo(show.title)
         val imageTags = mutableMapOf(
             "Primary" to show.seriesHexId,
@@ -318,8 +317,8 @@ class JellyfinBridge(
             "ProductionYear" to yearInt,
             "PremiereDate" to "${yearInt}-01-01T00:00:00.0000000Z",
             "Overview" to (firstEp?.overview ?: ""),
-            "CommunityRating" to (if ((firstEp?.rating ?: 0.0) > 0) firstEp!!.rating else 8.0),
-            "Genres" to (firstEp?.genres?.takeIf { it.isNotEmpty() } ?: (if (show.isAnime) listOf("Animation", "Anime") else listOf("Drama", "Series"))),
+            "CommunityRating" to (firstEp?.rating?.takeIf { it > 0.0 } ?: 8.0),
+            "Genres" to (if (show.isAnime) listOf("Animation", "Anime") else listOf("Drama", "Series")),
             "ChildCount" to sCount,
             "SeasonCount" to sCount,
             "EpisodeCount" to epCount,
