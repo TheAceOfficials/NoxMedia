@@ -159,16 +159,6 @@ class SpatialPosterService {
     private val logoCache = ConcurrentHashMap<String, String>()
     private val episodeStillCache = ConcurrentHashMap<String, String>()
 
-    fun hasCachedLogo(rawTitle: String): Boolean {
-        val clean = sanitizeTitle(rawTitle)
-        return clean.isNotBlank() && logoCache.containsKey(clean)
-    }
-
-    fun hasCachedBackdrop(rawTitle: String): Boolean {
-        val clean = sanitizeTitle(rawTitle)
-        return clean.isNotBlank() && backdropCache.containsKey(clean)
-    }
-
     fun resolveBackdrop(
         rawTitle: String,
         imdbId: String? = null,
