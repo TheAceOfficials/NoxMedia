@@ -316,7 +316,12 @@ class JellyfinBridge(
                 }
                 lowerUri.contains("/shows/") && lowerUri.contains("/seasons") -> {
                     val seriesId = extractSegmentBetween(cleanUri, "shows/", "/seasons").substringBefore("/")
-                    handleShowSeasons(seriesId, localIp, config.port, isInfuse)
+                    if (isInfuse) {
+                        // For Infuse: flatten hierarchy, return episodes directly so Infuse renders TV Show page natively
+                        handleShowEpisodes(seriesId, null, localIp, config.port, isInfuse)
+                    } else {
+                        handleShowSeasons(seriesId, localIp, config.port, isInfuse)
+                    }
                 }
                 lowerUri.contains("/shows/") && lowerUri.contains("/episodes") -> {
                     val seriesId = extractSegmentBetween(cleanUri, "shows/", "/episodes").substringBefore("/")
@@ -1071,9 +1076,37 @@ class JellyfinBridge(
                 return jsonResponse(mapOf("Items" to paged, "TotalRecordCount" to total, "StartIndex" to startIndex))
             }
 
-            // 4. Inside a Series -> Return Seasons (unless episodes requested)
-            (isParentSeries || (seriesIdParam.isNotBlank() && includeItemTypes.contains("season")))
-                    && !effectiveRawParentId.contains("_s") && !includeItemTypes.contains("episode") -> {
+            // 4. Inside a Series or Season -> Return Episodes Directly
+            // Directly returning episodes allows Infuse to group episodes into seasons natively
+            // via ParentIndexNumber and display the full TV show UI without intermediate folder crashes.
+            (isParentSeries || isParentSeason || includeItemTypes.contains("episode") ||
+                    effectiveRawSeasonId.contains("_s") ||
+                    effectiveRawParentId.startsWith("series_") ||
+                    seriesIdParam.isNotBlank()) && !includeItemTypes.contains("season") -> {
+                val targetId = when {
+                    effectiveRawSeasonId.contains("_s") -> effectiveRawSeasonId
+                    effectiveRawParentId.startsWith("series_") -> effectiveRawParentId
+                    seriesIdParam.isNotBlank() -> seriesIdParam
+                    cleanParentId.isNotBlank() -> cleanParentId
+                    else -> effectiveParentId
+                }
+                val seasonNum = if (targetId.contains("_s")) {
+                    targetId.substringAfter("_s").toIntOrNull()
+                } else seasonIdParam.toIntOrNull() ?: fromHexId(seasonIdParam).substringAfterLast("_s").toIntOrNull()
+
+                var episodes = getEpisodesForSeries(targetId)
+                if (seasonNum != null) {
+                    episodes = episodes.filter { (it.season ?: 1) == seasonNum }
+                }
+                val sorted = episodes.sortedWith(compareBy({ it.season ?: 1 }, { it.episode ?: 1 }))
+                val total = sorted.size
+                val paged = sorted.drop(startIndex).take(limit)
+                    .map { toJellyfinItem(it, localIp, port, isSeriesOverview = false, includeMediaSources = true, isInfuse = isInfuse) }
+                return jsonResponse(mapOf("Items" to paged, "TotalRecordCount" to total, "StartIndex" to startIndex))
+            }
+
+            // 5. Explicitly requesting Seasons (Only for clients explicitly querying season type)
+            includeItemTypes.contains("season") -> {
                 val targetSeriesId = when {
                     effectiveRawParentId.startsWith("series_") -> effectiveRawParentId
                     seriesIdParam.isNotBlank() -> seriesIdParam
@@ -1119,33 +1152,6 @@ class JellyfinBridge(
                 }
                 val total = seasonItems.size
                 val paged = seasonItems.drop(startIndex).take(limit)
-                return jsonResponse(mapOf("Items" to paged, "TotalRecordCount" to total, "StartIndex" to startIndex))
-            }
-
-            // 5. Inside a Season OR Requesting Episodes for a Series
-            (isParentSeason || (isParentSeries && includeItemTypes.contains("episode")) ||
-             effectiveRawSeasonId.contains("_s") ||
-             (effectiveRawParentId.startsWith("series_") && includeItemTypes.contains("episode")) ||
-             (seriesIdParam.isNotBlank() && (includeItemTypes.contains("episode") || !includeItemTypes.contains("season")))) -> {
-                val targetId = when {
-                    effectiveRawSeasonId.contains("_s") -> effectiveRawSeasonId
-                    effectiveRawParentId.startsWith("series_") -> effectiveRawParentId
-                    seriesIdParam.isNotBlank() -> seriesIdParam
-                    cleanParentId.isNotBlank() -> cleanParentId
-                    else -> effectiveParentId
-                }
-                val seasonNum = if (targetId.contains("_s")) {
-                    targetId.substringAfter("_s").toIntOrNull()
-                } else seasonIdParam.toIntOrNull() ?: fromHexId(seasonIdParam).substringAfterLast("_s").toIntOrNull()
-
-                var episodes = getEpisodesForSeries(targetId)
-                if (seasonNum != null) {
-                    episodes = episodes.filter { (it.season ?: 1) == seasonNum }
-                }
-                val sorted = episodes.sortedWith(compareBy({ it.season ?: 1 }, { it.episode ?: 1 }))
-                val total = sorted.size
-                val paged = sorted.drop(startIndex).take(limit)
-                    .map { toJellyfinItem(it, localIp, port, isSeriesOverview = false, includeMediaSources = true, isInfuse = isInfuse) }
                 return jsonResponse(mapOf("Items" to paged, "TotalRecordCount" to total, "StartIndex" to startIndex))
             }
 
