@@ -17,6 +17,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 private const val TAG = "JellyfinBridge"
@@ -655,7 +656,7 @@ class JellyfinBridge(
                         )
                     )
                 }
-                lowerUri == "/items/counts" -> {
+                lowerUri.endsWith("/items/counts") -> {
                     handleItemCounts()
                 }
 
@@ -1177,7 +1178,7 @@ class JellyfinBridge(
         return when {
             // 1. Create Checkpoint: POST /InfuseSync/Checkpoint
             lowerUri.endsWith("/checkpoint") || lowerUri.contains("/checkpoint?") -> {
-                val checkpointId = "022a3003-993f-45f1-8565-87d12af2e12a"
+                val checkpointId = UUID.randomUUID().toString()
                 jsonResponse(mapOf("Id" to checkpointId))
             }
 
@@ -1185,8 +1186,8 @@ class JellyfinBridge(
             lowerUri.contains("/startsync") -> {
                 val moviesCount = allMedia.filter { isMovie(it) }.distinctBy { getMovieKey(it) }.size
                 val tvShowsCount = showsByHex.size
-                val seasonsCount = seasonsByHex.size
-                val episodesCount = seasonsByHex.values.sumOf { it.episodes.size }
+                val seasonsCount = showsByHex.values.sumOf { it.seasons.size }
+                val episodesCount = showsByHex.values.sumOf { it.allEpisodes.size }
                 jsonResponse(mapOf(
                     "UpdatedFolders" to 0,
                     "RemovedFolders" to 0,
@@ -1352,8 +1353,8 @@ class JellyfinBridge(
     private fun handleItemCounts(): Response {
         val all = tgClient.getAllMedia().filter { !it.isHidden }
         val movies = all.count { isMovie(it) }
-        val series = all.filter { isSeries(it) }.distinctBy { it.title.lowercase().trim() }.size
-        val episodes = all.count { isSeries(it) }
+        val series = all.filter { isSeries(it) || isAnime(it) }.distinctBy { it.title.lowercase().trim() }.size
+        val episodes = all.count { isSeries(it) || isAnime(it) }
         return jsonResponse(
             mapOf(
                 "MovieCount" to movies,
