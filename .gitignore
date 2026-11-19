@@ -23,3 +23,9 @@ venv311/
 .env
 __pycache__/
 *.pyc
+
+# VitePress & Node documentation
+docs/node_modules/
+docs/.vitepress/dist/
+docs/.vitepress/cache/
+

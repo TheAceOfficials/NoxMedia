@@ -8,11 +8,16 @@
 
 <p align="center">
   <a href="https://github.com/TheAceOfficials/NoxMedia/releases"><img src="https://img.shields.io/badge/Platform-Android%207.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white" alt="Platform"></a>
+  <a href="https://theaceofficials.github.io/NoxMedia/"><img src="https://img.shields.io/badge/Docs%20%26%20Updates-GitHub%20Pages-FF5722?style=flat-square&logo=gitbook&logoColor=white" alt="Docs & Updates"></a>
   <a href="https://kotlinlang.org"><img src="https://img.shields.io/badge/Kotlin-2.3-7F52FF?style=flat-square&logo=kotlin&logoColor=white" alt="Kotlin"></a>
   <a href="https://chaquo.com/chaquopy/"><img src="https://img.shields.io/badge/Python-3.11%20(Chaquopy)-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python"></a>
   <a href="https://stremio.com"><img src="https://img.shields.io/badge/Stremio%20%2F%20Nuvio-Addon%20v3-7A55C7?style=flat-square&logo=stremio&logoColor=white" alt="Stremio / Nuvio"></a>
   <a href="https://www.patreon.com/cw/TheAceOfficials"><img src="https://img.shields.io/badge/Patreon-Support-FF424D?style=flat-square&logo=patreon&logoColor=white" alt="Patreon"></a>
   <a href="#-license"><img src="https://img.shields.io/badge/License-AGPLv3-blue.svg?style=flat-square" alt="License"></a>
+</p>
+
+<p align="center">
+  <a href="https://theaceofficials.github.io/NoxMedia/"><strong>Explore the Documentation & Changelog Website →</strong></a>
 </p>
 
 ---
