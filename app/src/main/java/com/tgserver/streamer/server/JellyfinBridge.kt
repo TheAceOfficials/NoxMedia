@@ -1438,8 +1438,10 @@ class JellyfinBridge(
                 if (customCat != null) {
                     val allGroups = allMedia.toMediaGroups()
                     val matched = catalogRepo.filterMediaForCatalog(customCat, allGroups)
+                    val total = matched.size
+                    val pagedGroups = matched.drop(startIndex).take(limit)
                     val items = mutableListOf<Map<String, Any?>>()
-                    for (group in matched) {
+                    for (group in pagedGroups) {
                         if (group.type == "series") {
                             val show = findShow(group.title) ?: showsByHex.values.firstOrNull { it.title.equals(group.title, ignoreCase = true) }
                             if (show != null) {
@@ -1457,9 +1459,7 @@ class JellyfinBridge(
                             }
                         }
                     }
-                    val total = items.size
-                    val paged = items.drop(startIndex).take(limit)
-                    return jsonResponse(mapOf("Items" to paged, "TotalRecordCount" to total, "StartIndex" to startIndex))
+                    return jsonResponse(mapOf("Items" to items, "TotalRecordCount" to total, "StartIndex" to startIndex))
                 } else {
                     return jsonResponse(mapOf("Items" to emptyList<Any>(), "TotalRecordCount" to 0, "StartIndex" to 0))
                 }

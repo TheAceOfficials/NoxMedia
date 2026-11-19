@@ -698,56 +698,18 @@ class MetadataEnricher {
 
     fun resolveRuntimeSeconds(item: MediaItem): Int {
         if (item.type == "movie") {
-            if (item.durationSeconds in 2400..18000) return item.durationSeconds
+            if (item.durationSeconds in 1800..21600) return item.durationSeconds
         } else {
-            if (item.durationSeconds in 900..7200) return item.durationSeconds
+            if (item.durationSeconds in 300..10800) return item.durationSeconds
         }
 
         val imdbId = item.imdbId
         if (!imdbId.isNullOrBlank()) {
-            runtimeCache[imdbId]?.let { cachedSec ->
-                if (cachedSec > 0) {
-                    item.durationSeconds = cachedSec
-                    return cachedSec
-                }
+            val cachedSec = runtimeCache[imdbId]
+            if (cachedSec != null && cachedSec > 0) {
+                item.durationSeconds = cachedSec
+                return cachedSec
             }
-
-            try {
-                val cType = if (item.type == "movie") "movie" else "series"
-                val url = "https://v3-cinemeta.strem.io/meta/$cType/$imdbId.json"
-                val req = Request.Builder().url(url).header("User-Agent", "NoxMedia/1.0").build()
-                httpClient.newCall(req).execute().use { resp ->
-                    if (resp.isSuccessful) {
-                        val body = resp.body?.string()
-                        if (!body.isNullOrBlank()) {
-                            val root = JsonParser.parseString(body).asJsonObject
-                            val metaObj = root.getAsJsonObject("meta")
-                            var rtStr = metaObj?.get("runtime")?.asString
-                            if (rtStr.isNullOrBlank() && item.type == "series" && metaObj != null && metaObj.has("videos")) {
-                                val vids = metaObj.getAsJsonArray("videos")
-                                for (v in vids) {
-                                    val vo = v.asJsonObject
-                                    val s = vo.get("season")?.asInt
-                                    val e = vo.get("episode")?.asInt ?: vo.get("number")?.asInt
-                                    if (s == item.season && e == item.episode) {
-                                        rtStr = vo.get("runtime")?.asString
-                                        break
-                                    }
-                                }
-                            }
-                            if (!rtStr.isNullOrBlank()) {
-                                val mins = Regex("(\\d+)").find(rtStr)?.groupValues?.get(1)?.toIntOrNull()
-                                if (mins != null && mins > 0) {
-                                    val secs = mins * 60
-                                    runtimeCache[imdbId] = secs
-                                    item.durationSeconds = secs
-                                    return secs
-                                }
-                            }
-                        }
-                    }
-                }
-            } catch (_: Exception) {}
         }
         return 0
     }
