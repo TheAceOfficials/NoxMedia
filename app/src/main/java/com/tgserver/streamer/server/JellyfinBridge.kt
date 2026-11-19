@@ -1441,7 +1441,7 @@ class JellyfinBridge(
                     val items = mutableListOf<Map<String, Any?>>()
                     for (group in matched) {
                         if (group.type == "series") {
-                            val show = showsByHex.values.firstOrNull { it.name.equals(group.title, ignoreCase = true) }
+                            val show = findShow(group.title) ?: showsByHex.values.firstOrNull { it.title.equals(group.title, ignoreCase = true) }
                             if (show != null) {
                                 items.add(buildSeriesDto(show, localIp, port, isInfuse))
                             } else {
