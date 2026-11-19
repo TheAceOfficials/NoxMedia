@@ -183,10 +183,14 @@ class JellyfinBridge(
             val episodesGroupedBySeason = items.groupBy { it.season ?: 1 }
 
             for ((sNum, eps) in episodesGroupedBySeason) {
-                val sortedEps = eps.sortedWith(
-                    compareBy<MediaItem> { it.episode ?: 1 }
-                        .thenBy { it.id }
-                )
+                val epsByEpisodeNumber = eps.groupBy { it.episode ?: 1 }
+                val deduplicatedEps = epsByEpisodeNumber.entries.sortedBy { it.key }.map { (_, versions) ->
+                    versions.sortedWith(
+                        compareByDescending<MediaItem> { if (it.quality.contains("4k", true) || it.qualityBadge.contains("4k", true)) 4 else if (it.quality.contains("1080", true)) 3 else if (it.quality.contains("720", true)) 2 else 1 }
+                            .thenByDescending { it.sizeBytes }
+                    ).first()
+                }
+
                 val seasonRawId = "${seriesRawId}_s$sNum"
                 val seasonHex = toHexId(seasonRawId)
                 registerHexId(seasonRawId, seasonHex)
@@ -196,13 +200,13 @@ class JellyfinBridge(
                     seasonHexId = seasonHex,
                     seriesHexId = seriesHex,
                     seriesTitle = showTitle,
-                    episodes = sortedEps
+                    episodes = deduplicatedEps
                 )
                 seasonMap[sNum] = seasonIndex
                 seasonsByHex[seasonHex] = seasonIndex
             }
 
-            val sortedAllEps = items.sortedWith(
+            val sortedAllEps = seasonMap.values.flatMap { it.episodes }.sortedWith(
                 compareBy<MediaItem> { it.season ?: 1 }
                     .thenBy { it.episode ?: 1 }
             )
@@ -221,7 +225,7 @@ class JellyfinBridge(
             showsByHex[seriesHex] = showIndex
             showsBySlug[slug] = showIndex
 
-            for (ep in sortedAllEps) {
+            for (ep in items) {
                 val epHex = toHexId(ep.id)
                 registerHexId(ep.id, epHex)
                 episodesById[ep.id] = ep
@@ -467,28 +471,14 @@ class JellyfinBridge(
         )
 
         if (includeMediaSources) {
-            val (vStream, aStream) = resolveMediaStreams(item)
-            val bitrate = if (item.sizeBytes > 0 && item.durationSeconds > 0) {
-                (item.sizeBytes * 8) / item.durationSeconds
-            } else 5_000_000L
-
-            val mediaSource = mapOf(
-                "Id" to hexId,
-                "Name" to rawFileName,
-                "Path" to virtualPath,
-                "DirectStreamUrl" to streamUrl,
-                "Protocol" to "Http",
-                "Container" to ext,
-                "Size" to item.sizeBytes,
-                "Bitrate" to bitrate,
-                "RunTimeTicks" to durationTicks,
-                "SupportsDirectPlay" to true,
-                "SupportsDirectStream" to true,
-                "SupportsTranscoding" to true,
-                "IsRemote" to false,
-                "MediaStreams" to listOf(vStream, aStream)
-            )
-            map["MediaSources"] = listOf(mediaSource)
+            val mediaSources = buildMediaSourcesForItem(item, localIp, port)
+            map["MediaSources"] = mediaSources
+            val primarySource = mediaSources.firstOrNull()
+            if (primarySource != null) {
+                primarySource["DirectStreamUrl"]?.let { map["DirectStreamUrl"] = it }
+                primarySource["Path"]?.let { map["Path"] = it }
+                primarySource["RunTimeTicks"]?.let { map["RunTimeTicks"] = it }
+            }
         }
 
         return map
@@ -1215,14 +1205,14 @@ class JellyfinBridge(
             isSeriesView -> {
                 ensureTvIndex()
                 showsByHex.values.filter { !it.isAnime }
-                    .sortedByDescending { it.firstEpisode?.dateAdded ?: 0L }
+                    .sortedByDescending { it.allEpisodes.maxOfOrNull { ep -> ep.dateAdded } ?: (it.firstEpisode?.dateAdded ?: 0L) }
                     .take(limit)
                     .map { buildSeriesDto(it, localIp, port, isInfuse) }
             }
             isAnimeView -> {
                 ensureTvIndex()
                 showsByHex.values.filter { it.isAnime }
-                    .sortedByDescending { it.firstEpisode?.dateAdded ?: 0L }
+                    .sortedByDescending { it.allEpisodes.maxOfOrNull { ep -> ep.dateAdded } ?: (it.firstEpisode?.dateAdded ?: 0L) }
                     .take(limit)
                     .map { buildSeriesDto(it, localIp, port, isInfuse) }
             }
@@ -1724,7 +1714,7 @@ class JellyfinBridge(
         } else {
             all.filter {
                 (isSeries(it) || isAnime(it)) && (it.id == item.id ||
-                    (it.title.equals(item.title, ignoreCase = true) && (it.season ?: 1) == (item.season ?: 1) && (it.episode ?: 1) == (item.episode ?: 1)))
+                    ((getSeriesSlug(it) == getSeriesSlug(item) || it.title.equals(item.title, ignoreCase = true)) && (it.season ?: 1) == (item.season ?: 1) && (it.episode ?: 1) == (item.episode ?: 1)))
             }
         }
 
@@ -1877,9 +1867,15 @@ class JellyfinBridge(
 
         // 2. Backdrop Image Redirect (16:9 fanart background)
         if (imageType.equals("Backdrop", ignoreCase = true)) {
-            val resolvedBackdrop = if (!item?.backdropUrl.isNullOrBlank() && item?.backdropUrl?.contains("/poster/") != true) {
-                item?.backdropUrl
-            } else if (title.isNotBlank()) {
+            val localBackdrop = item?.backdropUrl?.takeIf { it.isNotBlank() && !it.contains("/poster/") }
+                ?: show?.allEpisodes?.firstNotNullOfOrNull { it.backdropUrl?.takeIf { b -> b.isNotBlank() && !b.contains("/poster/") } }
+            if (localBackdrop != null) {
+                val resp = NanoHTTPD.newFixedLengthResponse(Response.Status.REDIRECT, "text/plain", "")
+                resp.addHeader("Location", localBackdrop)
+                resp.addHeader("Cache-Control", "public, max-age=86400, immutable")
+                return resp
+            }
+            val resolvedBackdrop = if (title.isNotBlank()) {
                 posterService.resolveBackdrop(title, item?.imdbId, item?.tmdbId, config.tmdbApiKey)
             } else null
             val targetUrl = resolvedBackdrop ?: "https://images.metahub.space/background/medium/placeholder/img"
@@ -1892,16 +1888,24 @@ class JellyfinBridge(
         val isSeriesOverview = show != null && ep == null
         val isEp = ep != null
 
+        val showPoster = if (show != null) {
+            show.allEpisodes.firstOrNull { !it.posterUrl.isNullOrBlank() && it.posterUrl != it.episodeThumbnailUrl }?.posterUrl
+                ?: show.firstEpisode?.posterUrl
+        } else null
+
+        val localPoster = showPoster ?: item?.posterUrl
+
         // 3. Thumb Image Redirect (Episode screenshot / still or show backdrop)
         if (imageType.equals("Thumb", ignoreCase = true)) {
             val thumbUrl = if (isEp && item != null) {
                 item.episodeThumbnailUrl
-                    ?: posterService.resolveEpisodeStill(item.title, item.tmdbId, item.season ?: 1, item.episode ?: 1, config.tmdbApiKey)
                     ?: item.backdropUrl
+                    ?: localPoster
+                    ?: posterService.resolveEpisodeStill(item.title, item.tmdbId, item.season ?: 1, item.episode ?: 1, config.tmdbApiKey)
             } else {
-                item?.backdropUrl
+                item?.backdropUrl ?: localPoster
             }
-            val targetUrl = thumbUrl ?: item?.posterUrl ?: "https://images.metahub.space/background/medium/placeholder/img"
+            val targetUrl = thumbUrl ?: "https://images.metahub.space/background/medium/placeholder/img"
             val resp = NanoHTTPD.newFixedLengthResponse(Response.Status.REDIRECT, "text/plain", "")
             resp.addHeader("Location", targetUrl)
             resp.addHeader("Cache-Control", "public, max-age=86400, immutable")
@@ -1911,43 +1915,26 @@ class JellyfinBridge(
         // 4. Primary Image Redirect (Episode still if Episode, or 2:3 vertical poster if Movie/Show)
         val targetUrl = if (isEp && item != null) {
             item.episodeThumbnailUrl
-                ?: posterService.resolveEpisodeStill(item.title, item.tmdbId, item.season ?: 1, item.episode ?: 1, config.tmdbApiKey)
                 ?: item.backdropUrl
-                ?: item.posterUrl
+                ?: localPoster
                 ?: "https://images.metahub.space/poster/medium/placeholder/img"
-        } else {
-            val showPoster = if (show != null) {
-                show.allEpisodes.firstOrNull { !it.posterUrl.isNullOrBlank() && it.posterUrl != it.episodeThumbnailUrl }?.posterUrl
-            } else null
-
-            val poster = if (isSeriesOverview) {
-                if (title.isNotBlank()) {
-                    posterService.resolvePoster(
-                        title,
-                        config.customPosterUrl,
-                        config.customPosterApiKey,
-                        config.tmdbApiKey,
-                        config.tvdbApiKey
-                    )
-                } else null ?: showPoster ?: item?.posterUrl
-            } else {
-                item?.posterUrl ?: showPoster ?: if (item != null) {
-                    val resolved = posterService.resolvePoster(
-                        item.title,
-                        config.customPosterUrl,
-                        config.customPosterApiKey,
-                        config.tmdbApiKey,
-                        config.tvdbApiKey
-                    )
-                    if (resolved != null) {
-                        item.posterUrl = resolved
-                        posterService.cachePoster(item.title, resolved)
-                    }
-                    resolved
-                } else null
+        } else if (!localPoster.isNullOrBlank()) {
+            localPoster
+        } else if (title.isNotBlank()) {
+            val resolved = posterService.resolvePoster(
+                title,
+                config.customPosterUrl,
+                config.customPosterApiKey,
+                config.tmdbApiKey,
+                config.tvdbApiKey
+            )
+            if (resolved != null && item != null) {
+                item.posterUrl = resolved
+                posterService.cachePoster(title, resolved)
             }
-
-            poster ?: "https://images.metahub.space/poster/medium/placeholder/img"
+            resolved ?: "https://images.metahub.space/poster/medium/placeholder/img"
+        } else {
+            "https://images.metahub.space/poster/medium/placeholder/img"
         }
 
         val resp = NanoHTTPD.newFixedLengthResponse(Response.Status.REDIRECT, "text/plain", "")
