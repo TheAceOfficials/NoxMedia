@@ -3,53 +3,37 @@ layout: home
 
 hero:
   name: "NoxMedia"
-  text: "Personal Media Server & Cloud Streaming Hub"
-  tagline: "High-performance streaming engine bridging Telegram channels directly to Infuse, Stremio, Nuvio, and Android TV."
+  text: "Next-Generation Personal Media Server"
+  tagline: "Transform Telegram cloud storage into a high-performance streaming bridge for Infuse, Vesper, and Nuvio."
   image:
     src: /logo.png
     alt: NoxMedia Logo
   actions:
     - theme: brand
-      text: 🚀 Get Started
+      text: Get Started
       link: /guide/getting-started
     - theme: alt
-      text: 🍎 Infuse Setup
+      text: Client Setup
       link: /clients/infuse
     - theme: alt
-      text: ⬇️ Download APK
-      link: https://github.com/TheAceOfficials/NoxMedia/releases/latest
+      text: Roadmap
+      link: /roadmap
 
 features:
-  - title: 🍎 Native Infuse Direct Mode
-    details: Complete Jellyfin/Emby API emulation enabling seamless Apple TV, iPad, iPhone, and Mac streaming with 100% native DirectPlay.
-    link: /clients/infuse
-  - title: 🍿 Instant Stremio & Nuvio Addon
-    details: Precomputed 0ms cache delivering zero-lag catalog loading and multi-audio stream selection on any Stremio-compatible client.
-    link: /clients/stremio-nuvio
-  - title: 🪄 AI & Custom Shelves
-    details: Curate custom catalogs using AI prompts powered by Gemini & OpenRouter, or build custom filters by studio, 4K HDR, and actors.
-    link: /guide/ai-catalogs
-  - title: ⚡ 3.5x High-Throughput Engine
-    details: Parallelized chunk prefetching pipeline delivering 70% lower latency on massive 4K Dolby Vision, IMAX, and Remux files.
-    link: /updates/v1-4-325
-  - title: ☁️ True Cloud Sync & Standby
-    details: Seamlessly synchronize watch progress across all devices with battery-optimized 24/7 background standby server mode.
-    link: /guide/cloud-sync
-  - title: 🎨 Spatial Posters & Rich Metadata
-    details: Automatic TMDB, TVDB, and Kitsu artwork enrichment with clear logo treatments, 16:9 episode accordions, and cast info.
-    link: /guide/channels-setup
+  - title: Direct Cloud Streaming
+    details: Zero local storage waste. Stream high-bitrate 4K HDR, Dolby Vision, and multi-track audio directly from Telegram servers into memory.
+  - title: Infuse & Vesper Integration
+    details: Emulated Jellyfin server bridge exposing both standard libraries and AI-curated custom shelves across Apple TV, iOS, iPadOS, and macOS.
+  - title: AI-Powered Shelves
+    details: Build dynamic playlists using natural language prompts via Google Gemini or OpenRouter LLM engines.
+  - title: Nuvio & Addon Protocol
+    details: Instant playback on Nuvio streaming clients with synchronized posters, metadata, and quality selectors.
+  - title: True Cloud Sync & 24/7 Standby
+    details: Resume playback at the exact second across any connected client with low-overhead Android foreground server hosting.
+  - title: Cross-Platform Expansion
+    details: Native Android/Google TV app, Windows client, and headless Linux server builds currently in active development.
 ---
 
-<div class="screenshot-frame">
-  <img src="/banner.png" alt="NoxMedia Showcase Banner" />
-  <div class="screenshot-caption">
-    <span>🔥</span> <b>NoxMedia Ecosystem:</b> Android Local Server hosting for Apple TV Infuse, Stremio, Nuvio, and Android TV.
-  </div>
+<div class="device-card">
+  <img src="/banner.png" alt="NoxMedia Showcase Banner" style="width: 100%; border-radius: 8px;" />
 </div>
-
-<style>
-:root {
-  --vp-home-hero-name-color: transparent;
-  --vp-home-hero-name-background: -webkit-linear-gradient(120deg, #ff5722 30%, #f59e0b);
-}
-</style>

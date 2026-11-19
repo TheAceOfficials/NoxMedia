@@ -1,77 +1,76 @@
 # Getting Started with NoxMedia
 
-Welcome to **NoxMedia** — a self-hosted personal streaming server that converts your Telegram channels and cloud media into a high-performance local media server compatible with **Infuse**, **Stremio**, **Nuvio**, and **Android TV**.
+Welcome to NoxMedia, a self-hosted personal streaming server that converts your Telegram channels and cloud media into a high-performance local media server compatible with Infuse, Vesper, and Nuvio.
 
 ---
 
-## 🌟 What makes NoxMedia different?
+## Architecture Overview
 
-Traditional media servers require massive hard drives and constant file downloads. NoxMedia operates on an on-demand streaming architecture:
+Traditional media servers require large local hard drives and constant file downloads. NoxMedia operates on an on-demand cloud streaming architecture:
 
-- **Zero Local Storage Waste:** Stream directly from cloud telegram storage into your favorite media players.
-- **Universal Client Support:** Connect from Apple TV via **Infuse**, from Windows/Mac/Linux via **Stremio**, or from mobile via **Nuvio**.
-- **Hardware-Decoded DirectPlay:** No server-side transcoding required. Your player decodes high-bitrate 4K, HDR, Dolby Vision, and Atmos natively.
-
----
-
-## 📋 Prerequisites
-
-1. An Android device (Phone, Tablet, or Android TV / Google TV / Shield TV) running **Android 7.0 (Nougat) or newer**.
-2. A Telegram account with access to media channels containing your movies and series.
-3. Your own free **Telegram API ID & Hash** (detailed below).
+- **Zero Local Storage Waste**: Stream directly from cloud Telegram storage into your media players without saving gigabytes of video files to disk.
+- **Universal Client Support**: Connect from Apple TV, iPhone, iPad, and Mac via Infuse and Vesper, or from Android, Windows, and Web via Nuvio.
+- **Hardware-Decoded DirectPlay**: No server-side transcoding required. Your player hardware handles high-bitrate 4K, HDR, Dolby Vision, and Atmos natively.
 
 ---
 
-## 🚀 Step 1: Download the NoxMedia APK
+## Supported Clients & Platforms
 
-Download the latest version corresponding to your device architecture from the [GitHub Releases](https://github.com/TheAceOfficials/NoxMedia/releases/latest):
-
-- **NoxMedia-arm64-v8a.apk** *(Recommended)*: For modern 64-bit phones, tablets, and Google TV with Chromecast.
-- **NoxMedia-armeabi-v7a.apk**: For older 32-bit devices and budget Android TV boxes (Mi Box, older Fire TV sticks).
-- **NoxMedia-universal.apk**: Universal build containing all CPU architectures.
-
----
-
-## 🔑 Step 2: Get your Telegram API Credentials
-
-To stream media through MTProto, Telegram requires official developer API credentials (which are 100% free):
-
-1. Open your browser and navigate to **[my.telegram.org](https://my.telegram.org)**.
-2. Log in with your Telegram account phone number and submit the confirmation code sent to your Telegram app.
-3. Tap on **API development tools**.
-4. Fill in an **App title** and **Short name** (e.g., `NoxMedia` and `nox`).
-5. Tap **Create application**.
-6. Copy your **`api_id`** (numbers) and **`api_hash`** (letters and numbers).
-
-> [!TIP]
-> Keep your API Hash private. NoxMedia stores these keys locally in encrypted private storage on your device.
+| Client | Supported Operating Systems | Connection Mode |
+| :--- | :--- | :--- |
+| **Infuse** | Apple TV (tvOS), iPhone & iPad (iOS), Mac (macOS), Apple Vision Pro (visionOS) | Jellyfin Bridge (Direct Mode) |
+| **Vesper** | Mac (macOS), iPhone & iPad (iOS), Apple TV (tvOS) | Jellyfin Bridge |
+| **Nuvio** | Android, Windows, macOS, Web | Stremio v3 Addon Protocol |
+| **Kodi / EmbyCon** | Android TV, Google TV, Shield TV, Fire TV, PC | Jellyfin Addon / HTTP Stream |
+| **Android TV / Google TV App** | Android TV, Google TV | Native App (Coming Soon) |
+| **Windows Desktop** | Windows 10, 11 | Native Client (Coming Soon) |
+| **Linux Client / Server** | Ubuntu, Debian, Arch | Headless Server (Coming Soon) |
 
 ---
 
-## 📱 Step 3: Sign in to NoxMedia
+## Prerequisites
 
-1. Launch the NoxMedia app on your Android device.
-2. Enter your **`api_id`** and **`api_hash`** on the setup screen.
-3. Enter your phone number with your country code (e.g., `+919876543210`).
-4. Enter the verification code sent to your Telegram app.
-5. If you have Two-Step Verification (cloud password) enabled, enter your password.
-
----
-
-## 📂 Step 4: Add Media Channels
-
-1. Once logged in, tap on the **Channels** tab.
-2. Select the channels containing your movies, TV shows, and anime.
-3. NoxMedia will automatically index your messages, parse file names, detect multi-part episodes, and assign rich TMDB/TVDB posters and metadata.
+Before setting up NoxMedia, ensure you have:
+1. An Android device running Android 7.0 or higher (phone, tablet, or TV box) to host the server.
+2. An active Telegram account.
+3. Your Telegram API credentials (`api_id` and `api_hash`).
 
 ---
 
-## 🌐 Step 5: Start Streaming
+## Step 1: Obtain Telegram API Credentials
 
-Go to the **Home** tab and tap **Start Server**. 
+To stream media through Telegram's high-speed MTProto network:
+1. Visit [my.telegram.org](https://my.telegram.org) in any web browser.
+2. Log in using your Telegram phone number (include international country code).
+3. Click on **API development tools**.
+4. Fill in the **App title** and **Short name** (for example, `NoxMedia`).
+5. Copy your **`api_id`** (an integer) and **`api_hash`** (a 32-character string).
 
-NoxMedia will display your local server address (e.g., `http://192.168.1.10:8096`). You can now connect your favorite players:
+---
 
-- [🍎 Connect Apple TV & iOS via Infuse](/clients/infuse)
-- [🍿 Connect Stremio & Nuvio](/clients/stremio-nuvio)
-- [📺 Connect Android TV & Kodi](/clients/android-tv-kodi)
+## Step 2: Install and Authenticate NoxMedia
+
+1. Download the latest release from the [GitHub Releases](https://github.com/TheAceOfficials/NoxMedia/releases/latest) page.
+2. Install the APK on your Android host device.
+3. Open NoxMedia and enter your `api_id`, `api_hash`, and your phone number.
+4. Enter the verification code sent to your official Telegram app.
+5. If Two-Step Verification (2FA) is enabled on your account, enter your cloud password when prompted.
+
+---
+
+## Step 3: Start the Server
+
+1. From the NoxMedia home screen, toggle the **Server Switch** to ON.
+2. Grant battery optimization exemptions and notification permissions so Android does not terminate the background service.
+3. NoxMedia will display your local server address (e.g., `http://192.168.1.15:8096`).
+
+---
+
+## Next Steps
+
+Now that your server is active, proceed to connect your streaming clients:
+
+- [Connect Apple TV, iOS & Mac via Infuse and Vesper](/clients/infuse)
+- [Connect Nuvio Streaming Client](/clients/stremio-nuvio)
+- [Connect Android TV & Kodi](/clients/android-tv-kodi)
+- [View Project Roadmap & Progress](/roadmap)

@@ -1,42 +1,42 @@
 /* ==========================================================================
-   NoxMedia Emil Kowalski / Linear / Apple Design Theme
-   Crafted for high taste, fluid motion, and crisp typography.
+   NoxMedia - Vesper & Linear Inspired Minimalist Design
+   Clean typography, zero-clutter navigation, and reactive scrollspy.
    ========================================================================== */
 
 :root {
   --vp-c-brand-1: #ff5722;
   --vp-c-brand-2: #f97316;
   --vp-c-brand-3: #ea580c;
-  --vp-c-brand-soft: rgba(255, 87, 34, 0.14);
+  --vp-c-brand-soft: rgba(255, 87, 34, 0.12);
 
   --vp-font-family-base: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   --vp-font-family-mono: "SF Mono", "Fira Code", Menlo, Monaco, Consolas, monospace;
 }
 
-/* Force dark aesthetic by default */
+/* Dark mode aesthetic */
 html.dark {
   --vp-c-bg: #09090b;
-  --vp-c-bg-alt: #121215;
-  --vp-c-bg-elv: #18181b;
-  --vp-c-bg-soft: #202024;
+  --vp-c-bg-alt: #101014;
+  --vp-c-bg-elv: #151518;
+  --vp-c-bg-soft: #1d1d22;
 
-  --vp-c-border: rgba(255, 255, 255, 0.08);
-  --vp-c-divider: rgba(255, 255, 255, 0.06);
+  --vp-c-border: rgba(255, 255, 255, 0.07);
+  --vp-c-divider: rgba(255, 255, 255, 0.05);
 
   --vp-c-text-1: #f4f4f5;
   --vp-c-text-2: #a1a1aa;
   --vp-c-text-3: #71717a;
 }
 
-/* Headings Typography (Apple / Linear tighter optical kerning) */
+/* Headings Typography */
 h1, h2, h3, h4, .vp-doc h1, .vp-doc h2, .vp-doc h3 {
   letter-spacing: -0.025em;
   font-weight: 600;
 }
 
-/* Fluid Apple Physics for buttons and links */
+/* Physics for interactive elements */
 a, button, .VPButton {
-  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
 
 a:active, button:active, .VPButton:active {
@@ -45,103 +45,175 @@ a:active, button:active, .VPButton:active {
 
 /* Glassmorphism Navigation Bar */
 .VPNav {
-  background-color: rgba(9, 9, 11, 0.75) !important;
+  background-color: rgba(9, 9, 11, 0.8) !important;
   backdrop-filter: blur(16px) saturate(180%) !important;
   -webkit-backdrop-filter: blur(16px) saturate(180%) !important;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
 }
 
-/* Elevated Feature Cards */
+/* Feature Cards */
 .VPFeature {
-  background: radial-gradient(circle at 50% 0%, rgba(255, 87, 34, 0.04), transparent 70%), #121215 !important;
+  background: #111114 !important;
   border: 1px solid rgba(255, 255, 255, 0.08) !important;
-  border-radius: 16px !important;
-  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.25s ease, box-shadow 0.25s ease !important;
+  border-radius: 12px !important;
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.22s ease !important;
 }
 
 .VPFeature:hover {
   transform: translateY(-2px);
   border-color: rgba(255, 87, 34, 0.4) !important;
-  box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.6), 0 0 20px -2px rgba(255, 87, 34, 0.15) !important;
 }
 
-/* Custom Screenshot & Video Showcase Frames */
-.screenshot-frame {
-  margin: 1.5rem 0;
-  border-radius: 16px;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: #121215;
-  box-shadow: 0 20px 48px -12px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.05) inset;
-  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease;
+/* ==========================================================================
+   Vesper-Style Minimalist Sidebar
+   ========================================================================== */
+
+/* Group Section Titles */
+.VPSidebarItem.level-0 .text {
+  font-size: 0.72rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase !important;
+  color: rgba(255, 255, 255, 0.4) !important;
+  margin-bottom: 6px !important;
 }
 
-.screenshot-frame:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 28px 56px -12px rgba(0, 0, 0, 0.9), 0 0 28px -4px rgba(255, 87, 34, 0.18);
+/* Nav Item Links */
+.VPSidebarItem.level-1 .link,
+.VPSidebarItem .item .link {
+  padding: 6px 12px !important;
+  margin: 2px 0 !important;
+  border-left: 2px solid transparent !important;
+  border-radius: 0 6px 6px 0 !important;
+  color: rgba(255, 255, 255, 0.55) !important;
+  font-size: 0.875rem !important;
+  font-weight: 450 !important;
+  line-height: 1.4 !important;
+  transition: all 0.16s ease !important;
+  background: transparent !important;
 }
 
-.screenshot-frame img {
-  display: block;
-  width: 100%;
-  height: auto;
-  border-radius: 15px;
+.VPSidebarItem.level-1 .link:hover,
+.VPSidebarItem .item .link:hover {
+  color: rgba(255, 255, 255, 0.88) !important;
+  background: rgba(255, 255, 255, 0.03) !important;
 }
 
-.screenshot-caption {
-  padding: 10px 16px;
-  font-size: 0.85rem;
-  color: #a1a1aa;
-  background: rgba(18, 18, 21, 0.9);
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* Active State (Vesper-Style Highlight with Left Orange Accent) */
+.VPSidebarItem.is-active > .item > .link,
+.VPSidebarItem.is-link.is-active > .item > .link {
+  color: #ffffff !important;
+  font-weight: 550 !important;
+  border-left: 2px solid #ff5722 !important;
+  background: rgba(255, 87, 34, 0.05) !important;
 }
 
-/* Release & Changelog Pill Badges */
+.VPSidebarItem.is-active .link-text {
+  color: #ffffff !important;
+}
+
+/* ==========================================================================
+   In-Page Outline / Table of Contents (Right Side Scrollspy)
+   ========================================================================== */
+
+.VPDocAsideOutline .outline-title {
+  font-size: 0.75rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.06em !important;
+  text-transform: uppercase !important;
+  color: rgba(255, 255, 255, 0.4) !important;
+}
+
+.VPDocAsideOutline .outline-link {
+  font-size: 0.82rem !important;
+  line-height: 1.5 !important;
+  color: rgba(255, 255, 255, 0.48) !important;
+  border-left: 2px solid transparent !important;
+  padding: 3px 0 3px 12px !important;
+  transition: all 0.15s ease !important;
+}
+
+.VPDocAsideOutline .outline-link:hover {
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+
+.VPDocAsideOutline .outline-link.active {
+  color: #ffffff !important;
+  font-weight: 500 !important;
+  border-left: 2px solid #ff5722 !important;
+}
+
+/* ==========================================================================
+   Badges, Callouts & Tables
+   ========================================================================== */
+
 .badge-pill {
   display: inline-flex;
   align-items: center;
-  padding: 3px 10px;
+  padding: 2px 9px;
   border-radius: 9999px;
-  font-size: 0.75rem;
-  font-weight: 600;
+  font-size: 0.72rem;
+  font-weight: 500;
   letter-spacing: 0.02em;
   margin-right: 6px;
 }
 
 .badge-feature {
-  background: rgba(255, 87, 34, 0.15);
+  background: rgba(255, 87, 34, 0.12);
   color: #ff7043;
-  border: 1px solid rgba(255, 87, 34, 0.35);
+  border: 1px solid rgba(255, 87, 34, 0.3);
 }
 
 .badge-perf {
-  background: rgba(16, 185, 129, 0.15);
+  background: rgba(16, 185, 129, 0.12);
   color: #34d399;
-  border: 1px solid rgba(16, 185, 129, 0.35);
+  border: 1px solid rgba(16, 185, 129, 0.3);
 }
 
 .badge-fix {
-  background: rgba(59, 130, 246, 0.15);
+  background: rgba(59, 130, 246, 0.12);
   color: #60a5fa;
-  border: 1px solid rgba(59, 130, 246, 0.35);
+  border: 1px solid rgba(59, 130, 246, 0.3);
 }
 
-/* Callout Blocks (Tips, Info, Notes) */
-.custom-block.tip {
-  border-color: #ff5722 !important;
-  background-color: rgba(255, 87, 34, 0.06) !important;
+.badge-coming {
+  background: rgba(168, 85, 247, 0.12);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+}
+
+/* Minimalist Tables */
+.vp-doc table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5rem 0;
+  font-size: 0.9rem;
+}
+
+.vp-doc th {
+  background: #141418;
+  color: #d4d4d8;
+  font-weight: 550;
+  text-align: left;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.vp-doc td {
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: #a1a1aa;
+}
+
+.vp-doc tr:hover td {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* Clean Device Frame Mockup */
+.device-card {
+  background: #121215;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
-}
-
-.custom-block.info {
-  border-radius: 12px;
-}
-
-/* Code Blocks & Command Snippets */
-div[class*='language-'] {
-  border-radius: 12px !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  padding: 1.25rem;
+  margin: 1.25rem 0;
 }
