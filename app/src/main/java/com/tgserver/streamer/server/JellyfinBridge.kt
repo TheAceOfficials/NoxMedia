@@ -4,6 +4,8 @@ import android.content.Context
 import com.google.gson.Gson
 import com.google.gson.JsonParser
 import com.tgserver.streamer.data.model.MediaItem
+import com.tgserver.streamer.data.model.MediaGroup
+import com.tgserver.streamer.data.model.CatalogDefinition
 import com.tgserver.streamer.data.model.ServerConfig
 import com.tgserver.streamer.data.model.toMediaGroups
 import com.tgserver.streamer.data.repository.CatalogRepository
@@ -104,6 +106,58 @@ class JellyfinBridge(
 
     private fun isSeriesRawId(raw: String): Boolean =
         raw.startsWith("series_") && !seasonSuffixRegex.containsMatchIn(raw)
+
+    @Volatile private var cachedMediaGroups: List<MediaGroup> = emptyList()
+    @Volatile private var cachedMediaSize: Int = -1
+    private val catalogItemsCache = ConcurrentHashMap<String, Pair<Int, List<MediaGroup>>>()
+
+    private fun getMediaGroupsCached(): List<MediaGroup> {
+        val all = tgClient.getAllMedia()
+        if (all.isEmpty()) return emptyList()
+
+        if (cachedMediaSize == all.size && cachedMediaGroups.isNotEmpty()) {
+            return cachedMediaGroups
+        }
+
+        // Fast load from precomputed on-disk cache if memory cache is empty (~10-20ms instead of 5000ms)
+        if (cachedMediaGroups.isEmpty()) {
+            try {
+                val groupCacheFile = java.io.File(context.filesDir, "media_groups_cache.json")
+                if (groupCacheFile.exists()) {
+                    val json = groupCacheFile.readText()
+                    if (json.isNotBlank()) {
+                        val type = object : com.google.gson.reflect.TypeToken<List<MediaGroup>>() {}.type
+                        val list: List<MediaGroup>? = gson.fromJson(json, type)
+                        val valid = list?.filterNotNull()?.filter { it.key != null && it.items != null } ?: emptyList()
+                        if (valid.isNotEmpty()) {
+                            cachedMediaGroups = valid
+                            cachedMediaSize = all.size
+                            return valid
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                StreamLog.w(TAG, "Failed to load precomputed media_groups_cache.json: ${e.message}")
+            }
+        }
+
+        val groups = all.toMediaGroups()
+        cachedMediaGroups = groups
+        cachedMediaSize = all.size
+        return groups
+    }
+
+    private fun getCatalogGroupsCached(cat: CatalogDefinition): List<MediaGroup> {
+        val allSize = tgClient.getAllMedia().size
+        val cached = catalogItemsCache[cat.id]
+        if (cached != null && cached.first == allSize) {
+            return cached.second
+        }
+        val allGroups = getMediaGroupsCached()
+        val matched = catalogRepo.filterMediaForCatalog(cat, allGroups)
+        catalogItemsCache[cat.id] = Pair(allSize, matched)
+        return matched
+    }
 
     init {
         // Register known system IDs
@@ -1183,34 +1237,30 @@ class JellyfinBridge(
 
         if (isInfuse) {
             val customCats = catalogRepo.getCatalogs().filter { !it.isHidden }
-            if (customCats.isNotEmpty()) {
-                val allGroups = all.toMediaGroups()
-                for (cat in customCats) {
-                    val catHex = toHexId("cat_${cat.id}")
-                    val matched = catalogRepo.filterMediaForCatalog(cat, allGroups)
-                    val colType = if (cat.filter.mediaType == "series") "tvshows" else "movies"
-                    views.add(
-                        mapOf(
-                            "Name" to cat.name,
-                            "ServerId" to serverId,
-                            "Id" to catHex,
-                            "CollectionType" to colType,
-                            "Type" to "CollectionFolder",
-                            "IsFolder" to true,
-                            "CanDelete" to false,
-                            "CanDownload" to false,
-                            "UserData" to mapOf(
-                                "UnplayedItemCount" to matched.size,
-                                "PlaybackPositionTicks" to 0L,
-                                "PlayCount" to 0,
-                                "IsFavorite" to false,
-                                "Played" to false
-                            ),
-                            "ImageTags" to mapOf("Primary" to catHex),
-                            "BackdropImageTags" to emptyList<String>()
-                        )
+            for (cat in customCats) {
+                val catHex = toHexId("cat_${cat.id}")
+                val colType = if (cat.filter.mediaType == "series") "tvshows" else "movies"
+                views.add(
+                    mapOf(
+                        "Name" to cat.name,
+                        "ServerId" to serverId,
+                        "Id" to catHex,
+                        "CollectionType" to colType,
+                        "Type" to "CollectionFolder",
+                        "IsFolder" to true,
+                        "CanDelete" to false,
+                        "CanDownload" to false,
+                        "UserData" to mapOf(
+                            "UnplayedItemCount" to 1,
+                            "PlaybackPositionTicks" to 0L,
+                            "PlayCount" to 0,
+                            "IsFavorite" to false,
+                            "Played" to false
+                        ),
+                        "ImageTags" to mapOf("Primary" to catHex),
+                        "BackdropImageTags" to emptyList<String>()
                     )
-                }
+                )
             }
         }
 
@@ -1436,8 +1486,7 @@ class JellyfinBridge(
                     toHexId("cat_${it.id}") == cleanParentId || "cat_${it.id}" == rawParentId || it.id == cleanParentId || it.id == rawParentId
                 }
                 if (customCat != null) {
-                    val allGroups = allMedia.toMediaGroups()
-                    val matched = catalogRepo.filterMediaForCatalog(customCat, allGroups)
+                    val matched = getCatalogGroupsCached(customCat)
                     val total = matched.size
                     val pagedGroups = matched.drop(startIndex).take(limit)
                     val items = mutableListOf<Map<String, Any?>>()
@@ -1449,12 +1498,18 @@ class JellyfinBridge(
                             } else {
                                 val firstEp = group.items.firstOrNull()
                                 if (firstEp != null) {
+                                    if (firstEp.posterUrl.isNullOrBlank() && !group.posterUrl.isNullOrBlank()) {
+                                        firstEp.posterUrl = group.posterUrl
+                                    }
                                     items.add(toJellyfinItem(firstEp, localIp, port, isSeriesOverview = true, includeMediaSources = false, isInfuse = isInfuse))
                                 }
                             }
                         } else {
                             val movie = group.items.firstOrNull() ?: allMedia.firstOrNull { it.id == group.key }
                             if (movie != null) {
+                                if (movie.posterUrl.isNullOrBlank() && !group.posterUrl.isNullOrBlank()) {
+                                    movie.posterUrl = group.posterUrl
+                                }
                                 items.add(toJellyfinItem(movie, localIp, port, isSeriesOverview = false, includeMediaSources = false, isInfuse = isInfuse))
                             }
                         }
@@ -2070,8 +2125,7 @@ class JellyfinBridge(
 
         val imgCat = catalogRepo.getCatalogs().find { toHexId("cat_${it.id}") == clean || "cat_${it.id}" == raw || it.id == clean }
         if (imgCat != null) {
-            val all = tgClient.getAllMedia().filter { !it.isHidden }
-            val matched = catalogRepo.filterMediaForCatalog(imgCat, all.toMediaGroups())
+            val matched = getCatalogGroupsCached(imgCat)
             val firstPoster = matched.firstNotNullOfOrNull { it.posterUrl?.takeIf { p -> p.isNotBlank() } }
                 ?: "https://images.metahub.space/poster/medium/placeholder/img"
             val resp = NanoHTTPD.newFixedLengthResponse(Response.Status.REDIRECT, "text/plain", "")
