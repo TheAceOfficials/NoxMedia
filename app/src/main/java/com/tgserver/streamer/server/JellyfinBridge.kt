@@ -555,6 +555,7 @@ class JellyfinBridge(
                 u.startsWith("/livetv") ||
                 u.startsWith("/scheduledtasks") ||
                 u.startsWith("/playback") ||
+                u.startsWith("/plugins") ||
                 u.startsWith("/infusesync") ||
                 u.startsWith("/environment")
     }
@@ -835,8 +836,11 @@ class JellyfinBridge(
                 lowerUri == "/playback/bitratetest" -> {
                     NanoHTTPD.newFixedLengthResponse(Response.Status.OK, "text/plain", "")
                 }
+                lowerUri.startsWith("/plugins") -> {
+                    handlePlugins(lowerUri)
+                }
                 lowerUri.startsWith("/infusesync") -> {
-                    NanoHTTPD.newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "Not Found")
+                    handleInfuseSync(lowerUri, session, localIp, config.port, isInfuse)
                 }
                 lowerUri.startsWith("/environment") -> {
                     jsonResponse(mapOf("Path" to "/media"))
@@ -1140,6 +1144,153 @@ class JellyfinBridge(
             )
         )
         return jsonResponse(mapOf("Items" to mediaFolders, "TotalRecordCount" to mediaFolders.size, "StartIndex" to 0))
+    }
+
+    private fun handlePlugins(lowerUri: String): Response {
+        val infuseSyncPlugin = mapOf(
+            "Name" to "InfuseSync",
+            "Version" to "1.5.1.0",
+            "ConfigurationFileName" to "InfuseSync.xml",
+            "Description" to "Plugin for fast synchronization with Infuse.",
+            "Id" to "022a3003-993f-45f1-8565-87d12af2e12a",
+            "CanUninstall" to false,
+            "HasImage" to true,
+            "Status" to "Active"
+        )
+        if (lowerUri.contains("022a3003-993f-45f1-8565-87d12af2e12a")) {
+            return jsonResponse(infuseSyncPlugin)
+        }
+        return jsonResponse(listOf(infuseSyncPlugin))
+    }
+
+    private fun handleInfuseSync(
+        lowerUri: String,
+        session: IHTTPSession,
+        localIp: String,
+        port: Int,
+        isInfuse: Boolean
+    ): Response {
+        val params = session.parameters
+        ensureTvIndex()
+        val allMedia = tgClient.getAllMedia().filter { !it.isHidden }
+
+        return when {
+            // 1. Create Checkpoint: POST /InfuseSync/Checkpoint
+            lowerUri.endsWith("/checkpoint") || lowerUri.contains("/checkpoint?") -> {
+                val checkpointId = "022a3003-993f-45f1-8565-87d12af2e12a"
+                jsonResponse(mapOf("Id" to checkpointId))
+            }
+
+            // 2. Start Sync: POST /InfuseSync/Checkpoint/{checkpointId}/StartSync
+            lowerUri.contains("/startsync") -> {
+                val moviesCount = allMedia.filter { isMovie(it) }.distinctBy { getMovieKey(it) }.size
+                val tvShowsCount = showsByHex.size
+                val seasonsCount = seasonsByHex.size
+                val episodesCount = seasonsByHex.values.sumOf { it.episodes.size }
+                jsonResponse(mapOf(
+                    "UpdatedFolders" to 0,
+                    "RemovedFolders" to 0,
+                    "UpdatedBoxSets" to 0,
+                    "RemovedBoxSets" to 0,
+                    "UpdatedPlaylists" to 0,
+                    "RemovedPlaylists" to 0,
+                    "UpdatedTvShows" to tvShowsCount,
+                    "RemovedTvShows" to 0,
+                    "UpdatedSeasons" to seasonsCount,
+                    "RemovedSeasons" to 0,
+                    "UpdatedVideos" to (moviesCount + episodesCount),
+                    "RemovedVideos" to 0,
+                    "UpdatedCollectionFolders" to 3,
+                    "UpdatedUserData" to 0
+                ))
+            }
+
+            // 3. Updated Items: GET /InfuseSync/Checkpoint/{checkpointId}/UpdatedItems
+            lowerUri.contains("/updateditems") -> {
+                val includeTypes = (getParam(params, "IncludeItemTypes", "includeitemtypes") ?: "")
+                    .lowercase().split(",").map { it.trim() }.filter { it.isNotBlank() }
+                val startIndex = getParam(params, "StartIndex", "startindex").toIntOrNull() ?: 0
+                val limit = getParam(params, "Limit", "limit").toIntOrNull() ?: 100
+
+                val wantAll = includeTypes.isEmpty()
+                val wantMovies = wantAll || includeTypes.contains("movie") || includeTypes.contains("video")
+                val wantSeries = wantAll || includeTypes.contains("series")
+                val wantSeasons = wantAll || includeTypes.contains("season")
+                val wantEpisodes = wantAll || includeTypes.contains("episode") || includeTypes.contains("video")
+                val wantFolders = wantAll || includeTypes.contains("collectionfolder") || includeTypes.contains("folder")
+
+                val allItems = mutableListOf<Map<String, Any?>>()
+                if (wantFolders) {
+                    allItems.add(mapOf(
+                        "Name" to "Movies", "ServerId" to serverId, "Id" to libMoviesHex,
+                        "Type" to "CollectionFolder", "CollectionType" to "movies", "IsFolder" to true,
+                        "ImageTags" to mapOf("Primary" to libMoviesHex)
+                    ))
+                    allItems.add(mapOf(
+                        "Name" to "TV Shows", "ServerId" to serverId, "Id" to libSeriesHex,
+                        "Type" to "CollectionFolder", "CollectionType" to "tvshows", "IsFolder" to true,
+                        "ImageTags" to mapOf("Primary" to libSeriesHex)
+                    ))
+                    allItems.add(mapOf(
+                        "Name" to "Anime", "ServerId" to serverId, "Id" to libAnimeHex,
+                        "Type" to "CollectionFolder", "CollectionType" to "tvshows", "IsFolder" to true,
+                        "ImageTags" to mapOf("Primary" to libAnimeHex)
+                    ))
+                }
+                if (wantMovies) {
+                    val movies = allMedia.filter { isMovie(it) }.distinctBy { getMovieKey(it) }
+                    for (m in movies) {
+                        allItems.add(toJellyfinItem(m, localIp, port, isSeriesOverview = false, includeMediaSources = false, isInfuse = isInfuse))
+                    }
+                }
+                if (wantSeries) {
+                    for (s in showsByHex.values) {
+                        allItems.add(buildSeriesDto(s, localIp, port, isInfuse))
+                    }
+                }
+                if (wantSeasons) {
+                    for (show in showsByHex.values) {
+                        for (season in show.seasons.values.sortedBy { it.seasonNumber }) {
+                            allItems.add(buildSeasonDto(season, localIp, port, isInfuse))
+                        }
+                    }
+                }
+                if (wantEpisodes) {
+                    for (show in showsByHex.values) {
+                        for (ep in show.allEpisodes) {
+                            val s = show.seasons[ep.season ?: 1] ?: show.seasons.values.firstOrNull()
+                            if (s != null) {
+                                allItems.add(buildEpisodeDto(ep, show, s, localIp, port, includeMediaSources = false, isInfuse = isInfuse))
+                            }
+                        }
+                    }
+                }
+                val total = allItems.size
+                val paged = allItems.drop(startIndex).take(limit)
+                jsonResponse(mapOf("Items" to paged, "TotalRecordCount" to total, "StartIndex" to startIndex))
+            }
+
+            // 4. Removed Items: GET /InfuseSync/Checkpoint/{checkpointId}/RemovedItems
+            lowerUri.contains("/removeditems") -> {
+                val startIndex = getParam(params, "StartIndex", "startindex").toIntOrNull() ?: 0
+                jsonResponse(mapOf("Items" to emptyList<Any>(), "TotalRecordCount" to 0, "StartIndex" to startIndex))
+            }
+
+            // 5. User Data: GET /InfuseSync/Checkpoint/{checkpointId}/UserData
+            lowerUri.contains("/userdata") -> {
+                val startIndex = getParam(params, "StartIndex", "startindex").toIntOrNull() ?: 0
+                jsonResponse(mapOf("Items" to emptyList<Any>(), "TotalRecordCount" to 0, "StartIndex" to startIndex))
+            }
+
+            // 6. User Folders: GET /InfuseSync/UserFolders/{userId}
+            lowerUri.contains("/userfolders") -> {
+                handleVirtualFolders()
+            }
+
+            else -> {
+                jsonResponse(mapOf("Status" to "OK", "Version" to "1.5.1.0"))
+            }
+        }
     }
 
     private fun handleViews(): Response {
@@ -2441,6 +2592,8 @@ class JellyfinBridge(
         val map = mutableMapOf<String, Any?>(
             "Name" to displayName,
             "OriginalTitle" to item.title,
+            "SortName" to displayName,
+            "ForcedSortName" to displayName,
             "ServerId" to serverId,
             "Id" to hexId,
             "Overview" to (item.overview ?: "${item.qualityBadge} • ${item.formattedSize}"),
@@ -2448,6 +2601,7 @@ class JellyfinBridge(
             "CommunityRating" to (if (item.rating > 0) item.rating else 8.0),
             "Container" to ext,
             "CanDownload" to true,
+            "CanDelete" to false,
             "SupportsDirectPlay" to true,
             "SupportsDirectStream" to true,
             "SupportsTranscoding" to false,
