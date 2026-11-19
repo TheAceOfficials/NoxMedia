@@ -453,7 +453,6 @@ class JellyfinBridge(
             "ParentBackdropImageTags" to listOf(show.seriesHexId),
             "BackdropImageTags" to listOf(show.seriesHexId),
             "PrimaryImageAspectRatio" to 1.7777778,
-            "RunTimeTicks" to durationTicks,
             "Container" to ext,
             "LocationType" to "FileSystem",
             "Path" to virtualPath,
@@ -474,6 +473,10 @@ class JellyfinBridge(
                 "Played" to false
             )
         )
+
+        if (durationTicks != null && durationTicks > 0) {
+            map["RunTimeTicks"] = durationTicks
+        }
 
         if (includeMediaSources) {
             val mediaSources = buildEpisodeMediaSources(item, matchingVersions, show.title, sNum, localIp, port)
@@ -1707,32 +1710,34 @@ class JellyfinBridge(
         }
     }
 
-    private fun resolveMovieDurationTicks(item: MediaItem, matching: List<MediaItem> = emptyList()): Long {
-        if (item.durationSeconds > 0) return item.durationSeconds.toLong() * 10_000_000L
-        val otherDur = matching.firstOrNull { it.durationSeconds > 0 }?.durationSeconds
+    private fun resolveMovieDurationTicks(item: MediaItem, matching: List<MediaItem> = emptyList()): Long? {
+        if (item.durationSeconds in 2400..18000) return item.durationSeconds.toLong() * 10_000_000L
+        val otherDur = matching.firstOrNull { it.durationSeconds in 2400..18000 }?.durationSeconds
         if (otherDur != null && otherDur > 0) {
             item.durationSeconds = otherDur
             return otherDur.toLong() * 10_000_000L
         }
-        if (item.sizeBytes > 0) {
-            val estSec = (item.sizeBytes / 312_500L).coerceIn(5100L, 10800L) // 85 min - 180 min
-            return estSec * 10_000_000L
+        val enriched = com.tgserver.streamer.metadata.MetadataEnricher.resolveRuntimeSeconds(item)
+        if (enriched in 2400..18000) {
+            item.durationSeconds = enriched
+            return enriched.toLong() * 10_000_000L
         }
-        return 6300L * 10_000_000L // 105 min standard movie
+        return null
     }
 
-    private fun resolveEpisodeDurationTicks(item: MediaItem, matching: List<MediaItem> = emptyList()): Long {
-        if (item.durationSeconds > 0) return item.durationSeconds.toLong() * 10_000_000L
-        val otherDur = matching.firstOrNull { it.durationSeconds > 0 }?.durationSeconds
+    private fun resolveEpisodeDurationTicks(item: MediaItem, matching: List<MediaItem> = emptyList()): Long? {
+        if (item.durationSeconds in 900..7200) return item.durationSeconds.toLong() * 10_000_000L
+        val otherDur = matching.firstOrNull { it.durationSeconds in 900..7200 }?.durationSeconds
         if (otherDur != null && otherDur > 0) {
             item.durationSeconds = otherDur
             return otherDur.toLong() * 10_000_000L
         }
-        if (item.sizeBytes > 0) {
-            val estSec = (item.sizeBytes / 250_000L).coerceIn(1440L, 3600L) // 24 min - 60 min
-            return estSec * 10_000_000L
+        val enriched = com.tgserver.streamer.metadata.MetadataEnricher.resolveRuntimeSeconds(item)
+        if (enriched in 900..7200) {
+            item.durationSeconds = enriched
+            return enriched.toLong() * 10_000_000L
         }
-        return 2700L * 10_000_000L // 45 min standard TV episode
+        return null
     }
 
     private fun buildEpisodeMediaSources(
@@ -1776,7 +1781,7 @@ class JellyfinBridge(
             val bitrate = if (ver.durationSeconds > 0 && ver.sizeBytes > 0) (ver.sizeBytes * 8) / ver.durationSeconds else 10_000_000L
             val virtualPath = "/TV Shows/$showTitle/Season $sNum/$rawFileName"
 
-            mapOf(
+            val sourceMap = mutableMapOf<String, Any?>(
                 "Id" to hexId,
                 "Name" to qualityLabel,
                 "Path" to virtualPath,
@@ -1784,13 +1789,16 @@ class JellyfinBridge(
                 "Container" to ext,
                 "Size" to ver.sizeBytes,
                 "Bitrate" to bitrate,
-                "RunTimeTicks" to durationTicks,
                 "SupportsDirectPlay" to true,
                 "SupportsDirectStream" to true,
                 "SupportsTranscoding" to true,
                 "DirectStreamUrl" to streamUrl,
                 "MediaStreams" to listOf(vStream, aStream)
             )
+            if (durationTicks != null && durationTicks > 0) {
+                sourceMap["RunTimeTicks"] = durationTicks
+            }
+            sourceMap
         }
     }
 
@@ -1845,7 +1853,7 @@ class JellyfinBridge(
 
             val virtualPath = if (isMovie(ver)) streamUrl else "/TV Shows/${ver.title}/Season ${ver.season ?: 1}/$rawFileName"
 
-            mapOf(
+            val sourceMap = mutableMapOf<String, Any?>(
                 "Id" to hexId,
                 "Name" to qualityLabel,
                 "Path" to virtualPath,
@@ -1853,13 +1861,16 @@ class JellyfinBridge(
                 "Container" to ext,
                 "Size" to ver.sizeBytes,
                 "Bitrate" to bitrate,
-                "RunTimeTicks" to durationTicks,
                 "SupportsDirectPlay" to true,
                 "SupportsDirectStream" to true,
-                "SupportsTranscoding" to false,
+                "SupportsTranscoding" to true,
                 "DirectStreamUrl" to streamUrl,
                 "MediaStreams" to listOf(vStream, aStream)
             )
+            if (durationTicks != null && durationTicks > 0) {
+                sourceMap["RunTimeTicks"] = durationTicks
+            }
+            sourceMap
         }
     }
 
@@ -2242,7 +2253,7 @@ class JellyfinBridge(
             "video.mkv"
         }
         val streamUrl = "http://$localIp:$port/stream/video/${item.channelId}/${item.id}/$safeFileName"
-        val durationTicks = if (isSeriesOverview) 0L else if (isMovie(item)) resolveMovieDurationTicks(item) else resolveEpisodeDurationTicks(item)
+        val durationTicks = if (isSeriesOverview) null else if (isMovie(item)) resolveMovieDurationTicks(item) else resolveEpisodeDurationTicks(item)
         val yearInt = item.year?.toIntOrNull() ?: 2024
         val ext = rawFileName.substringAfterLast(".", "mkv").lowercase()
 
@@ -2291,7 +2302,6 @@ class JellyfinBridge(
             "Overview" to (item.overview ?: "${item.qualityBadge} • ${item.formattedSize}"),
             "ProductionYear" to yearInt,
             "CommunityRating" to (if (item.rating > 0) item.rating else 8.0),
-            "RunTimeTicks" to durationTicks,
             "Container" to ext,
             "CanDownload" to true,
             "SupportsDirectPlay" to true,
@@ -2311,6 +2321,10 @@ class JellyfinBridge(
             "BackdropImageTags" to listOf(hexId),
             "MediaType" to "Video"
         )
+
+        if (durationTicks != null && durationTicks > 0) {
+            map["RunTimeTicks"] = durationTicks
+        }
 
         if (isSeriesOverview) {
             val epCount = precomputedEpisodeCount ?: getEpisodesForSeries(rawItemId).size

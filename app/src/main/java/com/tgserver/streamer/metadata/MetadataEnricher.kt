@@ -697,7 +697,11 @@ class MetadataEnricher {
     }
 
     fun resolveRuntimeSeconds(item: MediaItem): Int {
-        if (item.durationSeconds > 60) return item.durationSeconds
+        if (item.type == "movie") {
+            if (item.durationSeconds in 2400..18000) return item.durationSeconds
+        } else {
+            if (item.durationSeconds in 900..7200) return item.durationSeconds
+        }
 
         val imdbId = item.imdbId
         if (!imdbId.isNullOrBlank()) {
