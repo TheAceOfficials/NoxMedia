@@ -5,6 +5,8 @@ import com.google.gson.Gson
 import com.google.gson.JsonParser
 import com.tgserver.streamer.data.model.MediaItem
 import com.tgserver.streamer.data.model.ServerConfig
+import com.tgserver.streamer.data.model.toMediaGroups
+import com.tgserver.streamer.data.repository.CatalogRepository
 import com.tgserver.streamer.posters.SpatialPosterService
 import com.tgserver.streamer.telegram.TelegramClientManager
 import fi.iki.elonen.NanoHTTPD
@@ -43,6 +45,7 @@ class JellyfinBridge(
     }
 
     private val gson = Gson()
+    private val catalogRepo by lazy { CatalogRepository(context) }
     private val rootHexPathRegex = Regex("/[0-9a-fA-F]{32}")
     private val seriesSlugCleanRegex = Regex("[^a-z0-9]")
     // Season IDs always end with _s<digits> e.g. series_lucifer_s1, series_lucifer_s2
@@ -635,10 +638,10 @@ class JellyfinBridge(
                     handleGroupingOptions()
                 }
                 lowerUri.endsWith("/views") || lowerUri == "/userviews" -> {
-                    handleViews()
+                    handleViews(isInfuse)
                 }
                 lowerUri.startsWith("/library/virtualfolders") -> {
-                    handleVirtualFolders()
+                    handleVirtualFolders(isInfuse)
                 }
                 lowerUri == "/libraries/availableoptions" -> {
                     jsonResponse(
@@ -833,7 +836,7 @@ class JellyfinBridge(
                     NanoHTTPD.newFixedLengthResponse(Response.Status.OK, "text/plain", "")
                 }
                 lowerUri.startsWith("/infusesync") -> {
-                    jsonResponse(mapOf("Items" to emptyList<Any>(), "TotalRecordCount" to 0, "StartIndex" to 0))
+                    NanoHTTPD.newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "Not Found")
                 }
                 lowerUri.startsWith("/environment") -> {
                     jsonResponse(mapOf("Path" to "/media"))
@@ -1061,8 +1064,8 @@ class JellyfinBridge(
         return jsonResponse(options)
     }
 
-    private fun handleVirtualFolders(): Response {
-        val folders = listOf(
+    private fun handleVirtualFolders(isInfuse: Boolean = false): Response {
+        val folders = mutableListOf(
             mapOf(
                 "Name" to "Movies",
                 "Locations" to listOf("/media/movies"),
@@ -1091,16 +1094,34 @@ class JellyfinBridge(
                 "RefreshStatus" to "Idle"
             )
         )
+        if (isInfuse) {
+            val customCats = catalogRepo.getCatalogs().filter { !it.isHidden }
+            for (cat in customCats) {
+                val catHex = toHexId("cat_${cat.id}")
+                val colType = if (cat.filter.mediaType == "series") "tvshows" else "movies"
+                folders.add(
+                    mapOf(
+                        "Name" to cat.name,
+                        "Locations" to listOf("/media/${cat.name}"),
+                        "CollectionType" to colType,
+                        "ItemId" to catHex,
+                        "Guid" to catHex,
+                        "RefreshProgress" to 0,
+                        "RefreshStatus" to "Idle"
+                    )
+                )
+            }
+        }
         return jsonResponse(folders)
     }
 
-    private fun handleViews(): Response {
+    private fun handleViews(isInfuse: Boolean = false): Response {
         val all = tgClient.getAllMedia().filter { !it.isHidden }
         val movieCount = all.count { isMovie(it) }
         val seriesCount = all.filter { isSeries(it) }.distinctBy { it.title.lowercase().trim() }.size
         val animeCount = all.filter { isAnime(it) }.distinctBy { it.title.lowercase().trim() }.size
 
-        val views = listOf(
+        val views = mutableListOf(
             mapOf(
                 "Name" to "Movies",
                 "ServerId" to serverId,
@@ -1159,6 +1180,40 @@ class JellyfinBridge(
                 "BackdropImageTags" to emptyList<String>()
             )
         )
+
+        if (isInfuse) {
+            val customCats = catalogRepo.getCatalogs().filter { !it.isHidden }
+            if (customCats.isNotEmpty()) {
+                val allGroups = all.toMediaGroups()
+                for (cat in customCats) {
+                    val catHex = toHexId("cat_${cat.id}")
+                    val matched = catalogRepo.filterMediaForCatalog(cat, allGroups)
+                    val colType = if (cat.filter.mediaType == "series") "tvshows" else "movies"
+                    views.add(
+                        mapOf(
+                            "Name" to cat.name,
+                            "ServerId" to serverId,
+                            "Id" to catHex,
+                            "CollectionType" to colType,
+                            "Type" to "CollectionFolder",
+                            "IsFolder" to true,
+                            "CanDelete" to false,
+                            "CanDownload" to false,
+                            "UserData" to mapOf(
+                                "UnplayedItemCount" to matched.size,
+                                "PlaybackPositionTicks" to 0L,
+                                "PlayCount" to 0,
+                                "IsFavorite" to false,
+                                "Played" to false
+                            ),
+                            "ImageTags" to mapOf("Primary" to catHex),
+                            "BackdropImageTags" to emptyList<String>()
+                        )
+                    )
+                }
+            }
+        }
+
         return jsonResponse(mapOf("Items" to views, "TotalRecordCount" to views.size, "StartIndex" to 0))
     }
 
@@ -1311,6 +1366,21 @@ class JellyfinBridge(
                             "ImageTags" to mapOf("Primary" to libAnimeHex)
                         )
                     }
+                    raw.startsWith("cat_") || catalogRepo.getCatalogs().any { toHexId("cat_${it.id}") == id.replace("-", "").lowercase() } -> {
+                        val cat = catalogRepo.getCatalogs().find { toHexId("cat_${it.id}") == id.replace("-", "").lowercase() || "cat_${it.id}" == raw }
+                        val name = cat?.name ?: "Catalog"
+                        val catHex = if (cat != null) toHexId("cat_${cat.id}") else id.replace("-", "").lowercase()
+                        val colType = if (cat?.filter?.mediaType == "series") "tvshows" else "movies"
+                        mapOf(
+                            "Name" to name,
+                            "ServerId" to serverId,
+                            "Id" to catHex,
+                            "CollectionType" to colType,
+                            "Type" to "CollectionFolder",
+                            "IsFolder" to true,
+                            "ImageTags" to mapOf("Primary" to catHex)
+                        )
+                    }
                     raw.startsWith("series_") && !raw.contains("_s") -> {
                         val episodes = getEpisodesForSeries(raw)
                         val match = episodes.firstOrNull() ?: allMedia.firstOrNull { isSeries(it) || isAnime(it) }
@@ -1360,6 +1430,41 @@ class JellyfinBridge(
         )
 
         when {
+            // 0. Custom NoxMedia Catalogs (Infuse Custom Shelf Drill-Down)
+            cleanParentId.startsWith("cat_") || rawParentId.startsWith("cat_") || catalogRepo.getCatalogs().any { toHexId("cat_${it.id}") == cleanParentId } -> {
+                val customCat = catalogRepo.getCatalogs().find {
+                    toHexId("cat_${it.id}") == cleanParentId || "cat_${it.id}" == rawParentId || it.id == cleanParentId || it.id == rawParentId
+                }
+                if (customCat != null) {
+                    val allGroups = allMedia.toMediaGroups()
+                    val matched = catalogRepo.filterMediaForCatalog(customCat, allGroups)
+                    val items = mutableListOf<Map<String, Any?>>()
+                    for (group in matched) {
+                        if (group.type == "series") {
+                            val show = showsByHex.values.firstOrNull { it.name.equals(group.title, ignoreCase = true) }
+                            if (show != null) {
+                                items.add(buildSeriesDto(show, localIp, port, isInfuse))
+                            } else {
+                                val firstEp = group.items.firstOrNull()
+                                if (firstEp != null) {
+                                    items.add(toJellyfinItem(firstEp, localIp, port, isSeriesOverview = true, includeMediaSources = false, isInfuse = isInfuse))
+                                }
+                            }
+                        } else {
+                            val movie = group.items.firstOrNull() ?: allMedia.firstOrNull { it.id == group.key }
+                            if (movie != null) {
+                                items.add(toJellyfinItem(movie, localIp, port, isSeriesOverview = false, includeMediaSources = false, isInfuse = isInfuse))
+                            }
+                        }
+                    }
+                    val total = items.size
+                    val paged = items.drop(startIndex).take(limit)
+                    return jsonResponse(mapOf("Items" to paged, "TotalRecordCount" to total, "StartIndex" to startIndex))
+                } else {
+                    return jsonResponse(mapOf("Items" to emptyList<Any>(), "TotalRecordCount" to 0, "StartIndex" to 0))
+                }
+            }
+
             // 1. LOCKED MOVIE PIPELINE: Movies Folder / View (Deduplicated multi-versions)
             cleanParentId == libMoviesHex || rawParentId == "lib_movies" ||
                     (cleanParentId.isBlank() && isMovieQuery && !isSeriesQuery && !isEpisodeQuery) -> {
@@ -1625,6 +1730,23 @@ class JellyfinBridge(
                     "Type" to "CollectionFolder",
                     "IsFolder" to true,
                     "ImageTags" to mapOf("Primary" to libAnimeHex)
+                )
+            )
+        }
+
+        val singleCat = catalogRepo.getCatalogs().find { toHexId("cat_${it.id}") == cleanId || "cat_${it.id}" == rawId || it.id == cleanId }
+        if (singleCat != null) {
+            val catHex = toHexId("cat_${singleCat.id}")
+            val colType = if (singleCat.filter.mediaType == "series") "tvshows" else "movies"
+            return jsonResponse(
+                mapOf(
+                    "Name" to singleCat.name,
+                    "ServerId" to serverId,
+                    "Id" to catHex,
+                    "CollectionType" to colType,
+                    "Type" to "CollectionFolder",
+                    "IsFolder" to true,
+                    "ImageTags" to mapOf("Primary" to catHex)
                 )
             )
         }
@@ -1943,9 +2065,22 @@ class JellyfinBridge(
     }
 
     private fun handleImageRedirect(itemId: String, imageType: String, isInfuse: Boolean = false): Response {
-        ensureTvIndex()
         val clean = itemId.replace("-", "").lowercase().trim()
         val raw = fromHexId(clean)
+
+        val imgCat = catalogRepo.getCatalogs().find { toHexId("cat_${it.id}") == clean || "cat_${it.id}" == raw || it.id == clean }
+        if (imgCat != null) {
+            val all = tgClient.getAllMedia().filter { !it.isHidden }
+            val matched = catalogRepo.filterMediaForCatalog(imgCat, all.toMediaGroups())
+            val firstPoster = matched.firstNotNullOfOrNull { it.posterUrl?.takeIf { p -> p.isNotBlank() } }
+                ?: "https://images.metahub.space/poster/medium/placeholder/img"
+            val resp = NanoHTTPD.newFixedLengthResponse(Response.Status.REDIRECT, "text/plain", "")
+            resp.addHeader("Location", firstPoster)
+            resp.addHeader("Cache-Control", "public, max-age=86400, immutable")
+            return resp
+        }
+
+        ensureTvIndex()
         val ep = episodesById[clean] ?: episodesById[raw]
         val season = seasonsByHex[clean] ?: seasonsByHex[toHexId(raw)]
         val show = if (ep == null && season == null) findShow(clean) else null
