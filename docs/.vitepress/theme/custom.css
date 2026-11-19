@@ -1,31 +1,49 @@
 /* ==========================================================================
-   NoxMedia - Vesper & Linear Inspired Minimalist Design
-   Clean typography, zero-clutter navigation, and reactive scrollspy.
+   NoxMedia - AMOLED Black & Royal Purple Minimalist Design
+   Inspired by Apple & Vesper. Zero clutter, borderless sidebar, focus dimming.
    ========================================================================== */
 
 :root {
-  --vp-c-brand-1: #ff5722;
-  --vp-c-brand-2: #f97316;
-  --vp-c-brand-3: #ea580c;
-  --vp-c-brand-soft: rgba(255, 87, 34, 0.12);
+  --vp-c-brand-1: #9333ea;
+  --vp-c-brand-2: #a855f7;
+  --vp-c-brand-3: #7c3aed;
+  --vp-c-brand-soft: rgba(168, 85, 247, 0.12);
 
   --vp-font-family-base: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   --vp-font-family-mono: "SF Mono", "Fira Code", Menlo, Monaco, Consolas, monospace;
 }
 
-/* Dark mode aesthetic */
+/* Light Mode Overrides */
+html:not(.dark) {
+  --vp-c-bg: #ffffff;
+  --vp-c-bg-alt: #f8fafc;
+  --vp-c-bg-elv: #f1f5f9;
+  --vp-c-bg-soft: #f3f4f6;
+
+  --vp-c-border: rgba(0, 0, 0, 0.08);
+  --vp-c-divider: rgba(0, 0, 0, 0.06);
+
+  --vp-c-text-1: #0f172a;
+  --vp-c-text-2: #475569;
+  --vp-c-text-3: #94a3b8;
+
+  --vp-c-brand-1: #7c3aed;
+  --vp-c-brand-2: #8b5cf6;
+}
+
+/* OLED AMOLED Pure Black Mode */
 html.dark {
-  --vp-c-bg: #09090b;
-  --vp-c-bg-alt: #101014;
-  --vp-c-bg-elv: #151518;
-  --vp-c-bg-soft: #1d1d22;
+  --vp-c-bg: #000000 !important;
+  --vp-c-bg-alt: #050507 !important;
+  --vp-c-bg-elv: #0c0a14 !important;
+  --vp-c-bg-soft: #141122 !important;
 
-  --vp-c-border: rgba(255, 255, 255, 0.07);
-  --vp-c-divider: rgba(255, 255, 255, 0.05);
+  --vp-c-border: rgba(255, 255, 255, 0.06);
+  --vp-c-divider: transparent !important;
 
-  --vp-c-text-1: #f4f4f5;
-  --vp-c-text-2: #a1a1aa;
-  --vp-c-text-3: #71717a;
+  --vp-c-text-1: #f8fafc;
+  --vp-c-text-2: #94a3b8;
+  --vp-c-text-3: #64748b;
 }
 
 /* Headings Typography */
@@ -34,7 +52,12 @@ h1, h2, h3, h4, .vp-doc h1, .vp-doc h2, .vp-doc h3 {
   font-weight: 600;
 }
 
-/* Physics for interactive elements */
+/* Smooth Scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Subtle Interactive Physics */
 a, button, .VPButton {
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
@@ -43,49 +66,51 @@ a:active, button:active, .VPButton:active {
   transform: scale(0.98);
 }
 
-/* Glassmorphism Navigation Bar */
+/* Glassmorphism Header Nav Bar */
 .VPNav {
-  background-color: rgba(9, 9, 11, 0.8) !important;
-  backdrop-filter: blur(16px) saturate(180%) !important;
-  -webkit-backdrop-filter: blur(16px) saturate(180%) !important;
+  background-color: rgba(0, 0, 0, 0.8) !important;
+  backdrop-filter: blur(20px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
 }
 
-/* Feature Cards */
-.VPFeature {
-  background: #111114 !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
-  border-radius: 12px !important;
-  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.22s ease !important;
-}
-
-.VPFeature:hover {
-  transform: translateY(-2px);
-  border-color: rgba(255, 87, 34, 0.4) !important;
+html:not(.dark) .VPNav {
+  background-color: rgba(255, 255, 255, 0.82) !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06) !important;
 }
 
 /* ==========================================================================
-   Vesper-Style Minimalist Sidebar
+   Vesper-Style Borderless Sidebar
    ========================================================================== */
 
-/* Group Section Titles */
+/* Completely remove vertical dividing border */
+.VPSidebar {
+  border-right: none !important;
+  background-color: var(--vp-c-bg) !important;
+}
+
+/* Group Titles (Collapsible headers) */
 .VPSidebarItem.level-0 .text {
   font-size: 0.72rem !important;
   font-weight: 600 !important;
   letter-spacing: 0.08em !important;
   text-transform: uppercase !important;
   color: rgba(255, 255, 255, 0.4) !important;
-  margin-bottom: 6px !important;
+  margin-bottom: 4px !important;
 }
 
-/* Nav Item Links */
+html:not(.dark) .VPSidebarItem.level-0 .text {
+  color: #64748b !important;
+}
+
+/* Sidebar Links */
 .VPSidebarItem.level-1 .link,
 .VPSidebarItem .item .link {
   padding: 6px 12px !important;
   margin: 2px 0 !important;
   border-left: 2px solid transparent !important;
   border-radius: 0 6px 6px 0 !important;
-  color: rgba(255, 255, 255, 0.55) !important;
+  color: rgba(255, 255, 255, 0.5) !important;
   font-size: 0.875rem !important;
   font-weight: 450 !important;
   line-height: 1.4 !important;
@@ -93,31 +118,53 @@ a:active, button:active, .VPButton:active {
   background: transparent !important;
 }
 
+html:not(.dark) .VPSidebarItem.level-1 .link,
+html:not(.dark) .VPSidebarItem .item .link {
+  color: #64748b !important;
+}
+
 .VPSidebarItem.level-1 .link:hover,
 .VPSidebarItem .item .link:hover {
-  color: rgba(255, 255, 255, 0.88) !important;
+  color: rgba(255, 255, 255, 0.9) !important;
   background: rgba(255, 255, 255, 0.03) !important;
 }
 
-/* Active State (Vesper-Style Highlight with Left Orange Accent) */
+html:not(.dark) .VPSidebarItem.level-1 .link:hover,
+html:not(.dark) .VPSidebarItem .item .link:hover {
+  color: #0f172a !important;
+  background: rgba(0, 0, 0, 0.04) !important;
+}
+
+/* Active State (Royal Purple Left Accent Bar) */
 .VPSidebarItem.is-active > .item > .link,
 .VPSidebarItem.is-link.is-active > .item > .link {
   color: #ffffff !important;
   font-weight: 550 !important;
-  border-left: 2px solid #ff5722 !important;
-  background: rgba(255, 87, 34, 0.05) !important;
+  border-left: 2px solid #a855f7 !important;
+  background: rgba(168, 85, 247, 0.08) !important;
+}
+
+html:not(.dark) .VPSidebarItem.is-active > .item > .link {
+  color: #7c3aed !important;
+  border-left: 2px solid #7c3aed !important;
+  background: rgba(124, 58, 237, 0.08) !important;
 }
 
 .VPSidebarItem.is-active .link-text {
   color: #ffffff !important;
 }
 
-/* ==========================================================================
-   In-Page Outline / Table of Contents (Right Side Scrollspy)
-   ========================================================================== */
+html:not(.dark) .VPSidebarItem.is-active .link-text {
+  color: #7c3aed !important;
+}
+
+/* In-Page Outline / "On this page" Right Scrollspy */
+.VPDocAsideOutline {
+  border-left: none !important;
+}
 
 .VPDocAsideOutline .outline-title {
-  font-size: 0.75rem !important;
+  font-size: 0.72rem !important;
   font-weight: 600 !important;
   letter-spacing: 0.06em !important;
   text-transform: uppercase !important;
@@ -127,7 +174,7 @@ a:active, button:active, .VPButton:active {
 .VPDocAsideOutline .outline-link {
   font-size: 0.82rem !important;
   line-height: 1.5 !important;
-  color: rgba(255, 255, 255, 0.48) !important;
+  color: rgba(255, 255, 255, 0.45) !important;
   border-left: 2px solid transparent !important;
   padding: 3px 0 3px 12px !important;
   transition: all 0.15s ease !important;
@@ -140,80 +187,316 @@ a:active, button:active, .VPButton:active {
 .VPDocAsideOutline .outline-link.active {
   color: #ffffff !important;
   font-weight: 500 !important;
-  border-left: 2px solid #ff5722 !important;
+  border-left: 2px solid #a855f7 !important;
+}
+
+html:not(.dark) .VPDocAsideOutline .outline-link.active {
+  color: #7c3aed !important;
+  border-left: 2px solid #7c3aed !important;
 }
 
 /* ==========================================================================
-   Badges, Callouts & Tables
+   Focus Sections (Single-Page Dynamic Dimming Effect)
    ========================================================================== */
 
-.badge-pill {
+.doc-section {
+  padding: 1.75rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  opacity: 0.38;
+  transition: opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1), transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+html:not(.dark) .doc-section {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  opacity: 0.42;
+}
+
+/* When active, focused, or hovered: fully lit */
+.doc-section.is-focused,
+.doc-section:focus-within,
+.doc-section:hover {
+  opacity: 1 !important;
+}
+
+/* ==========================================================================
+   Vesper-Style Minimal Badges (New, Improved, Fixed)
+   ========================================================================== */
+
+.badge-item {
   display: inline-flex;
   align-items: center;
-  padding: 2px 9px;
-  border-radius: 9999px;
-  font-size: 0.72rem;
+  gap: 6px;
+  font-size: 0.85rem;
   font-weight: 500;
-  letter-spacing: 0.02em;
-  margin-right: 6px;
+  letter-spacing: -0.01em;
+  padding: 2px 8px;
+  border-radius: 6px;
+  vertical-align: middle;
+  background: transparent;
 }
 
-.badge-feature {
-  background: rgba(255, 87, 34, 0.12);
-  color: #ff7043;
-  border: 1px solid rgba(255, 87, 34, 0.3);
-}
-
-.badge-perf {
-  background: rgba(16, 185, 129, 0.12);
-  color: #34d399;
-  border: 1px solid rgba(16, 185, 129, 0.3);
-}
-
-.badge-fix {
-  background: rgba(59, 130, 246, 0.12);
-  color: #60a5fa;
-  border: 1px solid rgba(59, 130, 246, 0.3);
-}
-
-.badge-coming {
-  background: rgba(168, 85, 247, 0.12);
+.badge-new {
   color: #c084fc;
-  border: 1px solid rgba(168, 85, 247, 0.3);
 }
 
-/* Minimalist Tables */
+.badge-new svg {
+  stroke: #c084fc;
+}
+
+.badge-improved {
+  color: #fbbf24;
+}
+
+.badge-improved svg {
+  stroke: #fbbf24;
+}
+
+.badge-fixed {
+  color: #f87171;
+}
+
+.badge-fixed svg {
+  stroke: #f87171;
+}
+
+/* ==========================================================================
+   Apple-Style Tables & Callouts
+   ========================================================================== */
+
 .vp-doc table {
   width: 100%;
   border-collapse: collapse;
   margin: 1.5rem 0;
-  font-size: 0.9rem;
+  font-size: 0.875rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+html:not(.dark) .vp-doc table {
+  border: 1px solid rgba(0, 0, 0, 0.08);
 }
 
 .vp-doc th {
-  background: #141418;
-  color: #d4d4d8;
+  background: #0d0a17;
+  color: #f1f5f9;
   font-weight: 550;
   text-align: left;
-  padding: 10px 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 11px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+html:not(.dark) .vp-doc th {
+  background: #f1f5f9;
+  color: #0f172a;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  border-right: 1px solid rgba(0, 0, 0, 0.05);
 }
 
 .vp-doc td {
-  padding: 10px 14px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  color: #a1a1aa;
+  padding: 11px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+  color: #94a3b8;
+}
+
+html:not(.dark) .vp-doc td {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  border-right: 1px solid rgba(0, 0, 0, 0.05);
+  color: #334155;
+}
+
+.vp-doc tr:last-child td {
+  border-bottom: none;
 }
 
 .vp-doc tr:hover td {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(168, 85, 247, 0.03);
 }
 
-/* Clean Device Frame Mockup */
-.device-card {
-  background: #121215;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  padding: 1.25rem;
-  margin: 1.25rem 0;
+/* ==========================================================================
+   Apple-Style Minimalist Homepage Hero
+   ========================================================================== */
+
+.home-container {
+  min-height: calc(100vh - 140px);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 4rem 1.5rem 2rem 1.5rem;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.hero-section {
+  text-align: center;
+  margin: auto 0;
+  padding: 2rem 0;
+}
+
+.hero-logo-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 96px;
+  height: 96px;
+  margin-bottom: 2rem;
+  border-radius: 24px;
+  background: radial-gradient(circle at 50% 50%, rgba(168, 85, 247, 0.18), transparent 70%), #0c0a14;
+  border: 1px solid rgba(168, 85, 247, 0.25);
+  box-shadow: 0 0 40px -8px rgba(168, 85, 247, 0.35);
+}
+
+html:not(.dark) .hero-logo-box {
+  background: radial-gradient(circle at 50% 50%, rgba(124, 58, 237, 0.1), transparent 70%), #f8fafc;
+  border: 1px solid rgba(124, 58, 237, 0.2);
+  box-shadow: 0 0 30px -5px rgba(124, 58, 237, 0.15);
+}
+
+.hero-logo-box img {
+  width: 64px;
+  height: 64px;
+  border-radius: 14px;
+}
+
+.hero-title {
+  font-size: clamp(2.5rem, 6vw, 4.25rem);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  color: #ffffff;
+  margin: 0 0 0.75rem 0;
+  line-height: 1.05;
+}
+
+html:not(.dark) .hero-title {
+  color: #0f172a;
+}
+
+.hero-tagline {
+  font-size: clamp(1.1rem, 2.5vw, 1.45rem);
+  color: #94a3b8;
+  font-weight: 400;
+  letter-spacing: -0.015em;
+  margin: 0 auto 2.5rem auto;
+  max-width: 600px;
+  line-height: 1.4;
+}
+
+html:not(.dark) .hero-tagline {
+  color: #64748b;
+}
+
+.hero-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 11px 26px;
+  font-size: 0.95rem;
+  font-weight: 550;
+  border-radius: 9999px;
+  color: #ffffff !important;
+  background: linear-gradient(135deg, #a855f7, #7c3aed);
+  box-shadow: 0 4px 20px -2px rgba(168, 85, 247, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  text-decoration: none !important;
+}
+
+.btn-primary:hover {
+  background: linear-gradient(135deg, #c084fc, #9333ea);
+  box-shadow: 0 6px 28px 0 rgba(168, 85, 247, 0.6);
+  transform: translateY(-1px);
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 11px 24px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  border-radius: 9999px;
+  color: #f8fafc !important;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(8px);
+  text-decoration: none !important;
+}
+
+html:not(.dark) .btn-secondary {
+  color: #0f172a !important;
+  background: rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+  transform: translateY(-1px);
+}
+
+.btn-tertiary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 11px 22px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  border-radius: 9999px;
+  color: #a855f7 !important;
+  background: rgba(168, 85, 247, 0.08);
+  border: 1px solid rgba(168, 85, 247, 0.25);
+  text-decoration: none !important;
+}
+
+.btn-tertiary:hover {
+  background: rgba(168, 85, 247, 0.16);
+  border-color: rgba(168, 85, 247, 0.4);
+  transform: translateY(-1px);
+}
+
+/* Bottom Bar */
+.home-bottom-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding-top: 2rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 0.82rem;
+  color: #64748b;
+}
+
+html:not(.dark) .home-bottom-bar {
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.bottom-left a {
+  color: #94a3b8;
+  text-decoration: none;
+}
+
+.bottom-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-family: var(--vp-font-family-mono);
+  font-size: 0.78rem;
+}
+
+.version-pill {
+  color: #a855f7;
+  background: rgba(168, 85, 247, 0.08);
+  padding: 2px 8px;
+  border-radius: 9999px;
+  border: 1px solid rgba(168, 85, 247, 0.2);
 }
