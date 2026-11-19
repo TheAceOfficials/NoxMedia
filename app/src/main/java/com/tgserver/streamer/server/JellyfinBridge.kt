@@ -838,6 +838,9 @@ class JellyfinBridge(
                 lowerUri == "/playback/bitratetest" -> {
                     NanoHTTPD.newFixedLengthResponse(Response.Status.OK, "text/plain", "")
                 }
+                lowerUri.endsWith("/search/hints") || lowerUri.contains("/search/hints") -> {
+                    handleSearchHints(params, localIp, config.port, isInfuse)
+                }
                 lowerUri.startsWith("/plugins") -> {
                     handlePlugins(lowerUri)
                 }
@@ -1444,6 +1447,98 @@ class JellyfinBridge(
         return jsonResponse(latestItems)
     }
 
+    private fun handleSearchHints(
+        params: Map<String, String>,
+        localIp: String,
+        port: Int,
+        isInfuse: Boolean
+    ): Response {
+        ensureTvIndex()
+        val searchTerm = getParam(params, "SearchTerm", "searchTerm", "search", "q").trim()
+        val startIndex = getParam(params, "StartIndex", "startIndex").toIntOrNull() ?: 0
+        val limit = getParam(params, "Limit", "limit").toIntOrNull() ?: 50
+
+        if (searchTerm.isBlank()) {
+            return jsonResponse(mapOf("SearchHints" to emptyList<Any>(), "TotalRecordCount" to 0))
+        }
+
+        val allMedia = tgClient.getAllMedia().filter { !it.isHidden }
+        val hints = mutableListOf<Map<String, Any?>>()
+
+        // 1. Matched Movies
+        val matchedMovies = allMedia.filter {
+            isMovie(it) && (it.title.contains(searchTerm, ignoreCase = true) || it.fileName.contains(searchTerm, ignoreCase = true))
+        }.distinctBy { getMovieKey(it) }
+
+        for (m in matchedMovies) {
+            val hexId = toHexId(m.id)
+            val durTicks = resolveMovieDurationTicks(m)
+            hints.add(mapOf(
+                "ItemId" to hexId,
+                "Id" to hexId,
+                "Name" to m.title,
+                "MatchedTerm" to m.title,
+                "Type" to "Movie",
+                "MediaType" to "Video",
+                "RunTimeTicks" to durTicks,
+                "PrimaryImageTag" to hexId,
+                "ThumbImageTag" to hexId,
+                "ProductionYear" to (m.year?.toIntOrNull() ?: 2024),
+                "ChannelId" to m.channelId
+            ))
+        }
+
+        // 2. Matched TV Shows / Series
+        val matchedShows = showsByHex.values.filter { it.title.contains(searchTerm, ignoreCase = true) }
+        for (s in matchedShows) {
+            hints.add(mapOf(
+                "ItemId" to s.seriesHexId,
+                "Id" to s.seriesHexId,
+                "Name" to s.title,
+                "MatchedTerm" to s.title,
+                "Type" to "Series",
+                "PrimaryImageTag" to s.seriesHexId,
+                "ThumbImageTag" to s.seriesHexId,
+                "ProductionYear" to (s.firstEpisode?.year?.toIntOrNull() ?: 2024),
+                "ChildCount" to s.seasons.size,
+                "Series" to s.title
+            ))
+        }
+
+        // 3. Matched Episodes
+        for (show in showsByHex.values) {
+            for (ep in show.allEpisodes) {
+                if (ep.title.contains(searchTerm, ignoreCase = true) ||
+                    ep.fileName.contains(searchTerm, ignoreCase = true) ||
+                    (ep.episodeTitle?.contains(searchTerm, ignoreCase = true) == true)
+                ) {
+                    val hexId = toHexId(ep.id)
+                    val s = show.seasons[ep.season ?: 1] ?: show.seasons.values.firstOrNull()
+                    val durTicks = resolveEpisodeDurationTicks(ep)
+                    hints.add(mapOf(
+                        "ItemId" to hexId,
+                        "Id" to hexId,
+                        "Name" to (ep.episodeTitle ?: "Episode ${ep.episode ?: 1}"),
+                        "MatchedTerm" to (ep.episodeTitle ?: ep.title),
+                        "Type" to "Episode",
+                        "MediaType" to "Video",
+                        "Series" to show.title,
+                        "SeriesId" to show.seriesHexId,
+                        "ParentIndexNumber" to (s?.seasonNumber ?: 1),
+                        "IndexNumber" to (ep.episode ?: 1),
+                        "RunTimeTicks" to durTicks,
+                        "PrimaryImageTag" to hexId,
+                        "ThumbImageTag" to hexId
+                    ))
+                }
+            }
+        }
+
+        val total = hints.size
+        val paged = hints.drop(startIndex).take(limit)
+        return jsonResponse(mapOf("SearchHints" to paged, "TotalRecordCount" to total))
+    }
+
     private fun handleQueryItems(params: Map<String, String>, localIp: String, port: Int, isInfuse: Boolean = false): Response {
         val parentIdParam = getParam(params, "ParentId", "parentId", "parentID", "folderId", "id")
         val cleanParentId = parentIdParam.replace("-", "").lowercase().trim()
@@ -1988,34 +2083,35 @@ class JellyfinBridge(
         }
     }
 
-    private fun resolveMovieDurationTicks(item: MediaItem, matching: List<MediaItem> = emptyList()): Long? {
-        if (item.durationSeconds in 2400..18000) return item.durationSeconds.toLong() * 10_000_000L
-        val otherDur = matching.firstOrNull { it.durationSeconds in 2400..18000 }?.durationSeconds
+    private fun resolveMovieDurationTicks(item: MediaItem, matching: List<MediaItem> = emptyList()): Long {
+        if (item.durationSeconds in 1800..21600) return item.durationSeconds.toLong() * 10_000_000L
+        val otherDur = matching.firstOrNull { it.durationSeconds in 1800..21600 }?.durationSeconds
         if (otherDur != null && otherDur > 0) {
             item.durationSeconds = otherDur
             return otherDur.toLong() * 10_000_000L
         }
         val enriched = com.tgserver.streamer.metadata.MetadataEnricher.resolveRuntimeSeconds(item)
-        if (enriched in 2400..18000) {
+        if (enriched in 1800..21600) {
             item.durationSeconds = enriched
             return enriched.toLong() * 10_000_000L
         }
-        return null
+        return 6300L * 10_000_000L
     }
 
-    private fun resolveEpisodeDurationTicks(item: MediaItem, matching: List<MediaItem> = emptyList()): Long? {
-        if (item.durationSeconds in 900..7200) return item.durationSeconds.toLong() * 10_000_000L
-        val otherDur = matching.firstOrNull { it.durationSeconds in 900..7200 }?.durationSeconds
+    private fun resolveEpisodeDurationTicks(item: MediaItem, matching: List<MediaItem> = emptyList()): Long {
+        if (item.durationSeconds in 300..10800) return item.durationSeconds.toLong() * 10_000_000L
+        val otherDur = matching.firstOrNull { it.durationSeconds in 300..10800 }?.durationSeconds
         if (otherDur != null && otherDur > 0) {
             item.durationSeconds = otherDur
             return otherDur.toLong() * 10_000_000L
         }
         val enriched = com.tgserver.streamer.metadata.MetadataEnricher.resolveRuntimeSeconds(item)
-        if (enriched in 900..7200) {
+        if (enriched in 300..10800) {
             item.durationSeconds = enriched
             return enriched.toLong() * 10_000_000L
         }
-        return null
+        val fallbackSec = if (isAnime(item)) 24 * 60L else 45 * 60L
+        return fallbackSec * 10_000_000L
     }
 
     private fun buildEpisodeMediaSources(
@@ -2056,7 +2152,8 @@ class JellyfinBridge(
                 if (length == 0) append(ver.title)
             }
 
-            val bitrate = if (ver.durationSeconds > 0 && ver.sizeBytes > 0) (ver.sizeBytes * 8) / ver.durationSeconds else 10_000_000L
+            val effectiveSec = if (ver.durationSeconds > 0) ver.durationSeconds.toLong() else (durationTicks / 10_000_000L)
+            val bitrate = if (effectiveSec > 0 && ver.sizeBytes > 0) (ver.sizeBytes * 8) / effectiveSec else 10_000_000L
             val virtualPath = "/TV Shows/$showTitle/Season $sNum/$rawFileName"
 
             val sourceMap = mutableMapOf<String, Any?>(
@@ -2127,7 +2224,8 @@ class JellyfinBridge(
                 if (length == 0) append(ver.title)
             }
 
-            val bitrate = if (ver.durationSeconds > 0 && ver.sizeBytes > 0) (ver.sizeBytes * 8) / ver.durationSeconds else 10_000_000L
+            val effectiveSec = if (ver.durationSeconds > 0) ver.durationSeconds.toLong() else (durationTicks / 10_000_000L)
+            val bitrate = if (effectiveSec > 0 && ver.sizeBytes > 0) (ver.sizeBytes * 8) / effectiveSec else 10_000_000L
 
             val virtualPath = if (isMovie(ver)) "/Movies/$rawFileName" else if (isAnime(ver)) "/Anime/${ver.title}/Season ${ver.season ?: 1}/$rawFileName" else "/TV Shows/${ver.title}/Season ${ver.season ?: 1}/$rawFileName"
 
