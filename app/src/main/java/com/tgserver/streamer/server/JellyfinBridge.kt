@@ -424,7 +424,8 @@ class JellyfinBridge(
         val streamUrl = "http://$localIp:$port/stream/video/${item.channelId}/${item.id}/$safeFileName"
         val ext = rawFileName.substringAfterLast(".", "mkv").lowercase()
         val displayName = item.episodeTitle?.takeIf { it.isNotBlank() } ?: "Episode $epNum"
-        val virtualPath = "/TV Shows/${show.title}/Season $sNum/$rawFileName"
+        val folderName = if (show.isAnime) "Anime" else "TV Shows"
+        val virtualPath = "/$folderName/${show.title}/Season $sNum/$rawFileName"
 
         val providerIds = mutableMapOf<String, String>()
         item.imdbId?.takeIf { it.isNotBlank() }?.let { providerIds["Imdb"] = it }
@@ -1199,7 +1200,7 @@ class JellyfinBridge(
                     "RemovedSeasons" to 0,
                     "UpdatedVideos" to (moviesCount + episodesCount),
                     "RemovedVideos" to 0,
-                    "UpdatedCollectionFolders" to 3,
+                    "UpdatedCollectionFolders" to 0,
                     "UpdatedUserData" to 0
                 ))
             }
@@ -1209,37 +1210,19 @@ class JellyfinBridge(
                 val includeTypes = (getParam(params, "IncludeItemTypes", "includeitemtypes") ?: "")
                     .lowercase().split(",").map { it.trim() }.filter { it.isNotBlank() }
                 val startIndex = getParam(params, "StartIndex", "startindex").toIntOrNull() ?: 0
-                val limit = getParam(params, "Limit", "limit").toIntOrNull() ?: 100
+                val limit = getParam(params, "Limit", "limit").toIntOrNull() ?: Int.MAX_VALUE
 
                 val wantAll = includeTypes.isEmpty()
                 val wantMovies = wantAll || includeTypes.contains("movie") || includeTypes.contains("video")
                 val wantSeries = wantAll || includeTypes.contains("series")
                 val wantSeasons = wantAll || includeTypes.contains("season")
                 val wantEpisodes = wantAll || includeTypes.contains("episode") || includeTypes.contains("video")
-                val wantFolders = wantAll || includeTypes.contains("collectionfolder") || includeTypes.contains("folder")
 
                 val allItems = mutableListOf<Map<String, Any?>>()
-                if (wantFolders) {
-                    allItems.add(mapOf(
-                        "Name" to "Movies", "ServerId" to serverId, "Id" to libMoviesHex,
-                        "Type" to "CollectionFolder", "CollectionType" to "movies", "IsFolder" to true,
-                        "ImageTags" to mapOf("Primary" to libMoviesHex)
-                    ))
-                    allItems.add(mapOf(
-                        "Name" to "TV Shows", "ServerId" to serverId, "Id" to libSeriesHex,
-                        "Type" to "CollectionFolder", "CollectionType" to "tvshows", "IsFolder" to true,
-                        "ImageTags" to mapOf("Primary" to libSeriesHex)
-                    ))
-                    allItems.add(mapOf(
-                        "Name" to "Anime", "ServerId" to serverId, "Id" to libAnimeHex,
-                        "Type" to "CollectionFolder", "CollectionType" to "tvshows", "IsFolder" to true,
-                        "ImageTags" to mapOf("Primary" to libAnimeHex)
-                    ))
-                }
                 if (wantMovies) {
                     val movies = allMedia.filter { isMovie(it) }.distinctBy { getMovieKey(it) }
                     for (m in movies) {
-                        allItems.add(toJellyfinItem(m, localIp, port, isSeriesOverview = false, includeMediaSources = false, isInfuse = isInfuse))
+                        allItems.add(toJellyfinItem(m, localIp, port, isSeriesOverview = false, includeMediaSources = true, isInfuse = isInfuse))
                     }
                 }
                 if (wantSeries) {
@@ -1259,7 +1242,7 @@ class JellyfinBridge(
                         for (ep in show.allEpisodes) {
                             val s = show.seasons[ep.season ?: 1] ?: show.seasons.values.firstOrNull()
                             if (s != null) {
-                                allItems.add(buildEpisodeDto(ep, show, s, localIp, port, includeMediaSources = false, isInfuse = isInfuse))
+                                allItems.add(buildEpisodeDto(ep, show, s, localIp, port, includeMediaSources = true, isInfuse = isInfuse))
                             }
                         }
                     }
