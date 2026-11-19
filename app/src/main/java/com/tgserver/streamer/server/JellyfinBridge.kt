@@ -840,7 +840,7 @@ class JellyfinBridge(
                     handlePlugins(lowerUri)
                 }
                 lowerUri.startsWith("/infusesync") -> {
-                    handleInfuseSync(lowerUri, session, localIp, config.port, isInfuse)
+                    handleInfuseSync(lowerUri, params, localIp, config.port, isInfuse)
                 }
                 lowerUri.startsWith("/environment") -> {
                     jsonResponse(mapOf("Path" to "/media"))
@@ -1165,12 +1165,11 @@ class JellyfinBridge(
 
     private fun handleInfuseSync(
         lowerUri: String,
-        session: IHTTPSession,
+        params: Map<String, String>,
         localIp: String,
         port: Int,
         isInfuse: Boolean
     ): Response {
-        val params = session.parameters
         ensureTvIndex()
         val allMedia = tgClient.getAllMedia().filter { !it.isHidden }
 
