@@ -688,13 +688,15 @@ class MetadataEnricher {
         if (meta.tmdbId != null && meta.tmdbId > 0) item.tmdbId = meta.tmdbId
         if (meta.tvdbId != null && meta.tvdbId > 0) item.tvdbId = meta.tvdbId
         if (meta.kitsuId != null && meta.kitsuId > 0) item.kitsuId = meta.kitsuId
-        if (meta.runtimeMinutes != null && meta.runtimeMinutes > 0) {
-            val metaSec = meta.runtimeMinutes * 60
+        val rtMin = meta.runtimeMinutes
+        if (rtMin != null && rtMin > 0) {
+            val metaSec = rtMin * 60
             if (item.durationSeconds <= 0 || (item.type == "movie" && (item.durationSeconds < 1800 || item.durationSeconds > 21600))) {
                 item.durationSeconds = metaSec
             }
-            if (!item.imdbId.isNullOrBlank()) {
-                runtimeCache[item.imdbId!!] = metaSec
+            val imdb = item.imdbId
+            if (!imdb.isNullOrBlank()) {
+                runtimeCache[imdb] = metaSec
             }
         }
         if (meta.rating != null && meta.rating > 0.0) {
@@ -1228,10 +1230,14 @@ class MetadataEnricher {
                                         val mBody = mResp.body?.string()
                                         if (!mBody.isNullOrBlank()) {
                                             val mObj = JsonParser.parseString(mBody).asJsonObject
-                                            tmdbImdbId = mObj.get("imdb_id")?.asString
-                                            val rt = mObj.get("runtime")?.asInt
-                                            if (rt != null && rt > 0) {
-                                                movieRuntime = rt
+                                            if (mObj.has("imdb_id") && !mObj.get("imdb_id").isJsonNull) {
+                                                tmdbImdbId = mObj.get("imdb_id").asString
+                                            }
+                                            if (mObj.has("runtime") && !mObj.get("runtime").isJsonNull) {
+                                                val rt = mObj.get("runtime").asInt
+                                                if (rt > 0) {
+                                                    movieRuntime = rt
+                                                }
                                             }
                                         }
                                     }
@@ -1244,15 +1250,19 @@ class MetadataEnricher {
                                         val extBody = extResp.body?.string()
                                         if (!extBody.isNullOrBlank()) {
                                             val extObj = JsonParser.parseString(extBody).asJsonObject
-                                            tmdbImdbId = extObj.get("imdb_id")?.asString
+                                            if (extObj.has("imdb_id") && !extObj.get("imdb_id").isJsonNull) {
+                                                tmdbImdbId = extObj.get("imdb_id").asString
+                                            }
                                         }
                                     }
                                 }
                             }
                         } catch (_: Exception) {}
 
-                        if (movieRuntime != null && movieRuntime > 0 && !tmdbImdbId.isNullOrBlank()) {
-                            runtimeCache[tmdbImdbId] = movieRuntime * 60
+                        val finalRt = movieRuntime
+                        val finalImdb = tmdbImdbId
+                        if (finalRt != null && finalRt > 0 && !finalImdb.isNullOrBlank()) {
+                            runtimeCache[finalImdb] = finalRt * 60
                         }
 
                         val candRating = try { cand.get("vote_average")?.asDouble } catch (_: Exception) { null }
