@@ -820,12 +820,6 @@ def sync_channel_media(api_id: int, api_hash: str, session_str: str, channel_id:
             file_size = getattr(media, "file_size", 0)
             mime_type = getattr(media, "mime_type", "video/mp4") or "video/mp4"
             duration = getattr(media, "duration", 0) or 0
-            if not duration and hasattr(media, "attributes") and media.attributes:
-                for attr in media.attributes:
-                    dur = getattr(attr, "duration", 0)
-                    if dur:
-                        duration = int(dur)
-                        break
 
             caption = msg.caption or ""
             best_file_name = media_parser.extract_best_filename(file_name, caption)
@@ -855,8 +849,6 @@ def sync_channel_media(api_id: int, api_hash: str, session_str: str, channel_id:
                         "dateAdded": msg_date,
                         "parts": []
                     }
-                else:
-                    split_groups[clean_base]["duration"] += duration
                 split_groups[clean_base]["parts"].append({
                     "messageId": msg.id,
                     "partNumber": part_num,
@@ -979,12 +971,6 @@ def scan_channel_batch(api_id: int, api_hash: str, session_str: str, channel_id:
                 file_size = getattr(media, "file_size", 0) or 0
                 mime_type = getattr(media, "mime_type", "") or ""
                 duration = getattr(media, "duration", 0) or 0
-                if not duration and hasattr(media, "attributes") and media.attributes:
-                    for attr in media.attributes:
-                        dur = getattr(attr, "duration", 0)
-                        if dur:
-                            duration = int(dur)
-                            break
                 caption = msg.caption or ""
 
                 best_file_name = media_parser.extract_best_filename(file_name, caption)

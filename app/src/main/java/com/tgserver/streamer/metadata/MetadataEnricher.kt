@@ -688,16 +688,8 @@ class MetadataEnricher {
         if (meta.tmdbId != null && meta.tmdbId > 0) item.tmdbId = meta.tmdbId
         if (meta.tvdbId != null && meta.tvdbId > 0) item.tvdbId = meta.tvdbId
         if (meta.kitsuId != null && meta.kitsuId > 0) item.kitsuId = meta.kitsuId
-        val rtMin = meta.runtimeMinutes
-        if (rtMin != null && rtMin > 0) {
-            val metaSec = rtMin * 60
-            if (item.durationSeconds <= 0 || (item.type == "movie" && (item.durationSeconds < 1800 || item.durationSeconds > 21600))) {
-                item.durationSeconds = metaSec
-            }
-            val imdb = item.imdbId
-            if (!imdb.isNullOrBlank()) {
-                runtimeCache[imdb] = metaSec
-            }
+        if (item.durationSeconds <= 0 && meta.runtimeMinutes != null && meta.runtimeMinutes > 0) {
+            item.durationSeconds = meta.runtimeMinutes * 60
         }
         if (meta.rating != null && meta.rating > 0.0) {
             item.rating = meta.rating
@@ -706,9 +698,9 @@ class MetadataEnricher {
 
     fun resolveRuntimeSeconds(item: MediaItem): Int {
         if (item.type == "movie") {
-            if (item.durationSeconds in 1800..21600) return item.durationSeconds
+            if (item.durationSeconds in 2400..18000) return item.durationSeconds
         } else {
-            if (item.durationSeconds in 300..10800) return item.durationSeconds
+            if (item.durationSeconds in 900..7200) return item.durationSeconds
         }
 
         val imdbId = item.imdbId
@@ -719,12 +711,45 @@ class MetadataEnricher {
                     return cachedSec
                 }
             }
+
+            try {
+                val cType = if (item.type == "movie") "movie" else "series"
+                val url = "https://v3-cinemeta.strem.io/meta/$cType/$imdbId.json"
+                val req = Request.Builder().url(url).header("User-Agent", "NoxMedia/1.0").build()
+                httpClient.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string()
+                        if (!body.isNullOrBlank()) {
+                            val root = JsonParser.parseString(body).asJsonObject
+                            val metaObj = root.getAsJsonObject("meta")
+                            var rtStr = metaObj?.get("runtime")?.asString
+                            if (rtStr.isNullOrBlank() && item.type == "series" && metaObj != null && metaObj.has("videos")) {
+                                val vids = metaObj.getAsJsonArray("videos")
+                                for (v in vids) {
+                                    val vo = v.asJsonObject
+                                    val s = vo.get("season")?.asInt
+                                    val e = vo.get("episode")?.asInt ?: vo.get("number")?.asInt
+                                    if (s == item.season && e == item.episode) {
+                                        rtStr = vo.get("runtime")?.asString
+                                        break
+                                    }
+                                }
+                            }
+                            if (!rtStr.isNullOrBlank()) {
+                                val mins = Regex("(\\d+)").find(rtStr)?.groupValues?.get(1)?.toIntOrNull()
+                                if (mins != null && mins > 0) {
+                                    val secs = mins * 60
+                                    runtimeCache[imdbId] = secs
+                                    item.durationSeconds = secs
+                                    return secs
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
         }
         return 0
-    }
-
-    fun getCachedRuntimeSeconds(imdbId: String): Int? {
-        return runtimeCache[imdbId]?.takeIf { it > 0 }
     }
 
     private fun fetchTmdbEpisodeTitle(tmdbId: Int, season: Int, episode: Int, apiKey: String): String? {
@@ -1218,52 +1243,22 @@ class MetadataEnricher {
                             epRuntime = epInfo.runtimeMinutes
                         }
 
-                        // Resolve IMDb ID & Runtime from TMDB
+                        // Resolve IMDb ID from TMDB external_ids
                         var tmdbImdbId: String? = null
-                        var movieRuntime: Int? = null
                         try {
-                            if (type == "movie") {
-                                val mUrl = "https://api.themoviedb.org/3/movie/$tmdbId?api_key=$apiKey"
-                                val mReq = Request.Builder().url(mUrl).build()
-                                httpClient.newCall(mReq).execute().use { mResp ->
-                                    if (mResp.isSuccessful) {
-                                        val mBody = mResp.body?.string()
-                                        if (!mBody.isNullOrBlank()) {
-                                            val mObj = JsonParser.parseString(mBody).asJsonObject
-                                            if (mObj.has("imdb_id") && !mObj.get("imdb_id").isJsonNull) {
-                                                tmdbImdbId = mObj.get("imdb_id").asString
-                                            }
-                                            if (mObj.has("runtime") && !mObj.get("runtime").isJsonNull) {
-                                                val rt = mObj.get("runtime").asInt
-                                                if (rt > 0) {
-                                                    movieRuntime = rt
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            } else {
-                                val extUrl = "https://api.themoviedb.org/3/tv/$tmdbId/external_ids?api_key=$apiKey"
-                                val extReq = Request.Builder().url(extUrl).build()
-                                httpClient.newCall(extReq).execute().use { extResp ->
-                                    if (extResp.isSuccessful) {
-                                        val extBody = extResp.body?.string()
-                                        if (!extBody.isNullOrBlank()) {
-                                            val extObj = JsonParser.parseString(extBody).asJsonObject
-                                            if (extObj.has("imdb_id") && !extObj.get("imdb_id").isJsonNull) {
-                                                tmdbImdbId = extObj.get("imdb_id").asString
-                                            }
-                                        }
+                            val extEndpoint = if (type == "movie") "movie" else "tv"
+                            val extUrl = "https://api.themoviedb.org/3/$extEndpoint/$tmdbId/external_ids?api_key=$apiKey"
+                            val extReq = Request.Builder().url(extUrl).build()
+                            httpClient.newCall(extReq).execute().use { extResp ->
+                                if (extResp.isSuccessful) {
+                                    val extBody = extResp.body?.string()
+                                    if (!extBody.isNullOrBlank()) {
+                                        val extObj = JsonParser.parseString(extBody).asJsonObject
+                                        tmdbImdbId = extObj.get("imdb_id")?.asString
                                     }
                                 }
                             }
                         } catch (_: Exception) {}
-
-                        val finalRt = movieRuntime
-                        val finalImdb = tmdbImdbId
-                        if (finalRt != null && finalRt > 0 && !finalImdb.isNullOrBlank()) {
-                            runtimeCache[finalImdb] = finalRt * 60
-                        }
 
                         val candRating = try { cand.get("vote_average")?.asDouble } catch (_: Exception) { null }
 
@@ -1277,7 +1272,7 @@ class MetadataEnricher {
                             episodeThumbnailUrl = epThumb,
                             tmdbId = tmdbId,
                             imdbId = tmdbImdbId,
-                            runtimeMinutes = if (type == "movie") movieRuntime else epRuntime,
+                            runtimeMinutes = epRuntime,
                             rating = candRating
                         )
                     }
