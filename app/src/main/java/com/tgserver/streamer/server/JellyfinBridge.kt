@@ -74,6 +74,7 @@ class JellyfinBridge(
         val seriesHexId: String,
         val seasons: Map<Int, TvSeasonIndex>,
         val allEpisodes: List<MediaItem>,
+        val allVersions: List<MediaItem>,
         val firstEpisode: MediaItem?,
         val isAnime: Boolean
     )
@@ -84,7 +85,8 @@ class JellyfinBridge(
         val seasonHexId: String,
         val seriesHexId: String,
         val seriesTitle: String,
-        val episodes: List<MediaItem>
+        val episodes: List<MediaItem>,
+        val allVersions: List<MediaItem>
     )
 
     @Volatile private var cachedTvMediaCount = -1
@@ -200,7 +202,8 @@ class JellyfinBridge(
                     seasonHexId = seasonHex,
                     seriesHexId = seriesHex,
                     seriesTitle = showTitle,
-                    episodes = deduplicatedEps
+                    episodes = deduplicatedEps,
+                    allVersions = eps
                 )
                 seasonMap[sNum] = seasonIndex
                 seasonsByHex[seasonHex] = seasonIndex
@@ -218,6 +221,7 @@ class JellyfinBridge(
                 seriesHexId = seriesHex,
                 seasons = seasonMap,
                 allEpisodes = sortedAllEps,
+                allVersions = items,
                 firstEpisode = sortedAllEps.firstOrNull(),
                 isAnime = isAni
             )
@@ -409,7 +413,8 @@ class JellyfinBridge(
         val hexId = toHexId(item.id)
         val sNum = seasonIndex.seasonNumber
         val epNum = item.episode ?: 1
-        val durationTicks = if (item.durationSeconds > 0) item.durationSeconds.toLong() * 10_000_000L else 3600L * 10_000_000L
+        val matchingVersions = seasonIndex.allVersions.filter { (it.episode ?: 1) == epNum }
+        val durationTicks = resolveEpisodeDurationTicks(item, matchingVersions)
         val rawFileName = buildCleanFileName(item)
         val safeFileName = try {
             URLEncoder.encode(rawFileName, "UTF-8").replace("+", "%20")
@@ -471,7 +476,7 @@ class JellyfinBridge(
         )
 
         if (includeMediaSources) {
-            val mediaSources = buildMediaSourcesForItem(item, localIp, port)
+            val mediaSources = buildEpisodeMediaSources(item, matchingVersions, show.title, sNum, localIp, port)
             map["MediaSources"] = mediaSources
             val primarySource = mediaSources.firstOrNull()
             if (primarySource != null) {
@@ -1702,6 +1707,93 @@ class JellyfinBridge(
         }
     }
 
+    private fun resolveMovieDurationTicks(item: MediaItem, matching: List<MediaItem> = emptyList()): Long {
+        if (item.durationSeconds > 0) return item.durationSeconds.toLong() * 10_000_000L
+        val otherDur = matching.firstOrNull { it.durationSeconds > 0 }?.durationSeconds
+        if (otherDur != null && otherDur > 0) {
+            item.durationSeconds = otherDur
+            return otherDur.toLong() * 10_000_000L
+        }
+        if (item.sizeBytes > 0) {
+            val estSec = (item.sizeBytes / 312_500L).coerceIn(5100L, 10800L) // 85 min - 180 min
+            return estSec * 10_000_000L
+        }
+        return 6300L * 10_000_000L // 105 min standard movie
+    }
+
+    private fun resolveEpisodeDurationTicks(item: MediaItem, matching: List<MediaItem> = emptyList()): Long {
+        if (item.durationSeconds > 0) return item.durationSeconds.toLong() * 10_000_000L
+        val otherDur = matching.firstOrNull { it.durationSeconds > 0 }?.durationSeconds
+        if (otherDur != null && otherDur > 0) {
+            item.durationSeconds = otherDur
+            return otherDur.toLong() * 10_000_000L
+        }
+        if (item.sizeBytes > 0) {
+            val estSec = (item.sizeBytes / 250_000L).coerceIn(1440L, 3600L) // 24 min - 60 min
+            return estSec * 10_000_000L
+        }
+        return 2700L * 10_000_000L // 45 min standard TV episode
+    }
+
+    private fun buildEpisodeMediaSources(
+        item: MediaItem,
+        versions: List<MediaItem>,
+        showTitle: String,
+        sNum: Int,
+        localIp: String,
+        port: Int
+    ): List<Map<String, Any?>> {
+        val list = if (versions.isNotEmpty()) versions else listOf(item)
+        val sortedVersions = list.sortedWith(
+            compareByDescending<MediaItem> { it.id == item.id }
+                .thenByDescending { if (it.quality.contains("4k", true) || it.qualityBadge.contains("4k", true)) 4 else if (it.quality.contains("1080", true)) 3 else if (it.quality.contains("720", true)) 2 else 1 }
+                .thenByDescending { it.sizeBytes }
+        )
+        return sortedVersions.map { ver ->
+            val hexId = toHexId(ver.id)
+            val rawFileName = buildCleanFileName(ver)
+            val safeFileName = try {
+                URLEncoder.encode(rawFileName, "UTF-8").replace("+", "%20")
+            } catch (_: Exception) {
+                "video.mkv"
+            }
+            val streamUrl = "http://$localIp:$port/stream/video/${ver.channelId}/${ver.id}/$safeFileName"
+            val durationTicks = resolveEpisodeDurationTicks(ver, sortedVersions)
+            val ext = rawFileName.substringAfterLast(".", "mkv").lowercase()
+            val (vStream, aStream) = resolveMediaStreams(ver)
+
+            val qualityLabel = buildString {
+                val q = if (ver.qualityBadge.isNotBlank() && ver.qualityBadge != "Unknown") ver.qualityBadge else ver.quality
+                if (q.isNotBlank() && q != "Unknown") append(q)
+                val sz = ver.formattedSize
+                if (sz.isNotBlank() && sz != "0 MB") {
+                    if (length > 0) append(" • ")
+                    append(sz)
+                }
+                if (length == 0) append(ver.title)
+            }
+
+            val bitrate = if (ver.durationSeconds > 0 && ver.sizeBytes > 0) (ver.sizeBytes * 8) / ver.durationSeconds else 10_000_000L
+            val virtualPath = "/TV Shows/$showTitle/Season $sNum/$rawFileName"
+
+            mapOf(
+                "Id" to hexId,
+                "Name" to qualityLabel,
+                "Path" to virtualPath,
+                "Protocol" to "Http",
+                "Container" to ext,
+                "Size" to ver.sizeBytes,
+                "Bitrate" to bitrate,
+                "RunTimeTicks" to durationTicks,
+                "SupportsDirectPlay" to true,
+                "SupportsDirectStream" to true,
+                "SupportsTranscoding" to true,
+                "DirectStreamUrl" to streamUrl,
+                "MediaStreams" to listOf(vStream, aStream)
+            )
+        }
+    }
+
     private fun buildMediaSourcesForItem(item: MediaItem, localIp: String, port: Int): List<Map<String, Any?>> {
         val all = tgClient.getAllMedia().filter { !it.isHidden }
         val matching: List<MediaItem> = if (isMovie(item)) {
@@ -1712,10 +1804,11 @@ class JellyfinBridge(
                     (it.title.equals(item.title, ignoreCase = true) && (it.year.isNullOrBlank() || item.year.isNullOrBlank() || it.year == item.year)))
             }
         } else {
-            all.filter {
-                (isSeries(it) || isAnime(it)) && (it.id == item.id ||
-                    ((getSeriesSlug(it) == getSeriesSlug(item) || it.title.equals(item.title, ignoreCase = true)) && (it.season ?: 1) == (item.season ?: 1) && (it.episode ?: 1) == (item.episode ?: 1)))
+            val show = findShow(getSeriesSlug(item))
+            val versions = show?.allVersions?.filter {
+                (it.season ?: 1) == (item.season ?: 1) && (it.episode ?: 1) == (item.episode ?: 1)
             }
+            if (!versions.isNullOrEmpty()) versions else listOf(item)
         }
 
         val versions = if (matching.isNotEmpty()) matching.distinctBy { it.id } else listOf(item)
@@ -1733,7 +1826,7 @@ class JellyfinBridge(
                 "video.mkv"
             }
             val streamUrl = "http://$localIp:$port/stream/video/${ver.channelId}/${ver.id}/$safeFileName"
-            val durationTicks = if (ver.durationSeconds > 0) ver.durationSeconds.toLong() * 10_000_000L else 3600L * 10_000_000L
+            val durationTicks = if (isMovie(ver)) resolveMovieDurationTicks(ver, sortedVersions) else resolveEpisodeDurationTicks(ver, sortedVersions)
             val ext = rawFileName.substringAfterLast(".", "mkv").lowercase()
             val (vStream, aStream) = resolveMediaStreams(ver)
 
@@ -2149,7 +2242,7 @@ class JellyfinBridge(
             "video.mkv"
         }
         val streamUrl = "http://$localIp:$port/stream/video/${item.channelId}/${item.id}/$safeFileName"
-        val durationTicks = if (item.durationSeconds > 0) item.durationSeconds.toLong() * 10_000_000L else 3600L * 10_000_000L
+        val durationTicks = if (isSeriesOverview) 0L else if (isMovie(item)) resolveMovieDurationTicks(item) else resolveEpisodeDurationTicks(item)
         val yearInt = item.year?.toIntOrNull() ?: 2024
         val ext = rawFileName.substringAfterLast(".", "mkv").lowercase()
 
