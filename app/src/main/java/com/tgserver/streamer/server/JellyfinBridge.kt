@@ -916,7 +916,47 @@ class JellyfinBridge(
                     jsonResponse(emptyList<Any>())
                 }
                 lowerUri == "/quickconnect/enabled" -> {
-                    jsonResponse(false)
+                    jsonResponse(true)
+                }
+                lowerUri.startsWith("/quickconnect/initiate") -> {
+                    if (!session.remoteIpAddress.isNullOrBlank()) {
+                        reefinClientIps.add(session.remoteIpAddress)
+                    }
+                    val isoNow = getIsoTimestamp()
+                    jsonResponse(
+                        mapOf(
+                            "Authenticated" to true,
+                            "Secret" to "qc_secret_888888",
+                            "Code" to "888888",
+                            "DeviceId" to "reefin_device_1",
+                            "DeviceName" to "Android / Google TV",
+                            "AppName" to "Reefin",
+                            "AppVersion" to "1.0.0",
+                            "DateAdded" to isoNow
+                        )
+                    )
+                }
+                lowerUri.startsWith("/quickconnect/connect") -> {
+                    if (!session.remoteIpAddress.isNullOrBlank()) {
+                        reefinClientIps.add(session.remoteIpAddress)
+                    }
+                    val sec = getParam(params, "Secret", "secret").ifBlank { "qc_secret_888888" }
+                    val isoNow = getIsoTimestamp()
+                    jsonResponse(
+                        mapOf(
+                            "Authenticated" to true,
+                            "Secret" to sec,
+                            "Code" to "888888",
+                            "DeviceId" to "reefin_device_1",
+                            "DeviceName" to "Android / Google TV",
+                            "AppName" to "Reefin",
+                            "AppVersion" to "1.0.0",
+                            "DateAdded" to isoNow
+                        )
+                    )
+                }
+                lowerUri.startsWith("/quickconnect/authorize") -> {
+                    jsonResponse(true)
                 }
                 lowerUri == "/branding/configuration" -> {
                     jsonResponse(mapOf("CustomCss" to "", "SplashscreenEnabled" to false))
