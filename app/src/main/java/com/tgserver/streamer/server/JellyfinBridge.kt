@@ -701,17 +701,17 @@ class JellyfinBridge(
 
                 // ================= 2. Authentication & User Profile =================
                 lowerUri == "/users/public" -> {
-                    handleUsersPublic()
+                    handleUsersPublic(isReefin)
                 }
                 lowerUri == "/users/authenticatebyname" -> {
                     handleAuthenticateByName(session, params, headers, isInfuse, isReefin)
                 }
                 lowerUri == "/users/me" -> {
-                    handleGetUser(defaultUserName)
+                    handleGetUser(defaultUserName, isReefin)
                 }
                 // Specific user lookup: /Users/{id}
                 lowerUri.matches(Regex("/users/[^/]+")) && !lowerUri.contains("/views") && !lowerUri.contains("/items") && !lowerUri.contains("/groupingoptions") -> {
-                    handleGetUser(defaultUserName)
+                    handleGetUser(defaultUserName, isReefin)
                 }
 
                 // ================= 3. Library Views & Grouping Options =================
@@ -1020,17 +1020,17 @@ class JellyfinBridge(
         return jsonResponse(config)
     }
 
-    private fun buildUserDto(username: String): Map<String, Any?> {
+    private fun buildUserDto(username: String, isReefin: Boolean = false): Map<String, Any?> {
         val isoNow = getIsoTimestamp()
         return mapOf(
             "Name" to username,
             "ServerId" to serverId,
             "ServerName" to "NoxMedia",
             "Id" to defaultUserId,
-            "HasPassword" to false,
-            "HasConfiguredPassword" to false,
+            "HasPassword" to isReefin,
+            "HasConfiguredPassword" to isReefin,
             "HasConfiguredEasyPassword" to false,
-            "EnableAutoLogin" to true,
+            "EnableAutoLogin" to !isReefin,
             "LastLoginDate" to isoNow,
             "LastActivityDate" to isoNow,
             "Configuration" to mapOf(
@@ -1073,8 +1073,8 @@ class JellyfinBridge(
         )
     }
 
-    private fun handleUsersPublic(): Response {
-        return jsonResponse(listOf(buildUserDto(defaultUserName)))
+    private fun handleUsersPublic(isReefin: Boolean = false): Response {
+        return jsonResponse(listOf(buildUserDto(defaultUserName, isReefin)))
     }
 
     private fun handleAuthenticateByName(
@@ -1085,6 +1085,7 @@ class JellyfinBridge(
         isReefin: Boolean = false
     ): Response {
         var requestedUsername = defaultUserName
+        var receivedPassword = ""
         try {
             val map = HashMap<String, String>()
             session.parseBody(map)
@@ -1092,15 +1093,19 @@ class JellyfinBridge(
             if (postData.isNotBlank()) {
                 val json = JsonParser.parseString(postData).asJsonObject
                 val u = json.get("Username")?.asString ?: json.get("username")?.asString
+                val p = json.get("Pw")?.asString ?: json.get("pw")?.asString ?: json.get("Password")?.asString ?: json.get("password")?.asString
                 if (!u.isNullOrBlank()) requestedUsername = u
+                if (!p.isNullOrBlank()) receivedPassword = p
             }
         } catch (_: Exception) {}
 
         val paramUser = getParam(params, "Username", "username")
         if (paramUser.isNotBlank()) requestedUsername = paramUser
+        val paramPw = getParam(params, "Pw", "pw", "Password", "password")
+        if (paramPw.isNotBlank()) receivedPassword = paramPw
 
         val isoNow = getIsoTimestamp()
-        val userObj = buildUserDto(requestedUsername)
+        val userObj = buildUserDto(requestedUsername, isReefin)
 
         val authHeader = headers["x-emby-authorization"] ?: headers["X-Emby-Authorization"] ?: headers["authorization"] ?: ""
         val detectedClient = when {
@@ -1157,8 +1162,8 @@ class JellyfinBridge(
         return jsonResponse(authResult)
     }
 
-    private fun handleGetUser(username: String): Response {
-        return jsonResponse(buildUserDto(username))
+    private fun handleGetUser(username: String, isReefin: Boolean = false): Response {
+        return jsonResponse(buildUserDto(username, isReefin))
     }
 
     private fun handleGroupingOptions(): Response {

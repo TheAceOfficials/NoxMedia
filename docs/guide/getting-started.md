@@ -196,14 +196,14 @@ NoxMedia integrates directly with modern Jellyfin clients including [Firecore In
 - **Host**: Your device IP (e.g., `192.168.1.15`)
 - **Port**: `7788`
 - **Username**: `NoxMedia`
-- **Password**: *(leave blank)*
+- **Password**: `NoxMedia` (or leave blank for Infuse / Vesper)
 
 > [!IMPORTANT]
 > **Use Direct Mode in Infuse.**
-> Browse media via the **Files** tab. Avoid enabling full background library crawling under Infuse Settings -> Library. Direct Mode queries metadata on-demand with zero-latency response times.
+> Browse media via the **Files** tab. Avoid enabling full background library crawling under Infuse Settings -> Library. Direct Mode queries metadata on-demand with zero-latency response times. Leave password blank.
 >
 > **Android & Android TV with Reefin.**
-> In Reefin, connect to `http://<your-device-ip>:7788` with username `NoxMedia` (no password needed). Reefin automatically leverages hardware ExoPlayer DirectPlay with isolated remote streaming pipelines.
+> In Reefin, connect to `http://<your-device-ip>:7788` with username `NoxMedia` and password `NoxMedia`. Reefin automatically leverages hardware ExoPlayer DirectPlay with isolated remote streaming pipelines.
 
 ### Pinned Home Screen Favorites
 1. Open the **Files** tab in Infuse or server view in Vesper/Reefin and select your NoxMedia server.
