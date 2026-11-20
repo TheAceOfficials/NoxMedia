@@ -3,6 +3,14 @@
    Inspired by Apple & Vesper. Zero clutter, borderless sidebar, focus dimming.
    ========================================================================== */
 
+@font-face {
+  font-family: 'NDot';
+  src: url('/fonts/ndot.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --vp-c-brand-1: #9333ea;
   --vp-c-brand-2: #a855f7;

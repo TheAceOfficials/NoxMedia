@@ -2,10 +2,6 @@
   <div class="home-container">
     <!-- Hero Section -->
     <div class="hero-section">
-      <div class="hero-logo-box">
-        <img src="/logo.png" alt="NoxMedia Logo" />
-      </div>
-      
       <h1 class="hero-title">NoxMedia</h1>
       <p class="hero-tagline">Designed for Your Media.</p>
 
@@ -16,7 +12,7 @@
       </div>
     </div>
 
-    <!-- Access NoxMedia Server Across Devices Showcase -->
+    <!-- Access NoxMedia Server Showcase -->
     <div class="access-section">
       <div class="access-header">
         <div class="access-tag">Universal DirectPlay</div>
@@ -24,18 +20,58 @@
         <p class="access-subtitle">Stream and play effortlessly across all your screens and platforms</p>
       </div>
 
-      <div class="device-showcase-grid">
-        <a 
-          v-for="device in devices" 
-          :key="device.name" 
-          href="/guide/getting-started#clients-compatibility" 
-          class="device-card"
-        >
-          <div class="device-card-icon">
-            <DeviceIcon :name="device.name" />
-          </div>
-          <span class="device-card-title">{{ device.label }}</span>
-        </a>
+      <div class="device-strip">
+        <!-- Group 1: Mobile & Tablets -->
+        <div class="device-cluster">
+          <a 
+            v-for="d in mobileDevices" 
+            :key="d.name" 
+            href="/guide/getting-started#clients-compatibility" 
+            class="device-item"
+            :title="d.label"
+          >
+            <div class="device-icon">
+              <DeviceIcon :name="d.name" />
+            </div>
+            <span class="device-name">{{ d.label }}</span>
+          </a>
+        </div>
+
+        <div class="device-divider" />
+
+        <!-- Group 2: TVs -->
+        <div class="device-cluster">
+          <a 
+            v-for="d in tvDevices" 
+            :key="d.name" 
+            href="/guide/getting-started#clients-compatibility" 
+            class="device-item"
+            :title="d.label"
+          >
+            <div class="device-icon">
+              <DeviceIcon :name="d.name" />
+            </div>
+            <span class="device-name">{{ d.label }}</span>
+          </a>
+        </div>
+
+        <div class="device-divider" />
+
+        <!-- Group 3: Desktop -->
+        <div class="device-cluster">
+          <a 
+            v-for="d in desktopDevices" 
+            :key="d.name" 
+            href="/guide/getting-started#clients-compatibility" 
+            class="device-item"
+            :title="d.label"
+          >
+            <div class="device-icon">
+              <DeviceIcon :name="d.name" />
+            </div>
+            <span class="device-name">{{ d.label }}</span>
+          </a>
+        </div>
       </div>
     </div>
 
@@ -62,18 +98,26 @@
 <script setup>
 import DeviceIcon from './DeviceIcon.vue'
 
-const devices = [
-  { name: 'iphone', label: 'iPhone' },
-  { name: 'android-phone', label: 'Android' },
-  { name: 'ipad', label: 'iPad' },
+// 1. Android Phone, Tablet, iPhone, iPad
+const mobileDevices = [
+  { name: 'android-phone', label: 'Android Phone' },
   { name: 'android-tablet', label: 'Tablet' },
-  { name: 'appletv', label: 'Apple TV' },
+  { name: 'iphone', label: 'iPhone' },
+  { name: 'ipad', label: 'iPad' }
+]
+
+// 2. Smart TV, Android TV, Apple TV
+const tvDevices = [
+  { name: 'smart-tv', label: 'Smart TV' },
   { name: 'android-tv', label: 'Android TV' },
-  { name: 'mac', label: 'MacBook' },
+  { name: 'appletv', label: 'Apple TV' }
+]
+
+// 3. Windows, Linux, MacBook (Web Browser removed)
+const desktopDevices = [
   { name: 'windows', label: 'Windows' },
   { name: 'linux', label: 'Linux' },
-  { name: 'smart-tv', label: 'Smart TV' },
-  { name: 'web', label: 'Web Browser' }
+  { name: 'mac', label: 'MacBook' }
 ]
 </script>
 
@@ -83,8 +127,8 @@ const devices = [
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  padding: 3rem 1.5rem 2rem 1.5rem;
-  max-width: 1100px;
+  padding: 3.5rem 1.5rem 2rem 1.5rem;
+  max-width: 1040px;
   margin: 0 auto;
 }
 
@@ -94,51 +138,29 @@ const devices = [
   padding: 2.5rem 0 3.5rem 0;
 }
 
-.hero-logo-box {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 96px;
-  height: 96px;
-  margin-bottom: 2rem;
-  border-radius: 24px;
-  background: radial-gradient(circle at 50% 50%, rgba(168, 85, 247, 0.2), transparent 70%), #0c0a14;
-  border: 1px solid rgba(168, 85, 247, 0.3);
-  box-shadow: 0 0 45px -5px rgba(168, 85, 247, 0.35);
-}
-
-:root:not(.dark) .hero-logo-box {
-  background: radial-gradient(circle at 50% 50%, rgba(124, 58, 237, 0.12), transparent 70%), #f8fafc;
-  border: 1px solid rgba(124, 58, 237, 0.25);
-  box-shadow: 0 0 35px -5px rgba(124, 58, 237, 0.2);
-}
-
-.hero-logo-box img {
-  width: 64px;
-  height: 64px;
-  border-radius: 14px;
-}
-
 .hero-title {
-  font-size: clamp(2.75rem, 6.5vw, 4.5rem);
-  font-weight: 700;
-  letter-spacing: -0.04em;
+  font-family: 'NDot', monospace;
+  font-size: clamp(2.2rem, 5vw, 3.25rem);
+  font-weight: 400;
+  letter-spacing: 0.05em;
   color: #ffffff;
-  margin: 0 0 0.75rem 0;
-  line-height: 1.05;
+  margin: 0 0 0.5rem 0;
+  line-height: 1.1;
+  text-shadow: 0 0 30px rgba(168, 85, 247, 0.35);
 }
 
 :root:not(.dark) .hero-title {
   color: #0f172a;
+  text-shadow: none;
 }
 
 .hero-tagline {
-  font-size: clamp(1.15rem, 2.5vw, 1.5rem);
+  font-size: clamp(0.98rem, 2vw, 1.18rem);
   color: #94a3b8;
   font-weight: 400;
   letter-spacing: -0.015em;
-  margin: 0 auto 2.5rem auto;
-  max-width: 600px;
+  margin: 0 auto 2.2rem auto;
+  max-width: 520px;
   line-height: 1.4;
 }
 
@@ -150,7 +172,7 @@ const devices = [
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 14px;
+  gap: 12px;
   flex-wrap: wrap;
 }
 
@@ -158,13 +180,13 @@ const devices = [
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 11px 26px;
-  font-size: 0.95rem;
+  padding: 9px 22px;
+  font-size: 0.88rem;
   font-weight: 550;
   border-radius: 9999px;
   color: #ffffff !important;
   background: linear-gradient(135deg, #a855f7, #7c3aed);
-  box-shadow: 0 4px 20px -2px rgba(168, 85, 247, 0.45);
+  box-shadow: 0 4px 18px -2px rgba(168, 85, 247, 0.45);
   border: 1px solid rgba(255, 255, 255, 0.15);
   text-decoration: none !important;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
@@ -172,7 +194,7 @@ const devices = [
 
 .btn-primary:hover {
   background: linear-gradient(135deg, #c084fc, #9333ea);
-  box-shadow: 0 6px 28px 0 rgba(168, 85, 247, 0.6);
+  box-shadow: 0 6px 24px 0 rgba(168, 85, 247, 0.6);
   transform: translateY(-1px);
 }
 
@@ -180,8 +202,8 @@ const devices = [
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 11px 24px;
-  font-size: 0.95rem;
+  padding: 9px 20px;
+  font-size: 0.88rem;
   font-weight: 500;
   border-radius: 9999px;
   color: #f8fafc !important;
@@ -208,8 +230,8 @@ const devices = [
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 11px 22px;
-  font-size: 0.95rem;
+  padding: 9px 18px;
+  font-size: 0.88rem;
   font-weight: 500;
   border-radius: 9999px;
   color: #a855f7 !important;
@@ -227,7 +249,7 @@ const devices = [
 
 /* Access NoxMedia Server Section */
 .access-section {
-  padding: 3rem 0;
+  padding: 2.5rem 0 2rem 0;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
@@ -237,17 +259,17 @@ const devices = [
 
 .access-header {
   text-align: center;
-  margin-bottom: 2.5rem;
+  margin-bottom: 2rem;
 }
 
 .access-tag {
   display: inline-block;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: #a855f7;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.4rem;
 }
 
 :root:not(.dark) .access-tag {
@@ -255,11 +277,11 @@ const devices = [
 }
 
 .access-title {
-  font-size: clamp(1.6rem, 3.5vw, 2.3rem);
+  font-size: clamp(1.4rem, 3vw, 1.9rem);
   font-weight: 650;
   letter-spacing: -0.03em;
   color: #ffffff;
-  margin: 0 0 0.5rem 0;
+  margin: 0 0 0.35rem 0;
 }
 
 :root:not(.dark) .access-title {
@@ -267,76 +289,94 @@ const devices = [
 }
 
 .access-subtitle {
-  font-size: 0.95rem;
+  font-size: 0.88rem;
   color: #94a3b8;
   margin: 0 auto;
-  max-width: 520px;
+  max-width: 480px;
 }
 
 :root:not(.dark) .access-subtitle {
   color: #64748b;
 }
 
-/* Device Showcase Grid */
-.device-showcase-grid {
+/* Sleek Minimal Device Strip - NO CARDS, Clean Canvas Flow */
+.device-strip {
   display: flex;
   align-items: center;
   justify-content: center;
   flex-wrap: wrap;
-  gap: 12px;
-  max-width: 980px;
+  gap: 16px 20px;
+  max-width: 920px;
   margin: 0 auto;
 }
 
-.device-card {
+.device-cluster {
+  display: flex;
+  align-items: center;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.device-divider {
+  width: 1px;
+  height: 24px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 4px;
+}
+
+:root:not(.dark) .device-divider {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.device-item {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 14px 18px;
-  min-width: 94px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  gap: 6px;
+  padding: 6px 10px;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
   text-decoration: none !important;
   color: #94a3b8 !important;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: pointer;
 }
 
-:root:not(.dark) .device-card {
-  background: rgba(0, 0, 0, 0.02);
-  border: 1px solid rgba(0, 0, 0, 0.06);
+:root:not(.dark) .device-item {
   color: #64748b !important;
 }
 
-.device-card:hover {
-  background: rgba(168, 85, 247, 0.08);
-  border-color: rgba(168, 85, 247, 0.3);
+.device-item:hover {
   color: #ffffff !important;
   transform: translateY(-2px);
-  box-shadow: 0 4px 16px -2px rgba(168, 85, 247, 0.2);
 }
 
-:root:not(.dark) .device-card:hover {
-  background: rgba(124, 58, 237, 0.08);
-  border-color: rgba(124, 58, 237, 0.3);
+:root:not(.dark) .device-item:hover {
   color: #7c3aed !important;
-  box-shadow: 0 4px 16px -2px rgba(124, 58, 237, 0.15);
 }
 
-.device-card-icon {
+.device-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  color: inherit;
+  transition: color 0.2s ease, filter 0.2s ease;
 }
 
-.device-card-title {
-  font-size: 0.76rem;
-  font-weight: 500;
+.device-item:hover .device-icon {
+  color: #c084fc;
+  filter: drop-shadow(0 0 8px rgba(168, 85, 247, 0.5));
+}
+
+.device-name {
+  font-size: 0.74rem;
+  font-weight: 450;
   letter-spacing: -0.01em;
+  color: inherit;
+  white-space: nowrap;
 }
 
 /* Minimalist Bottom Bar */
@@ -349,11 +389,16 @@ const devices = [
   padding-top: 2rem;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   font-size: 0.82rem;
+  font-family: var(--vp-font-family-base);
   color: #64748b;
 }
 
 :root:not(.dark) .home-bottom-bar {
   border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.bottom-left {
+  font-family: inherit;
 }
 
 .bottom-left a {
@@ -369,8 +414,8 @@ const devices = [
 .bottom-right {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-family: var(--vp-font-family-mono);
+  gap: 8px;
+  font-family: inherit;
   font-size: 0.82rem;
 }
 
@@ -378,11 +423,13 @@ const devices = [
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  font-family: inherit;
 }
 
 .version-label {
   color: #64748b;
-  font-weight: 450;
+  font-weight: 400;
+  font-family: inherit;
 }
 
 :root:not(.dark) .version-label {
@@ -402,6 +449,7 @@ const devices = [
 .version-link {
   color: #c084fc !important;
   font-weight: 500;
+  font-family: inherit;
   text-decoration: none !important;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -421,6 +469,12 @@ const devices = [
   color: #6d28d9 !important;
 }
 
+@media (max-width: 768px) {
+  .device-divider {
+    display: none;
+  }
+}
+
 @media (max-width: 640px) {
   .home-bottom-bar {
     flex-direction: column;
@@ -429,4 +483,3 @@ const devices = [
   }
 }
 </style>
-
