@@ -8,6 +8,7 @@
 
 <p align="center">
   <a href="https://theaceofficials.github.io/NoxMedia/"><img src="https://img.shields.io/badge/Documentation-NoxMedia%20Docs-9333ea?style=flat-square&logo=gitbook&logoColor=white" alt="Documentation"></a>
+  <a href="https://www.reddit.com/r/NoxMedia/s/z2jwRxwK7v"><img src="https://img.shields.io/badge/Reddit-r%2FNoxMedia-FF4500?style=flat-square&logo=reddit&logoColor=white" alt="Reddit Community"></a>
   <a href="https://github.com/TheAceOfficials/NoxMedia/releases/latest"><img src="https://img.shields.io/badge/Platform-Android%207.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white" alt="Platform"></a>
   <a href="https://kotlinlang.org"><img src="https://img.shields.io/badge/Kotlin-2.3-7F52FF?style=flat-square&logo=kotlin&logoColor=white" alt="Kotlin"></a>
   <a href="https://chaquo.com/chaquopy/"><img src="https://img.shields.io/badge/Python-3.11%20(Chaquopy)-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python"></a>
@@ -61,7 +62,9 @@ By interfacing directly with Telegram's content delivery network through an embe
 
 ---
 
-## Support & Sponsorship
+## Community & Support
+
+Join the official **[r/NoxMedia Subreddit](https://www.reddit.com/r/NoxMedia/s/z2jwRxwK7v)** to ask questions, share setups, request features, and connect with other users.
 
 NoxMedia is 100% free and open-source under the AGPLv3 license. If you love using NoxMedia or want to support future developments by **@TheAceOfficials**, consider backing on Patreon:
 

@@ -3402,6 +3402,194 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 }
             }
 
+            // ==================== 10. DOCUMENTATION & COMMUNITY ====================
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .border(BorderStroke(1.dp, Color(0xFF22242D)), RoundedCornerShape(18.dp)),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF12141A))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // Header Row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(11.dp))
+                                .background(Color(0xFF1B1D25))
+                                .border(1.dp, Color(0xFF2A2D38), RoundedCornerShape(11.dp))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.MenuBook,
+                                contentDescription = null,
+                                tint = Color(0xFFA855F7),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Documentation & Help",
+                                color = TextPrimary,
+                                fontSize = 14.5.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Official guides, client setup and community",
+                                color = TextSecondary,
+                                fontSize = 11.5.sp
+                            )
+                        }
+                    }
+
+                    Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).background(Color(0xFF22242D)))
+
+                    // Row 1: Official Documentation
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF161821))
+                            .border(BorderStroke(0.5.dp, Color(0xFF242735)), RoundedCornerShape(12.dp))
+                            .clickable {
+                                try {
+                                    val intent = Intent(
+                                        Intent.ACTION_VIEW,
+                                        Uri.parse("https://theaceofficials.github.io/NoxMedia/")
+                                    )
+                                    context.startActivity(intent)
+                                } catch (_: Exception) {
+                                    Toast.makeText(context, "Could not open documentation link", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFFA855F7).copy(alpha = 0.12f))
+                                    .border(BorderStroke(0.5.dp, Color(0xFFA855F7).copy(alpha = 0.35f)), RoundedCornerShape(8.dp))
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.MenuBook,
+                                    contentDescription = null,
+                                    tint = Color(0xFFA855F7),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+
+                            Column {
+                                Text(
+                                    text = "Official Documentation",
+                                    color = TextPrimary,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = "Guides for Infuse, Vesper, Nuvio and Tailscale",
+                                    color = TextSecondary,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                            contentDescription = "Open Documentation",
+                            tint = Color(0xFFA855F7),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    // Row 2: Reddit Community
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF161821))
+                            .border(BorderStroke(0.5.dp, Color(0xFF242735)), RoundedCornerShape(12.dp))
+                            .clickable {
+                                try {
+                                    val intent = Intent(
+                                        Intent.ACTION_VIEW,
+                                        Uri.parse("https://www.reddit.com/r/NoxMedia/s/z2jwRxwK7v")
+                                    )
+                                    context.startActivity(intent)
+                                } catch (_: Exception) {
+                                    Toast.makeText(context, "Could not open Reddit link", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFFFF4500).copy(alpha = 0.12f))
+                                    .border(BorderStroke(0.5.dp, Color(0xFFFF4500).copy(alpha = 0.35f)), RoundedCornerShape(8.dp))
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Forum,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFF4500),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+
+                            Column {
+                                Text(
+                                    text = "Reddit Community",
+                                    color = TextPrimary,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = "r/NoxMedia • Discussions & Community Support",
+                                    color = TextSecondary,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                            contentDescription = "Open Reddit",
+                            tint = Color(0xFFFF4500),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+
             // ==================== FOOTER ====================
             Box(
                 modifier = Modifier
