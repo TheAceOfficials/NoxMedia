@@ -925,7 +925,7 @@ class JellyfinBridge(
                     val isoNow = getIsoTimestamp()
                     jsonResponse(
                         mapOf(
-                            "Authenticated" to true,
+                            "Authenticated" to false,
                             "Secret" to "qc_secret_888888",
                             "Code" to "888888",
                             "DeviceId" to "reefin_device_1",
@@ -940,7 +940,19 @@ class JellyfinBridge(
                     if (!session.remoteIpAddress.isNullOrBlank()) {
                         reefinClientIps.add(session.remoteIpAddress)
                     }
-                    val sec = getParam(params, "Secret", "secret").ifBlank { "qc_secret_888888" }
+                    var sec = getParam(params, "Secret", "secret")
+                    if (sec.isBlank()) {
+                        try {
+                            val map = HashMap<String, String>()
+                            session.parseBody(map)
+                            val postData = map["postData"] ?: ""
+                            if (postData.isNotBlank()) {
+                                val json = JsonParser.parseString(postData).asJsonObject
+                                sec = json.get("Secret")?.asString ?: json.get("secret")?.asString ?: ""
+                            }
+                        } catch (_: Exception) {}
+                    }
+                    if (sec.isBlank()) sec = "qc_secret_888888"
                     val isoNow = getIsoTimestamp()
                     jsonResponse(
                         mapOf(
