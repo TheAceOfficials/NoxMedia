@@ -138,11 +138,11 @@ NoxMedia provides seamless streaming through the official Stremio Addon v3 Proto
 
 | Platform / Environment | Distribution | Download Link |
 | :--- | :--- | :--- |
-| **Android Phone, Tablet & TV** <br><DeviceGroup devices="iphone, ipad, tv" /> | Google Play Store <span class="badge-official">Official Store</span> | [Get on Google Play &rarr;](https://play.google.com/store/apps/details?id=com.nuvio.app) |
-| **Android Mobile APK** <br><DeviceGroup devices="iphone" /> | GitHub Releases <span class="badge-sideload">Sideloading</span> | [Download Mobile APK &rarr;](https://github.com/NuvioMedia/NuvioMobile/releases) |
-| **Android TV & Google TV APK** <br><DeviceGroup devices="tv" /> | GitHub Releases <span class="badge-sideload">Sideloading</span> | [Download TV APK &rarr;](https://github.com/NuvioMedia/NuvioTV/releases) |
-| **Desktop (Windows, Linux, macOS)** <br><DeviceGroup devices="mac" /> | GitHub Releases <span class="badge-official">Standalone App</span> | [Download Desktop &rarr;](https://github.com/NuvioMedia/NuvioDesktop/releases) |
-| **Smart TV Packages (Tizen, webOS)** <br><DeviceGroup devices="tv" /> | GitHub Releases <span class="badge-sideload">Sideloading</span> | [Download Smart TV Packages &rarr;](https://github.com/NuvioMedia/NuvioTVSmart/releases) |
+| **Android Phone, Tablet & TV** <br><DeviceGroup devices="android-phone, android-tablet, android-tv" /> | Google Play Store <span class="badge-official">Official Store</span> | [Get on Google Play &rarr;](https://play.google.com/store/apps/details?id=com.nuvio.app) |
+| **Android Mobile APK** <br><DeviceGroup devices="android-phone" /> | GitHub Releases <span class="badge-sideload">Sideloading</span> | [Download Mobile APK &rarr;](https://github.com/NuvioMedia/NuvioMobile/releases) |
+| **Android TV & Google TV APK** <br><DeviceGroup devices="android-tv" /> | GitHub Releases <span class="badge-sideload">Sideloading</span> | [Download TV APK &rarr;](https://github.com/NuvioMedia/NuvioTV/releases) |
+| **Desktop (Windows, Linux, macOS)** <br><DeviceGroup devices="windows, linux, mac" /> | GitHub Releases <span class="badge-official">Standalone App</span> | [Download Desktop &rarr;](https://github.com/NuvioMedia/NuvioDesktop/releases) |
+| **Smart TV Packages (Tizen, webOS)** <br><DeviceGroup devices="smart-tv" /> | GitHub Releases <span class="badge-sideload">Sideloading</span> | [Download Smart TV Packages &rarr;](https://github.com/NuvioMedia/NuvioTVSmart/releases) |
 | **iPhone & iPad (Enhanced)** <br><DeviceGroup devices="iphone, ipad" /> | GitHub Releases <span class="badge-sideload">Sideloading</span> | [Download iOS IPA &rarr;](https://github.com/luqmanfadlli/NuvioMobile-Enhanced/releases) |
 | **Apple TV (tvOS)** <br><DeviceGroup devices="appletv" /> | GitHub Releases <span class="badge-sideload">Sideloading</span> | [Download tvOS Package &rarr;](https://github.com/bobsupra/NuvioTVOS) |
 
@@ -190,8 +190,8 @@ We are actively developing standalone, first-party NoxMedia client applications 
 
 | Application | Target Ecosystem | Focus & Highlights | Status |
 | :--- | :--- | :--- | :--- |
-| **Native Android TV & Google TV** | <DeviceGroup devices="tv" /> | 10-foot D-Pad interface, hardware ExoPlayer acceleration, home screen channels | Coming Soon |
-| **Windows Desktop Native** | <DeviceGroup devices="mac" /> | Standalone desktop application with embedded core runtime | Coming Soon |
-| **Linux Desktop & Headless** | <DeviceGroup devices="mac" /> | Dedicated GUI media client and headless background server daemon | Coming Soon |
+| **Native Android TV & Google TV** | <DeviceGroup devices="android-tv" /> | 10-foot D-Pad interface, hardware ExoPlayer acceleration, home screen channels | Coming Soon |
+| **Windows Desktop Native** | <DeviceGroup devices="windows" /> | Standalone desktop application with embedded core runtime | Coming Soon |
+| **Linux Desktop & Headless** | <DeviceGroup devices="linux" /> | Dedicated GUI media client and headless background server daemon | Coming Soon |
 
 </section>

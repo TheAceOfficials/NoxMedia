@@ -10,11 +10,11 @@ This document outlines the development trajectory of NoxMedia, including complet
 | :--- | :--- | :--- |
 | **Infuse (Apple)** | <DeviceGroup devices="iphone, ipad, mac, appletv, visionpro" /> | Available Now |
 | **Vesper (Apple)** | <DeviceGroup devices="iphone, ipad, mac, appletv, visionpro" /> | Available Now |
-| **Nuvio Streaming** | <DeviceGroup devices="iphone, ipad, mac, tv" /> | Available Now |
-| **Native Android TV & Google TV** | <DeviceGroup devices="tv" /> | In Development (Coming Soon) |
-| **Windows Desktop Native** | <DeviceGroup devices="mac" /> | Coming Soon |
-| **Linux Client & Server** | <DeviceGroup devices="mac" /> | Coming Soon |
-| **Stremio Direct Playback Bridge** | <DeviceGroup devices="iphone, ipad, mac, tv" /> | In Progress |
+| **Nuvio Streaming** | <DeviceGroup devices="android-phone, android-tv, windows, linux, mac, smart-tv, iphone, appletv" /> | Available Now |
+| **Native Android TV & Google TV** | <DeviceGroup devices="android-tv" /> | In Development (Coming Soon) |
+| **Windows Desktop Native** | <DeviceGroup devices="windows" /> | Coming Soon |
+| **Linux Client & Server** | <DeviceGroup devices="linux" /> | Coming Soon |
+| **Stremio Direct Playback Bridge** | <DeviceGroup devices="android-phone, android-tv, windows, mac, linux" /> | In Progress |
 
 ---
 

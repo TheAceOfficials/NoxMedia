@@ -35,9 +35,16 @@ const list = computed(() => {
 const labelMap = {
   iphone: 'iPhone',
   ipad: 'iPad',
-  mac: 'Mac',
+  mac: 'MacBook / macOS',
   appletv: 'Apple TV 4K',
   visionpro: 'Apple Vision Pro',
+  windows: 'Windows PC',
+  linux: 'Linux / Headless',
+  'android-phone': 'Android Smartphone',
+  'android-tablet': 'Android Tablet',
+  'android-tv': 'Android TV / Google TV',
+  'smart-tv': 'Smart TV (Tizen / webOS)',
+  web: 'Web Browser',
   tv: 'TV / Monitor'
 }
 
@@ -48,8 +55,8 @@ const getLabel = (name) => labelMap[name] || name
 .device-group-container {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
-  padding: 6px 14px;
+  gap: 10px;
+  padding: 5px 12px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 9999px;
@@ -80,4 +87,3 @@ html:not(.dark) .device-group-container {
   letter-spacing: -0.01em;
 }
 </style>
-
