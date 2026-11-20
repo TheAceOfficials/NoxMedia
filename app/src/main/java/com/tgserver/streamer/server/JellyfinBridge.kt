@@ -726,8 +726,8 @@ class JellyfinBridge(
                 lowerUri == "/system/info" -> {
                     handleSystemInfo(localIp, config.port, isPublic = false, isReefin = isReefin)
                 }
-                lowerUri == "/system/configuration" -> {
-                    handleSystemConfiguration(config.port)
+                lowerUri.startsWith("/system/configuration") -> {
+                    handleSystemConfiguration(config.port, isReefin)
                 }
                 lowerUri == "/system/endpoint" -> {
                     jsonResponse(mapOf("LocalAddress" to "http://$localIp:${config.port}", "IsInNetwork" to true))
@@ -737,11 +737,26 @@ class JellyfinBridge(
                 lowerUri == "/users/public" -> {
                     handleUsersPublic(isReefin)
                 }
+                lowerUri.endsWith("/authenticatewithquickconnect") || lowerUri == "/users/authenticatewithquickconnect" -> {
+                    handleAuthenticateWithQuickConnect(session, params, headers, isReefin = true)
+                }
                 lowerUri.endsWith("/authenticatebyname") || lowerUri.endsWith("/authenticate") || lowerUri.contains("/authenticate") -> {
                     handleAuthenticateByName(session, params, headers, isInfuse, isReefin)
                 }
                 lowerUri == "/users/me" -> {
                     handleGetUser(defaultUserName, isReefin)
+                }
+                lowerUri.endsWith("/configuration") && lowerUri.contains("/users/") -> {
+                    if (method == Method.POST) {
+                        noContentResponse()
+                    } else {
+                        val userObj = buildUserDto(defaultUserName, isReefin)
+                        jsonResponse(userObj["Configuration"] ?: emptyMap<String, Any>())
+                    }
+                }
+                lowerUri.endsWith("/policy") && lowerUri.contains("/users/") -> {
+                    val userObj = buildUserDto(defaultUserName, isReefin)
+                    jsonResponse(userObj["Policy"] ?: emptyMap<String, Any>())
                 }
                 // Specific user lookup: /Users/{id}
                 lowerUri.matches(Regex("/users/[^/]+")) && !lowerUri.contains("/views") && !lowerUri.contains("/items") && !lowerUri.contains("/groupingoptions") -> {
@@ -926,6 +941,13 @@ class JellyfinBridge(
                 lowerUri.startsWith("/sessions/capabilities") -> {
                     noContentResponse()
                 }
+                lowerUri.startsWith("/sessions/logout") -> {
+                    noContentResponse()
+                }
+                lowerUri == "/sessions" || lowerUri.startsWith("/sessions?") -> {
+                    val sessionObj = buildSessionDto(session, defaultUserName, isReefin, isInfuse, headers)
+                    jsonResponse(listOf(sessionObj))
+                }
                 lowerUri.startsWith("/displaypreferences") -> {
                     handleDisplayPreferences(isInfuse, isReefin)
                 }
@@ -958,7 +980,7 @@ class JellyfinBridge(
                         reefinClientIps.add(session.remoteIpAddress)
                     }
                     var sec = getParam(params, "Secret", "secret")
-                    if (sec.isBlank()) {
+                    if (sec.isBlank() && method == Method.POST) {
                         try {
                             val map = HashMap<String, String>()
                             session.parseBody(map)
@@ -990,7 +1012,7 @@ class JellyfinBridge(
                 lowerUri == "/branding/configuration" -> {
                     jsonResponse(mapOf("CustomCss" to "", "SplashscreenEnabled" to false))
                 }
-                lowerUri == "/branding/css" -> {
+                lowerUri.startsWith("/branding/css") -> {
                     NanoHTTPD.newFixedLengthResponse(Response.Status.OK, "text/css", "")
                 }
                 lowerUri == "/livetv/channels" -> {
@@ -1059,7 +1081,8 @@ class JellyfinBridge(
         return jsonResponse(info)
     }
 
-    private fun handleSystemConfiguration(port: Int): Response {
+    private fun handleSystemConfiguration(port: Int, isReefin: Boolean = false): Response {
+        val sid = formatId(serverId, isReefin)
         val config = mapOf(
             "LogFileRetentionDays" to 3,
             "IsStartupWizardCompleted" to true,
@@ -1067,7 +1090,7 @@ class JellyfinBridge(
             "EnableMetrics" to false,
             "EnableNormalizedItemByNameIds" to true,
             "IsPortAuthorized" to true,
-            "QuickConnectAvailable" to false,
+            "QuickConnectAvailable" to true,
             "EnableCaseSensitiveItemIds" to true,
             "DisableLiveTvChannelUserDataName" to true,
             "MetadataPath" to "/metadata",
@@ -1097,7 +1120,7 @@ class JellyfinBridge(
             "ImageSavingQuality" to 90,
             "MetadataOptions" to emptyList<String>(),
             "SkipDeserializationForBasicTypes" to false,
-            "ServerId" to serverId,
+            "ServerId" to sid,
             "UICultures" to listOf("en-US"),
             "AllowClientLogUpload" to false,
             "DummyChapterDuration" to 300,
@@ -1120,7 +1143,7 @@ class JellyfinBridge(
             "HasPassword" to isReefin,
             "HasConfiguredPassword" to isReefin,
             "HasConfiguredEasyPassword" to false,
-            "EnableAutoLogin" to !isReefin,
+            "EnableAutoLogin" to true,
             "LastLoginDate" to isoNow,
             "LastActivityDate" to isoNow,
             "Configuration" to mapOf(
@@ -1167,6 +1190,82 @@ class JellyfinBridge(
         return jsonResponse(listOf(buildUserDto(defaultUserName, isReefin)))
     }
 
+    private fun buildSessionDto(
+        session: IHTTPSession,
+        username: String,
+        isReefin: Boolean,
+        isInfuse: Boolean,
+        headers: Map<String, String>
+    ): Map<String, Any?> {
+        val isoNow = getIsoTimestamp()
+        val uid = if (isReefin) formatGuid(defaultUserId) else defaultUserId
+        val sessId = if (isReefin) formatGuid(defaultSessionId) else defaultSessionId
+
+        val authHeader = headers["x-emby-authorization"] ?: headers["X-Emby-Authorization"] ?: headers["authorization"] ?: ""
+        val detectedClient = when {
+            isReefin -> "Reefin"
+            isInfuse -> "Infuse"
+            else -> {
+                val match = Regex("""Client="?([^",]+)"?""", RegexOption.IGNORE_CASE).find(authHeader)
+                match?.groupValues?.getOrNull(1)?.takeIf { it.isNotBlank() } ?: "Jellyfin Client"
+            }
+        }
+        val detectedDevice = Regex("""Device="?([^",]+)"?""", RegexOption.IGNORE_CASE).find(authHeader)?.groupValues?.getOrNull(1)
+            ?: (if (isReefin) "Android / Google TV" else "Client Device")
+        val detectedDeviceId = Regex("""DeviceId="?([^",]+)"?""", RegexOption.IGNORE_CASE).find(authHeader)?.groupValues?.getOrNull(1)
+            ?: (if (isReefin) "reefin_device_1" else "nox_device_1")
+
+        if (isReefin && !session.remoteIpAddress.isNullOrBlank()) {
+            reefinClientIps.add(session.remoteIpAddress)
+        }
+
+        return mapOf(
+            "PlayState" to mapOf(
+                "CanSeek" to true,
+                "IsPaused" to false,
+                "IsMuted" to false,
+                "VolumeLevel" to 100,
+                "PositionTicks" to 0L,
+                "RepeatMode" to "RepeatNone",
+                "SubtitleStreamIndex" to -1,
+                "AudioStreamIndex" to -1
+            ),
+            "AdditionalUsers" to emptyList<String>(),
+            "Capabilities" to mapOf(
+                "PlayableMediaTypes" to listOf("Video", "Audio"),
+                "SupportedCommands" to listOf(
+                    "MoveUp", "MoveDown", "MoveLeft", "MoveRight", "PageUp", "PageDown",
+                    "PreviousLetter", "NextLetter", "ToggleOsd", "ToggleContextMenu",
+                    "Select", "Back", "TakeScreenshot", "SendKey", "SendString",
+                    "GoHome", "GoToSettings", "VolumeUp", "VolumeDown", "Mute", "Unmute",
+                    "ToggleMute", "SetVolume", "SetAudioStreamIndex", "SetSubtitleStreamIndex",
+                    "ToggleFullscreen", "DisplayContent", "GoToSearch", "DisplayMessage",
+                    "SetRepeatMode", "ChannelUp", "ChannelDown", "Guide", "ToggleStats", "PlayMediaSource"
+                ),
+                "SupportsMediaControl" to true,
+                "SupportsPersistentIdentifier" to true,
+                "SupportsContentUploading" to false,
+                "SupportsSync" to false
+            ),
+            "RemoteEndPoint" to (session.remoteIpAddress ?: "127.0.0.1"),
+            "PlayableMediaTypes" to listOf("Video", "Audio"),
+            "Id" to sessId,
+            "UserId" to uid,
+            "UserName" to username,
+            "Client" to detectedClient,
+            "LastActivityDate" to isoNow,
+            "LastPlaybackCheckIn" to isoNow,
+            "DeviceName" to detectedDevice,
+            "DeviceId" to detectedDeviceId,
+            "ApplicationVersion" to "1.0.0",
+            "IsActive" to true,
+            "SupportsMediaControl" to true,
+            "SupportsRemoteControl" to true,
+            "NowPlayingItem" to null,
+            "HasCustomTheme" to false
+        )
+    }
+
     private fun handleAuthenticateByName(
         session: IHTTPSession,
         params: Map<String, String>,
@@ -1194,67 +1293,35 @@ class JellyfinBridge(
         val paramPw = getParam(params, "Pw", "pw", "Password", "password")
         if (paramPw.isNotBlank()) receivedPassword = paramPw
 
-        val isoNow = getIsoTimestamp()
-        val uid = if (isReefin) formatGuid(defaultUserId) else defaultUserId
-        val sid = if (isReefin) formatGuid(serverId) else serverId
-        val sessId = if (isReefin) formatGuid(defaultSessionId) else defaultSessionId
+        val sid = formatId(serverId, isReefin)
         val token = if (isReefin) formatGuid("c0a80101b2c34d5ef64789a0b1c2d3e4") else accessToken
 
         val userObj = buildUserDto(requestedUsername, isReefin)
+        val sessionObj = buildSessionDto(session, requestedUsername, isReefin, isInfuse, headers)
 
-        val authHeader = headers["x-emby-authorization"] ?: headers["X-Emby-Authorization"] ?: headers["authorization"] ?: ""
-        val detectedClient = when {
-            isReefin -> "Reefin"
-            isInfuse -> "Infuse"
-            else -> {
-                val match = Regex("""Client="?([^",]+)"?""", RegexOption.IGNORE_CASE).find(authHeader)
-                match?.groupValues?.getOrNull(1)?.takeIf { it.isNotBlank() } ?: "Jellyfin Client"
-            }
-        }
-        val detectedDevice = Regex("""Device="?([^",]+)"?""", RegexOption.IGNORE_CASE).find(authHeader)?.groupValues?.getOrNull(1)
-            ?: (if (isReefin) "Android / Google TV" else "Client Device")
-        val detectedDeviceId = Regex("""DeviceId="?([^",]+)"?""", RegexOption.IGNORE_CASE).find(authHeader)?.groupValues?.getOrNull(1)
-            ?: (if (isReefin) "reefin_device_1" else "nox_device_1")
+        val authResult = mapOf(
+            "User" to userObj,
+            "SessionInfo" to sessionObj,
+            "AccessToken" to token,
+            "ServerId" to sid
+        )
+        return jsonResponse(authResult)
+    }
 
-        if (isReefin && !session.remoteIpAddress.isNullOrBlank()) {
+    private fun handleAuthenticateWithQuickConnect(
+        session: IHTTPSession,
+        params: Map<String, String>,
+        headers: Map<String, String> = emptyMap(),
+        isReefin: Boolean = true
+    ): Response {
+        if (!session.remoteIpAddress.isNullOrBlank()) {
             reefinClientIps.add(session.remoteIpAddress)
         }
+        val sid = formatId(serverId, isReefin)
+        val token = if (isReefin) formatGuid("c0a80101b2c34d5ef64789a0b1c2d3e4") else accessToken
 
-        val sessionObj = mutableMapOf<String, Any?>(
-            "PlayState" to mapOf(
-                "CanSeek" to true,
-                "IsPaused" to false,
-                "IsMuted" to false,
-                "VolumeLevel" to 100,
-                "PositionTicks" to 0L,
-                "RepeatMode" to "RepeatNone",
-                "SubtitleStreamIndex" to -1,
-                "AudioStreamIndex" to -1
-            ),
-            "AdditionalUsers" to emptyList<String>(),
-            "Capabilities" to mapOf(
-                "PlayableMediaTypes" to listOf("Video", "Audio"),
-                "SupportedCommands" to listOf("MoveUp", "MoveDown", "MoveLeft", "MoveRight", "Select", "Back", "ToggleFullscreen"),
-                "SupportsMediaControl" to true,
-                "SupportsPersistentIdentifier" to true
-            ),
-            "RemoteEndPoint" to (session.remoteIpAddress ?: "127.0.0.1"),
-            "PlayableMediaTypes" to listOf("Video", "Audio"),
-            "Id" to sessId,
-            "UserId" to uid,
-            "UserName" to requestedUsername,
-            "Client" to detectedClient,
-            "LastActivityDate" to isoNow,
-            "LastPlaybackCheckIn" to isoNow,
-            "DeviceName" to detectedDevice,
-            "DeviceId" to detectedDeviceId,
-            "ApplicationVersion" to "1.0.0",
-            "IsActive" to true,
-            "SupportsMediaControl" to true,
-            "SupportsRemoteControl" to true,
-            "NowPlayingItem" to null,
-            "HasCustomTheme" to false
-        )
+        val userObj = buildUserDto(defaultUserName, isReefin)
+        val sessionObj = buildSessionDto(session, defaultUserName, isReefin, isInfuse = false, headers = headers)
 
         val authResult = mapOf(
             "User" to userObj,
