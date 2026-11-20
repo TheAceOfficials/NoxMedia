@@ -212,35 +212,41 @@ html:not(.dark) .VPSidebarItem .item .link:hover {
   background: rgba(0, 0, 0, 0.04) !important;
 }
 
-/* Active State (Royal Purple Left Accent Bar) */
-.VPSidebarItem.level-1.is-active > .item > .link,
-.VPSidebarItem.level-1 > .item > .link.is-active,
-.VPSidebarItem.is-active > .item > .link,
-.VPSidebarItem.is-link.is-active > .item > .link {
+/* Active State: STRICTLY ONE SECTION AT A TIME (Scrollspy Driven) */
+.VPSidebarItem.level-1.is-current-scroll-active > .item > .link,
+.VPSidebarItem.level-1 > .item > .link.is-current-scroll-active {
   color: #ffffff !important;
   font-weight: 550 !important;
   border-left: 2px solid #a855f7 !important;
-  background: rgba(168, 85, 247, 0.12) !important;
+  background: rgba(168, 85, 247, 0.14) !important;
 }
 
-.VPSidebarItem.level-1.is-active > .item > .link .link-text,
-.VPSidebarItem.level-1 > .item > .link.is-active .link-text,
-.VPSidebarItem.is-active .link-text {
+.VPSidebarItem.level-1.is-current-scroll-active > .item > .link .link-text,
+.VPSidebarItem.level-1 > .item > .link.is-current-scroll-active .link-text {
   color: #ffffff !important;
 }
 
-html:not(.dark) .VPSidebarItem.level-1.is-active > .item > .link,
-html:not(.dark) .VPSidebarItem.level-1 > .item > .link.is-active,
-html:not(.dark) .VPSidebarItem.is-active > .item > .link {
+html:not(.dark) .VPSidebarItem.level-1.is-current-scroll-active > .item > .link,
+html:not(.dark) .VPSidebarItem.level-1 > .item > .link.is-current-scroll-active {
   color: #7c3aed !important;
   border-left: 2px solid #7c3aed !important;
   background: rgba(124, 58, 237, 0.1) !important;
 }
 
-html:not(.dark) .VPSidebarItem.level-1.is-active > .item > .link .link-text,
-html:not(.dark) .VPSidebarItem.level-1 > .item > .link.is-active .link-text,
-html:not(.dark) .VPSidebarItem.is-active .link-text {
+html:not(.dark) .VPSidebarItem.level-1.is-current-scroll-active > .item > .link .link-text,
+html:not(.dark) .VPSidebarItem.level-1 > .item > .link.is-current-scroll-active .link-text {
   color: #7c3aed !important;
+}
+
+/* Reset default VitePress is-active to avoid double-highlighting */
+.VPSidebarItem.level-1:not(.is-current-scroll-active) > .item > .link {
+  border-left: 2px solid transparent !important;
+  background: transparent !important;
+  color: rgba(255, 255, 255, 0.5) !important;
+}
+
+html:not(.dark) .VPSidebarItem.level-1:not(.is-current-scroll-active) > .item > .link {
+  color: #64748b !important;
 }
 
 /* Smooth Accordion Slide Transition for Collapsible Groups */
@@ -376,13 +382,13 @@ html:not(.dark) .VPDocAsideOutline .outline-link.active {
 .doc-section {
   padding: 1.75rem 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  opacity: 0.38;
+  opacity: 0.6;
   transition: opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1), transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 html:not(.dark) .doc-section {
   border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-  opacity: 0.42;
+  opacity: 0.65;
 }
 
 /* When active, focused, or hovered: fully lit */

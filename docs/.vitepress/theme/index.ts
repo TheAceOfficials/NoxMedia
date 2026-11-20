@@ -40,28 +40,38 @@ export default {
           if (!sections || sections.length === 0) return
 
           const updateActiveState = () => {
-            const scrollPos = window.scrollY + 140
+            const vh = window.innerHeight || document.documentElement.clientHeight
+            // Reading line anchor: 35% from the top of the viewport
+            const threshold = Math.min(260, vh * 0.35)
 
-            // Find current section in view
-            let activeSection: HTMLElement | null = null
-            for (let i = sections.length - 1; i >= 0; i--) {
+            // 1. Identify which section is currently active based on viewport rect
+            let candidate: HTMLElement | null = null
+
+            for (let i = 0; i < sections.length; i++) {
               const sec = sections[i]
-              if (sec.offsetTop <= scrollPos) {
-                activeSection = sec
+              const rect = sec.getBoundingClientRect()
+              if (rect.top <= threshold) {
+                candidate = sec
+              } else {
                 break
               }
             }
 
-            if (!activeSection && sections.length > 0) {
-              activeSection = sections[0]
+            if (!candidate && sections.length > 0) {
+              candidate = sections[0]
             }
 
-            if (activeSection) {
-              const sectionId = activeSection.getAttribute('id') || ''
+            // Bottom of page check
+            if ((window.innerHeight + window.scrollY) >= (document.documentElement.scrollHeight - 60)) {
+              candidate = sections[sections.length - 1]
+            }
 
-              // 1. Focus dimming (opacity focus)
+            if (candidate) {
+              const sectionId = candidate.getAttribute('id') || ''
+
+              // 2. Light up focused section
               sections.forEach((sec) => {
-                if (sec === activeSection) {
+                if (sec === candidate) {
                   sec.classList.add('is-focused')
                 } else {
                   sec.classList.remove('is-focused')
@@ -71,21 +81,25 @@ export default {
               if (sectionId !== currentActiveSectionId) {
                 currentActiveSectionId = sectionId
 
-                // 2. Realtime sidebar link highlight
-                const sidebarLinks = document.querySelectorAll<HTMLElement>('.VPSidebar .VPLink')
-                sidebarLinks.forEach((link) => {
-                  const href = link.getAttribute('href') || ''
-                  const item = link.closest('.VPSidebarItem')
-                  if (href.endsWith('#' + sectionId)) {
-                    link.classList.add('is-active')
-                    item?.classList.add('is-active')
+                // 3. Highlight EXACTLY ONE sidebar link (remove all others)
+                const allSidebarItems = document.querySelectorAll<HTMLElement>('.VPSidebar .VPSidebarItem.level-1')
+                let foundMatch = false
+
+                allSidebarItems.forEach((item) => {
+                  const link = item.querySelector('.link') as HTMLAnchorElement | null
+                  const href = link?.getAttribute('href') || ''
+
+                  if (!foundMatch && href.endsWith('#' + sectionId)) {
+                    item.classList.add('is-current-scroll-active')
+                    link?.classList.add('is-current-scroll-active')
+                    foundMatch = true
                   } else {
-                    link.classList.remove('is-active')
-                    item?.classList.remove('is-active')
+                    item.classList.remove('is-current-scroll-active', 'is-active')
+                    link?.classList.remove('is-current-scroll-active', 'is-active')
                   }
                 })
 
-                // 3. Smart Auto-Accordion: switch expanded group when crossing boundaries
+                // 4. Smart Auto-Accordion
                 const targetGroup = sectionGroupMap[sectionId]
                 if (typeof targetGroup === 'number' && targetGroup !== currentActiveGroupIndex) {
                   currentActiveGroupIndex = targetGroup
@@ -96,12 +110,12 @@ export default {
                     const toggleBtn = (group.querySelector('.caret') || group.querySelector('.item')) as HTMLElement | null
 
                     if (idx === targetGroup) {
-                      // Expand target group if currently collapsed
+                      // Expand target group if collapsed
                       if (isCollapsed && toggleBtn) {
                         toggleBtn.click()
                       }
                     } else if (idx === 0 || idx === 1) {
-                      // Collapse other group if currently expanded
+                      // Collapse other group if expanded
                       if (!isCollapsed && toggleBtn) {
                         toggleBtn.click()
                       }
