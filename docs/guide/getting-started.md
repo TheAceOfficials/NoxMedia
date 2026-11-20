@@ -187,9 +187,9 @@ NoxMedia provides seamless streaming through the official Stremio Addon v3 Proto
 
 <section class="doc-section" id="jellyfin-bridge">
 
-## NoxMedia - Jellyfin Bridge (Apple Ecosystem)
+## NoxMedia - Jellyfin Bridge (Infuse, Reefin, Vesper)
 
-NoxMedia integrates directly with [Firecore Infuse](https://firecore.com/infuse) and [Vesper](https://watchvesper.app) through an emulated Jellyfin bridge, offering full DirectPlay capabilities, 4K HDR10, Dolby Vision, and Spatial Audio.
+NoxMedia integrates directly with modern Jellyfin clients including [Firecore Infuse](https://firecore.com/infuse), [Reefin](https://play.google.com/store/apps/details?id=com.shady.reefin&hl=en_US) (Android / Android TV / Google TV), and [Vesper](https://watchvesper.app) through an emulated Jellyfin bridge, offering full DirectPlay capabilities, 4K HDR10, Dolby Vision, and Spatial Audio.
 
 ### Connection Parameters
 - **Protocol**: `Jellyfin`
@@ -201,18 +201,22 @@ NoxMedia integrates directly with [Firecore Infuse](https://firecore.com/infuse)
 > [!IMPORTANT]
 > **Use Direct Mode in Infuse.**
 > Browse media via the **Files** tab. Avoid enabling full background library crawling under Infuse Settings -> Library. Direct Mode queries metadata on-demand with zero-latency response times.
+>
+> **Android & Android TV with Reefin.**
+> In Reefin, connect to `http://<your-device-ip>:7788` with username `NoxMedia` (no password needed). Reefin automatically leverages hardware ExoPlayer DirectPlay with isolated remote streaming pipelines.
 
 ### Pinned Home Screen Favorites
-1. Open the **Files** tab in Infuse or server view in Vesper and select your NoxMedia server.
+1. Open the **Files** tab in Infuse or server view in Vesper/Reefin and select your NoxMedia server.
 2. Locate any custom shelf (e.g., *Murder Mystery Dark*).
 3. Long-press or click the **Star** icon to favorite.
-4. The shelf will appear as a dedicated horizontal row on your Apple TV or iOS Home Screen.
+4. The shelf will appear as a dedicated horizontal row on your Apple TV, Android TV, or mobile Home Screen.
 
 ### Jellyfin Compatible Players
 
 | Player | Supported Devices | Distribution | Download Link |
 | :--- | :--- | :--- | :--- |
 | **Infuse** | <DeviceGroup devices="iphone, ipad, mac, appletv, visionpro" /> | Apple App Store <span class="badge-official">Official</span> | [Get on App Store &rarr;](https://apps.apple.com/app/infuse-7/id1136220934) |
+| **Reefin** | <DeviceGroup devices="android-phone, android-tv" /> | Google Play Store <span class="badge-official">Official</span> | [Get on Google Play &rarr;](https://play.google.com/store/apps/details?id=com.shady.reefin&hl=en_US) |
 | **Vesper** | <DeviceGroup devices="iphone, ipad, mac, appletv, visionpro" /> | Apple TestFlight <span class="badge-testflight">TestFlight</span> | [Join TestFlight &rarr;](https://testflight.apple.com/join/mcCk473Y) |
 
 > More players and platform integrations are in active development and will be added soon.
