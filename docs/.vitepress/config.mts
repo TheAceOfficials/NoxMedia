@@ -45,7 +45,7 @@ export default defineConfig({
         },
         {
           text: 'Client Platforms & Setup',
-          collapsed: false,
+          collapsed: true,
           items: [
             { text: 'NoxMedia - Nuvio', link: '/guide/getting-started#nuvio' },
             { text: 'NoxMedia - Jellyfin (Apple)', link: '/guide/getting-started#jellyfin-bridge' },

@@ -12,38 +12,121 @@ export default {
     app.component('HomePage', HomePage)
 
     if (typeof window !== 'undefined') {
-      // Initialize focus sections observer after DOM updates
-      const setupFocusObserver = () => {
+      const sectionGroupMap: Record<string, number> = {
+        'introduction': 0,
+        'architecture': 0,
+        'installation': 0,
+        'channels-setup': 0,
+        'ai-catalogs': 0,
+        'cloud-sync': 0,
+        'nuvio': 1,
+        'jellyfin-bridge': 1,
+        'native-apps': 1
+      }
+
+      let currentActiveSectionId = ''
+      let currentActiveGroupIndex = -1
+      let scrollTicking = false
+
+      const setupScrollSpyAndAccordion = () => {
         setTimeout(() => {
-          const sections = document.querySelectorAll('.doc-section')
+          const sections = Array.from(document.querySelectorAll<HTMLElement>('.doc-section[id]'))
           if (!sections || sections.length === 0) return
 
-          // Set first section focused by default
-          sections[0].classList.add('is-focused')
+          const updateActiveState = () => {
+            const scrollPos = window.scrollY + 140
 
-          const observer = new IntersectionObserver(
-            (entries) => {
-              entries.forEach((entry) => {
-                if (entry.isIntersecting) {
-                  sections.forEach((sec) => sec.classList.remove('is-focused'))
-                  entry.target.classList.add('is-focused')
+            // Find current section in view
+            let activeSection: HTMLElement | null = null
+            for (let i = sections.length - 1; i >= 0; i--) {
+              const sec = sections[i]
+              if (sec.offsetTop <= scrollPos) {
+                activeSection = sec
+                break
+              }
+            }
+
+            if (!activeSection && sections.length > 0) {
+              activeSection = sections[0]
+            }
+
+            if (activeSection) {
+              const sectionId = activeSection.getAttribute('id') || ''
+
+              // 1. Focus dimming (opacity focus)
+              sections.forEach((sec) => {
+                if (sec === activeSection) {
+                  sec.classList.add('is-focused')
+                } else {
+                  sec.classList.remove('is-focused')
                 }
               })
-            },
-            {
-              root: null,
-              rootMargin: '-20% 0px -55% 0px',
-              threshold: 0.1
-            }
-          )
 
-          sections.forEach((section) => observer.observe(section))
+              if (sectionId !== currentActiveSectionId) {
+                currentActiveSectionId = sectionId
+
+                // 2. Realtime sidebar link highlight
+                const sidebarLinks = document.querySelectorAll<HTMLElement>('.VPSidebar .VPLink')
+                sidebarLinks.forEach((link) => {
+                  const href = link.getAttribute('href') || ''
+                  const item = link.closest('.VPSidebarItem')
+                  if (href.endsWith('#' + sectionId)) {
+                    link.classList.add('is-active')
+                    item?.classList.add('is-active')
+                  } else {
+                    link.classList.remove('is-active')
+                    item?.classList.remove('is-active')
+                  }
+                })
+
+                // 3. Smart Auto-Accordion: switch expanded group when crossing boundaries
+                const targetGroup = sectionGroupMap[sectionId]
+                if (typeof targetGroup === 'number' && targetGroup !== currentActiveGroupIndex) {
+                  currentActiveGroupIndex = targetGroup
+
+                  const groups = document.querySelectorAll<HTMLElement>('.VPSidebar .VPSidebarItem.level-0.collapsible')
+                  groups.forEach((group, idx) => {
+                    const isCollapsed = group.classList.contains('collapsed')
+                    const toggleBtn = (group.querySelector('.caret') || group.querySelector('.item')) as HTMLElement | null
+
+                    if (idx === targetGroup) {
+                      // Expand target group if currently collapsed
+                      if (isCollapsed && toggleBtn) {
+                        toggleBtn.click()
+                      }
+                    } else if (idx === 0 || idx === 1) {
+                      // Collapse other group if currently expanded
+                      if (!isCollapsed && toggleBtn) {
+                        toggleBtn.click()
+                      }
+                    }
+                  })
+                }
+              }
+            }
+          }
+
+          const onScroll = () => {
+            if (!scrollTicking) {
+              requestAnimationFrame(() => {
+                updateActiveState()
+                scrollTicking = false
+              })
+              scrollTicking = true
+            }
+          }
+
+          window.removeEventListener('scroll', onScroll)
+          window.addEventListener('scroll', onScroll, { passive: true })
+
+          // Initial run
+          updateActiveState()
         }, 150)
       }
 
-      window.addEventListener('DOMContentLoaded', setupFocusObserver)
+      window.addEventListener('DOMContentLoaded', setupScrollSpyAndAccordion)
       if (router) {
-        router.onAfterRouteChanged = setupFocusObserver
+        router.onAfterRouteChanged = setupScrollSpyAndAccordion
       }
     }
   }
