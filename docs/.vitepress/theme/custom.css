@@ -141,6 +141,20 @@ html:not(.dark) .VPNav {
   border-bottom: 1px solid rgba(0, 0, 0, 0.06) !important;
 }
 
+/* Top Navbar Branding - Dotted Style */
+.VPNavBarTitle .title,
+.VPNavBarTitle .title span {
+  font-family: 'NDot', monospace !important;
+  font-weight: 400 !important;
+  font-size: 1.18rem !important;
+  letter-spacing: 0.05em !important;
+  line-height: 1 !important;
+}
+
+.VPNavBarTitle .title:hover {
+  opacity: 0.85;
+}
+
 /* ==========================================================================
    Vesper-Style Borderless Sidebar
    ========================================================================== */
