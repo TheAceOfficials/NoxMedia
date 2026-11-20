@@ -1688,28 +1688,18 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
             MinimalSettingsCard(
                 icon = Icons.Default.Tv,
                 title = "Media Server",
-                subtitle = if (jellyfinBridgeEnabled) "Active • :${config.port}/jellyfin" else "Jellyfin, Infuse & Swiftfin bridge",
+                subtitle = if (jellyfinBridgeEnabled) "Active" else "Disabled",
                 isExpanded = expandedMediaServer,
                 onToggleExpand = { expandedMediaServer = !expandedMediaServer }
             ) {
                 val localIp = remember { com.tgserver.streamer.server.LocalHttpServer.getLocalIpAddress() }
                 val effectivePort = config.port
-                val jellyfinUrl = "http://$localIp:$effectivePort/jellyfin"
-                val loginPickerUrl = "http://$localIp:$effectivePort/jellyfin/login"
+                val vesperUrl = "http://$localIp:$effectivePort"
+                var selectedPlatform by remember { mutableStateOf("Vesper") }
 
-                Text(
-                    text = "Transform your server into an isolated Jellyfin & Emby endpoint for third-party player apps like Infuse, Swiftfin, Findroid, Streamyfin, Kodi, and Jellyfin TV.",
-                    color = TextSecondary,
-                    fontSize = 12.sp,
-                    lineHeight = 17.sp
-                )
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Master Toggle
                 SettingToggleRow(
                     title = "Enable Media Server Bridge",
-                    description = "Hosts standard Jellyfin OpenAPI endpoints on /jellyfin with DirectPlay HTTP 206 video streaming without modifying Stremio.",
+                    description = "DirectPlay streaming endpoint for third-party media players.",
                     checked = jellyfinBridgeEnabled,
                     onCheckedChange = { enabled ->
                         jellyfinBridgeEnabled = enabled
@@ -1718,152 +1708,126 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 )
 
                 if (jellyfinBridgeEnabled) {
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
-                    // 2 AIOStreams-style Concept Highlights
+                    // Platform Selector (Segmented Tab Bar)
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF0F1014))
+                            .border(1.dp, Color(0xFF22242D), RoundedCornerShape(12.dp))
+                            .padding(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        // Card 1: Catalogs become libraries
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Color(0xFF141416))
-                                .border(1.dp, Color(0xFF242428), RoundedCornerShape(12.dp))
-                                .padding(12.dp)
-                        ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("Vesper", "Infuse").forEach { platform ->
+                            val isSelected = selectedPlatform == platform
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(38.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(
+                                        if (isSelected) AccentPurple.copy(alpha = 0.18f) else Color.Transparent
+                                    )
+                                    .border(
+                                        1.dp,
+                                        if (isSelected) AccentPurple.copy(alpha = 0.6f) else Color.Transparent,
+                                        RoundedCornerShape(8.dp)
+                                    )
+                                    .clickable {
+                                        selectedPlatform = platform
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    }
+                            ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.FolderSpecial,
+                                        imageVector = if (platform == "Vesper") Icons.Default.PlayCircle else Icons.Default.Tv,
                                         contentDescription = null,
-                                        tint = AccentPurple,
+                                        tint = if (isSelected) AccentPurple else TextTertiary,
                                         modifier = Modifier.size(16.dp)
                                     )
                                     Text(
-                                        text = "Libraries",
-                                        color = TextPrimary,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
+                                        text = platform,
+                                        color = if (isSelected) Color.White else TextSecondary,
+                                        fontSize = 13.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                                     )
                                 }
-                                Text(
-                                    text = "Catalogs become libraries",
-                                    color = TextSecondary,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Text(
-                                    text = "In the order from the Catalogs page. Directly accessible in Infuse and Jellyfin apps.",
-                                    color = TextTertiary,
-                                    fontSize = 10.sp,
-                                    lineHeight = 14.sp
-                                )
-                            }
-                        }
-
-                        // Card 2: Streams become versions
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Color(0xFF141416))
-                                .border(1.dp, Color(0xFF242428), RoundedCornerShape(12.dp))
-                                .padding(12.dp)
-                        ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Layers,
-                                        contentDescription = null,
-                                        tint = AccentPurple,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Text(
-                                        text = "Versions",
-                                        color = TextPrimary,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                                Text(
-                                    text = "Streams become versions",
-                                    color = TextSecondary,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Text(
-                                    text = "Opening a title presents multi-quality DirectPlay streams. Zero transcoding overhead.",
-                                    color = TextTertiary,
-                                    fontSize = 10.sp,
-                                    lineHeight = 14.sp
-                                )
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                    // Connection Credentials Box
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFF121215))
-                            .border(1.dp, Color(0xFF222226), RoundedCornerShape(12.dp))
-                            .padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        // Section 1: Infuse Setup Guide (Apple TV, iOS, Mac)
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(
-                                text = "INFUSE SETUP (APPLE TV / IOS / MAC)",
-                                color = AccentYellow,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 0.8.sp
-                            )
-                            Text(
-                                text = "In Infuse: Add Server > Jellyfin. Fill in the exact fields below:",
-                                color = TextSecondary,
-                                fontSize = 11.sp
-                            )
-
-                            // Infuse Address & Port side-by-side
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    AnimatedContent(
+                        targetState = selectedPlatform,
+                        transitionSpec = {
+                            fadeIn(animationSpec = tween(180)) togetherWith fadeOut(animationSpec = tween(120))
+                        },
+                        label = "platform_details"
+                    ) { platform ->
+                        if (platform == "Vesper") {
+                            // Vesper Setup Box
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(Color(0xFF121215))
+                                    .border(1.dp, Color(0xFF222428), RoundedCornerShape(14.dp))
+                                    .padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                // Address (IP only)
-                                Column(
-                                    modifier = Modifier.weight(1.3f),
-                                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(6.dp)
+                                            .clip(CircleShape)
+                                            .background(AccentPurple)
+                                    )
                                     Text(
-                                        text = "Address (IP only)",
-                                        color = TextTertiary,
+                                        text = "VESPER SETUP GUIDE",
+                                        color = AccentPurple,
                                         fontSize = 10.sp,
-                                        fontWeight = FontWeight.Medium
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 0.8.sp
+                                    )
+                                }
+
+                                Text(
+                                    text = "In Vesper: Add Server > Jellyfin. Copy the URL below and paste it directly:",
+                                    color = TextSecondary,
+                                    fontSize = 11.5.sp,
+                                    lineHeight = 16.sp
+                                )
+
+                                // Server URL
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(
+                                        text = "SERVER URL (WITH PORT)",
+                                        color = TextTertiary,
+                                        fontSize = 9.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 0.6.sp
                                     )
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .clip(RoundedCornerShape(8.dp))
                                             .background(Color(0xFF18181C))
-                                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                                            .padding(horizontal = 10.dp, vertical = 8.dp),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
-                                            text = localIp,
+                                            text = vesperUrl,
                                             color = TextPrimary,
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Medium,
@@ -1873,352 +1837,400 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                                         IconButton(
                                             onClick = {
                                                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                                clipboard.setPrimaryClip(ClipData.newPlainText("Infuse Address IP", localIp))
+                                                clipboard.setPrimaryClip(ClipData.newPlainText("Vesper Server URL", vesperUrl))
                                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                Toast.makeText(context, "Copied IP for Infuse Address", Toast.LENGTH_SHORT).show()
+                                                Toast.makeText(context, "Copied Vesper Server URL", Toast.LENGTH_SHORT).show()
                                             },
-                                            modifier = Modifier.size(24.dp)
+                                            modifier = Modifier.size(28.dp)
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.ContentCopy,
-                                                contentDescription = "Copy IP",
+                                                contentDescription = "Copy",
                                                 tint = AccentPurple,
-                                                modifier = Modifier.size(14.dp)
+                                                modifier = Modifier.size(15.dp)
                                             )
                                         }
                                     }
                                 }
 
-                                // Port (Must change from 8096!)
-                                Column(
-                                    modifier = Modifier.weight(1f),
-                                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                                // Username & Password Row
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    Text(
-                                        text = "Port (in Advanced)",
-                                        color = TextTertiary,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(Color(0xFF18181C))
-                                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
                                         Text(
-                                            text = effectivePort.toString(),
-                                            color = AccentYellow,
-                                            fontSize = 12.sp,
+                                            text = "USERNAME",
+                                            color = TextTertiary,
+                                            fontSize = 9.5.sp,
                                             fontWeight = FontWeight.Bold,
-                                            fontFamily = FontFamily.Monospace,
-                                            modifier = Modifier.weight(1f)
+                                            letterSpacing = 0.6.sp
                                         )
-                                        IconButton(
-                                            onClick = {
-                                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                                clipboard.setPrimaryClip(ClipData.newPlainText("Port", effectivePort.toString()))
-                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                Toast.makeText(context, "Copied Port $effectivePort", Toast.LENGTH_SHORT).show()
-                                            },
-                                            modifier = Modifier.size(24.dp)
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color(0xFF18181C))
+                                                .padding(horizontal = 10.dp, vertical = 7.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Icon(
-                                                imageVector = Icons.Default.ContentCopy,
-                                                contentDescription = "Copy Port",
-                                                tint = AccentPurple,
-                                                modifier = Modifier.size(14.dp)
+                                            Text(
+                                                text = "NoxMedia",
+                                                color = TextPrimary,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                fontFamily = FontFamily.Monospace,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            IconButton(
+                                                onClick = {
+                                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                    clipboard.setPrimaryClip(ClipData.newPlainText("Username", "NoxMedia"))
+                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                    Toast.makeText(context, "Copied Username", Toast.LENGTH_SHORT).show()
+                                                },
+                                                modifier = Modifier.size(24.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.ContentCopy,
+                                                    contentDescription = "Copy",
+                                                    tint = AccentPurple,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(
+                                            text = "PASSWORD",
+                                            color = TextTertiary,
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 0.6.sp
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(38.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color(0xFF18181C))
+                                                .padding(horizontal = 10.dp),
+                                            contentAlignment = Alignment.CenterStart
+                                        ) {
+                                            Text(
+                                                text = "None (Leave Blank)",
+                                                color = TextSecondary,
+                                                fontSize = 11.5.sp,
+                                                fontWeight = FontWeight.Medium
                                             )
                                         }
                                     }
                                 }
-                            }
 
-                            Text(
-                                text = "⚠️ In Infuse: Tap 'Advanced' and change Port from default 8096 to $effectivePort. Path can be /jellyfin or left blank.",
-                                color = AccentYellow,
-                                fontSize = 10.sp,
-                                lineHeight = 14.sp
-                            )
-                        }
-
-                        // Username & Password Row
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Column(
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Text(
-                                    text = "USERNAME",
-                                    color = TextTertiary,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = 0.8.sp
-                                )
-                                Row(
+                                // Quick Steps Card
+                                Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(Color(0xFF18181C))
-                                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Color(0xFF18181E))
+                                        .border(1.dp, Color(0xFF282832), RoundedCornerShape(10.dp))
+                                        .padding(10.dp)
                                 ) {
-                                    Text(
-                                        text = "NoxMedia",
-                                        color = TextPrimary,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    IconButton(
-                                        onClick = {
-                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                            clipboard.setPrimaryClip(ClipData.newPlainText("Username", "NoxMedia"))
-                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            Toast.makeText(context, "Copied Username", Toast.LENGTH_SHORT).show()
-                                        },
-                                        modifier = Modifier.size(28.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.ContentCopy,
-                                            contentDescription = "Copy",
-                                            tint = AccentPurple,
-                                            modifier = Modifier.size(16.dp)
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text(
+                                            text = "Quick Setup Steps:",
+                                            color = TextPrimary,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            text = "1. Open Vesper and tap Add Server > Jellyfin.",
+                                            color = TextSecondary,
+                                            fontSize = 10.5.sp
+                                        )
+                                        Text(
+                                            text = "2. Paste the Server URL copied above.",
+                                            color = TextSecondary,
+                                            fontSize = 10.5.sp
+                                        )
+                                        Text(
+                                            text = "3. Enter NoxMedia as Username, leave Password blank and connect.",
+                                            color = TextSecondary,
+                                            fontSize = 10.5.sp
                                         )
                                     }
                                 }
                             }
-
+                        } else {
+                            // Infuse Setup Box
                             Column(
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(Color(0xFF121215))
+                                    .border(1.dp, Color(0xFF222428), RoundedCornerShape(14.dp))
+                                    .padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(6.dp)
+                                            .clip(CircleShape)
+                                            .background(AccentPurple)
+                                    )
+                                    Text(
+                                        text = "INFUSE SETUP GUIDE (APPLE TV / IOS / MAC)",
+                                        color = AccentPurple,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 0.8.sp
+                                    )
+                                }
+
                                 Text(
-                                    text = "PASSWORD",
-                                    color = TextTertiary,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = 0.8.sp
+                                    text = "In Infuse: Add Server > Jellyfin. Fill in the exact fields below:",
+                                    color = TextSecondary,
+                                    fontSize = 11.5.sp,
+                                    lineHeight = 16.sp
                                 )
+
+                                // Address & Port Row
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    // Address (IP only)
+                                    Column(
+                                        modifier = Modifier.weight(1.3f),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(
+                                            text = "ADDRESS (IP ONLY)",
+                                            color = TextTertiary,
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 0.6.sp
+                                        )
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color(0xFF18181C))
+                                                .padding(horizontal = 10.dp, vertical = 7.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = localIp,
+                                                color = TextPrimary,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                fontFamily = FontFamily.Monospace,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            IconButton(
+                                                onClick = {
+                                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                    clipboard.setPrimaryClip(ClipData.newPlainText("Infuse Address IP", localIp))
+                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                    Toast.makeText(context, "Copied IP for Infuse", Toast.LENGTH_SHORT).show()
+                                                },
+                                                modifier = Modifier.size(24.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.ContentCopy,
+                                                    contentDescription = "Copy IP",
+                                                    tint = AccentPurple,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    // Port
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(
+                                            text = "PORT (IN ADVANCED)",
+                                            color = TextTertiary,
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 0.6.sp
+                                        )
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color(0xFF18181C))
+                                                .padding(horizontal = 10.dp, vertical = 7.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = effectivePort.toString(),
+                                                color = Color.White,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                fontFamily = FontFamily.Monospace,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            IconButton(
+                                                onClick = {
+                                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                    clipboard.setPrimaryClip(ClipData.newPlainText("Port", effectivePort.toString()))
+                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                    Toast.makeText(context, "Copied Port $effectivePort", Toast.LENGTH_SHORT).show()
+                                                },
+                                                modifier = Modifier.size(24.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.ContentCopy,
+                                                    contentDescription = "Copy Port",
+                                                    tint = AccentPurple,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Important Port Notice
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(8.dp))
-                                        .background(Color(0xFF18181C))
-                                        .padding(horizontal = 10.dp, vertical = 10.dp)
+                                        .background(Color(0xFF1E1828))
+                                        .border(1.dp, AccentPurple.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                                        .padding(horizontal = 10.dp, vertical = 8.dp)
                                 ) {
                                     Text(
-                                        text = "None (Leave Blank)",
-                                        color = TextSecondary,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium
+                                        text = "In Infuse: Tap 'Advanced' and change Port from default 8096 to $effectivePort. Path can be left blank.",
+                                        color = Color(0xFFD8B4FE),
+                                        fontSize = 10.5.sp,
+                                        lineHeight = 15.sp
                                     )
                                 }
-                            }
-                        }
 
-                        // Section 2: Full Server Address (For Swiftfin, Findroid, Web & Streamyfin)
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(
-                                text = "SWIFTFIN / FINDROID / BROWSER URL",
-                                color = TextTertiary,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 0.8.sp
-                            )
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color(0xFF18181C))
-                                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = jellyfinUrl,
-                                    color = TextPrimary,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    fontFamily = FontFamily.Monospace,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                IconButton(
-                                    onClick = {
-                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                        clipboard.setPrimaryClip(ClipData.newPlainText("Jellyfin Server Address", jellyfinUrl))
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        Toast.makeText(context, "Copied Server Address", Toast.LENGTH_SHORT).show()
-                                    },
-                                    modifier = Modifier.size(28.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.ContentCopy,
-                                        contentDescription = "Copy",
-                                        tint = AccentPurple,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            }
-                            Text(
-                                text = "Paste this single URL in Swiftfin, Findroid, or a browser to connect directly.",
-                                color = TextTertiary,
-                                fontSize = 10.sp
-                            )
-                        }
-
-                        // Section 3: Remote Tailscale Address (if available)
-                        if (config.remotePublicUrl.isNotBlank()) {
-                            val remoteJellyfinUrl = "${config.remotePublicUrl.trimEnd('/')}/jellyfin"
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(
-                                    text = "REMOTE / TAILSCALE ADDRESS",
-                                    color = TextTertiary,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = 0.8.sp
-                                )
+                                // Username & Password Row
                                 Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(
+                                            text = "USERNAME",
+                                            color = TextTertiary,
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 0.6.sp
+                                        )
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color(0xFF18181C))
+                                                .padding(horizontal = 10.dp, vertical = 7.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "NoxMedia",
+                                                color = TextPrimary,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                fontFamily = FontFamily.Monospace,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            IconButton(
+                                                onClick = {
+                                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                    clipboard.setPrimaryClip(ClipData.newPlainText("Username", "NoxMedia"))
+                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                    Toast.makeText(context, "Copied Username", Toast.LENGTH_SHORT).show()
+                                                },
+                                                modifier = Modifier.size(24.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.ContentCopy,
+                                                    contentDescription = "Copy",
+                                                    tint = AccentPurple,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(
+                                            text = "PASSWORD",
+                                            color = TextTertiary,
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 0.6.sp
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(38.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color(0xFF18181C))
+                                                .padding(horizontal = 10.dp),
+                                            contentAlignment = Alignment.CenterStart
+                                        ) {
+                                            Text(
+                                                text = "None (Leave Blank)",
+                                                color = TextSecondary,
+                                                fontSize = 11.5.sp,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // Recommendation card (Library Mode Off)
+                                Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(Color(0xFF18181C))
-                                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Color(0xFF18181E))
+                                        .border(1.dp, Color(0xFF282832), RoundedCornerShape(10.dp))
+                                        .padding(10.dp)
                                 ) {
-                                    Text(
-                                        text = remoteJellyfinUrl,
-                                        color = TextPrimary,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        fontFamily = FontFamily.Monospace,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    IconButton(
-                                        onClick = {
-                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                            clipboard.setPrimaryClip(ClipData.newPlainText("Remote Jellyfin Address", remoteJellyfinUrl))
-                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            Toast.makeText(context, "Copied Remote Address", Toast.LENGTH_SHORT).show()
-                                        },
-                                        modifier = Modifier.size(28.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.ContentCopy,
-                                            contentDescription = "Copy",
-                                            tint = AccentPurple,
-                                            modifier = Modifier.size(16.dp)
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text(
+                                            text = "Recommended Settings:",
+                                            color = TextPrimary,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            text = "Turn Library Mode OFF in Infuse server settings for instant direct folder navigation and zero sync wait times.",
+                                            color = TextSecondary,
+                                            fontSize = 10.5.sp,
+                                            lineHeight = 15.sp
                                         )
                                     }
                                 }
-                                Text(
-                                    text = "Use this URL to stream outside your home network via your Tailscale / VPN tunnel.",
-                                    color = TextTertiary,
-                                    fontSize = 10.sp
-                                )
-                            }
-                        }
-
-                        // 3. Address with sign-in picker
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(
-                                text = "ADDRESS WITH SIGN-IN PICKER",
-                                color = TextTertiary,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 0.8.sp
-                            )
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color(0xFF18181C))
-                                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = loginPickerUrl,
-                                    color = TextPrimary,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    fontFamily = FontFamily.Monospace,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                IconButton(
-                                    onClick = {
-                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                        clipboard.setPrimaryClip(ClipData.newPlainText("Sign-in Picker Address", loginPickerUrl))
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        Toast.makeText(context, "Copied Sign-in Picker Address", Toast.LENGTH_SHORT).show()
-                                    },
-                                    modifier = Modifier.size(28.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.ContentCopy,
-                                        contentDescription = "Copy",
-                                        tint = AccentPurple,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            }
-                            Text(
-                                text = "Lists user profiles automatically at login, requiring zero manual typing on Apple TV or TV remotes.",
-                                color = TextTertiary,
-                                fontSize = 10.sp
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Supported Client Apps row
-                    Text(
-                        text = "COMPATIBLE APPS",
-                        color = TextTertiary,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.8.sp
-                    )
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        listOf(
-                            "Infuse (Apple TV / iOS)",
-                            "Swiftfin",
-                            "Findroid",
-                            "Streamyfin",
-                            "Jellyfin Android TV",
-                            "Kodi"
-                        ).forEach { appName ->
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(Color(0xFF18181C))
-                                    .border(1.dp, Color(0xFF28282E), RoundedCornerShape(6.dp))
-                                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                            ) {
-                                Text(
-                                    text = appName,
-                                    color = TextSecondary,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
                             }
                         }
                     }
