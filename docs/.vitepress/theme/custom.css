@@ -60,6 +60,60 @@ h1, h2, h3, h4, .vp-doc h1, .vp-doc h2, .vp-doc h3 {
   font-weight: 600;
 }
 
+.vp-doc h1 {
+  font-size: clamp(1.7rem, 3.2vw, 2.2rem) !important;
+  margin-top: 1rem !important;
+  margin-bottom: 0.75rem !important;
+}
+
+.vp-doc h2 {
+  font-size: clamp(1.25rem, 2.2vw, 1.55rem) !important;
+  margin-top: 1.75rem !important;
+  margin-bottom: 0.6rem !important;
+}
+
+.vp-doc h3 {
+  font-size: 1.05rem !important;
+  margin-top: 1.25rem !important;
+  margin-bottom: 0.5rem !important;
+}
+
+/* Compact Document Body & Paragraphs */
+.vp-doc p, .vp-doc li {
+  font-size: 0.92rem !important;
+  line-height: 1.65 !important;
+}
+
+/* Compact Apple-style Tables: Single Row, No Awkward Wrap */
+.vp-doc table {
+  font-size: 0.82rem !important;
+  border-collapse: collapse !important;
+  margin: 1.25rem 0 !important;
+  display: table !important;
+  width: 100% !important;
+}
+
+.vp-doc th, .vp-doc td {
+  padding: 8px 12px !important;
+  vertical-align: middle !important;
+  line-height: 1.4 !important;
+}
+
+.vp-doc td a {
+  white-space: nowrap !important;
+  display: inline-flex !important;
+  align-items: center !important;
+}
+
+.vp-doc td span.badge-official,
+.vp-doc td span.badge-sideload,
+.vp-doc td span.badge-testflight {
+  white-space: nowrap !important;
+  font-size: 0.68rem !important;
+  padding: 1px 6px !important;
+  letter-spacing: 0.02em !important;
+}
+
 /* Smooth Scrolling */
 html {
   scroll-behavior: smooth;
@@ -99,31 +153,46 @@ html:not(.dark) .VPNav {
 
 /* Group Titles (Collapsible headers) */
 .VPSidebarItem.level-0 .text {
-  font-size: 0.72rem !important;
+  font-size: 0.7rem !important;
   font-weight: 600 !important;
   letter-spacing: 0.08em !important;
   text-transform: uppercase !important;
   color: rgba(255, 255, 255, 0.4) !important;
   margin-bottom: 4px !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
 }
 
 html:not(.dark) .VPSidebarItem.level-0 .text {
   color: #64748b !important;
 }
 
-/* Sidebar Links */
+/* Sidebar Links - Single Line Compact Apple-Style */
 .VPSidebarItem.level-1 .link,
 .VPSidebarItem .item .link {
-  padding: 6px 12px !important;
+  padding: 5px 12px !important;
   margin: 2px 0 !important;
   border-left: 2px solid transparent !important;
   border-radius: 0 6px 6px 0 !important;
   color: rgba(255, 255, 255, 0.5) !important;
-  font-size: 0.875rem !important;
+  font-size: 0.81rem !important;
   font-weight: 450 !important;
-  line-height: 1.4 !important;
-  transition: all 0.16s ease !important;
+  line-height: 1.35 !important;
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1) !important;
   background: transparent !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+.VPSidebarItem.level-1 .link .link-text,
+.VPSidebarItem .item .link .link-text,
+.VPSidebarItem .link-text {
+  font-size: 0.81rem !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
 }
 
 html:not(.dark) .VPSidebarItem.level-1 .link,
@@ -174,13 +243,47 @@ html:not(.dark) .VPSidebarItem.is-active .link-text {
   color: #7c3aed !important;
 }
 
+/* Smooth Accordion Slide Transition for Collapsible Groups */
+.VPSidebarItem.level-0.collapsible > .items {
+  display: block !important;
+  overflow: hidden !important;
+  max-height: 500px !important;
+  opacity: 1 !important;
+  transform: translateY(0) !important;
+  transition: max-height 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.VPSidebarItem.level-0.collapsible.collapsed > .items {
+  max-height: 0 !important;
+  opacity: 0 !important;
+  transform: translateY(-4px) !important;
+  pointer-events: none !important;
+  padding-bottom: 0 !important;
+  margin-bottom: 0 !important;
+}
+
+/* Caret Icon Smooth Spring Rotation */
+.VPSidebarItem .caret-icon {
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.VPSidebarItem.collapsed .caret-icon {
+  transform: rotate(0deg) !important;
+}
+
+.VPSidebarItem:not(.collapsed) .caret-icon {
+  transform: rotate(90deg) !important;
+}
+
 /* ==========================================================================
    Tighten Content & Sidebar Spacing (Eliminate wasted blank void)
    ========================================================================== */
 
 @media (min-width: 960px) {
   :root {
-    --vp-sidebar-width: 240px;
+    --vp-sidebar-width: 270px;
   }
 
   .VPDoc.has-sidebar {

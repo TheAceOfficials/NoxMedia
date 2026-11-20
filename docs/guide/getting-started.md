@@ -138,11 +138,11 @@ NoxMedia provides seamless streaming through the official Stremio Addon v3 Proto
 
 | Platform / Environment | Distribution | Download Link |
 | :--- | :--- | :--- |
-| **Android Phone, Tablet & TV** <br><DeviceGroup devices="android-phone, android-tablet, android-tv" /> | Google Play Store <span class="badge-official">Official Store</span> | [Get on Google Play &rarr;](https://play.google.com/store/apps/details?id=com.nuvio.app) |
+| **Android Phone, Tablet & TV** <br><DeviceGroup devices="android-phone, android-tablet, android-tv" /> | Google Play Store <span class="badge-official">Official</span> | [Get on Google Play &rarr;](https://play.google.com/store/apps/details?id=com.nuvio.app) |
 | **Android Mobile APK** <br><DeviceGroup devices="android-phone" /> | GitHub Releases <span class="badge-sideload">Sideloading</span> | [Download Mobile APK &rarr;](https://github.com/NuvioMedia/NuvioMobile/releases) |
 | **Android TV & Google TV APK** <br><DeviceGroup devices="android-tv" /> | GitHub Releases <span class="badge-sideload">Sideloading</span> | [Download TV APK &rarr;](https://github.com/NuvioMedia/NuvioTV/releases) |
-| **Desktop (Windows, Linux, macOS)** <br><DeviceGroup devices="windows, linux, mac" /> | GitHub Releases <span class="badge-official">Standalone App</span> | [Download Desktop &rarr;](https://github.com/NuvioMedia/NuvioDesktop/releases) |
-| **Smart TV Packages (Tizen, webOS)** <br><DeviceGroup devices="smart-tv" /> | GitHub Releases <span class="badge-sideload">Sideloading</span> | [Download Smart TV Packages &rarr;](https://github.com/NuvioMedia/NuvioTVSmart/releases) |
+| **Desktop (Windows, Linux, macOS)** <br><DeviceGroup devices="windows, linux, mac" /> | GitHub Releases <span class="badge-official">Standalone</span> | [Download Desktop &rarr;](https://github.com/NuvioMedia/NuvioDesktop/releases) |
+| **Smart TV Packages (Tizen, webOS)** <br><DeviceGroup devices="smart-tv" /> | GitHub Releases <span class="badge-sideload">Sideloading</span> | [Get TV Packages &rarr;](https://github.com/NuvioMedia/NuvioTVSmart/releases) |
 | **iPhone & iPad (Enhanced)** <br><DeviceGroup devices="iphone, ipad" /> | GitHub Releases <span class="badge-sideload">Sideloading</span> | [Download iOS IPA &rarr;](https://github.com/luqmanfadlli/NuvioMobile-Enhanced/releases) |
 | **Apple TV (tvOS)** <br><DeviceGroup devices="appletv" /> | GitHub Releases <span class="badge-sideload">Sideloading</span> | [Download tvOS Package &rarr;](https://github.com/bobsupra/NuvioTVOS) |
 
@@ -175,8 +175,8 @@ NoxMedia integrates directly with [Firecore Infuse](https://firecore.com/infuse)
 
 | Player | Supported Devices | Distribution | Download Link |
 | :--- | :--- | :--- | :--- |
-| **Infuse** | <DeviceGroup devices="iphone, ipad, mac, appletv, visionpro" /> | Apple App Store <span class="badge-official">Official App Store</span> | [Get on App Store &rarr;](https://apps.apple.com/app/infuse-7/id1136220934) |
-| **Vesper** | <DeviceGroup devices="iphone, ipad, mac, appletv, visionpro" /> | Apple TestFlight <span class="badge-testflight">TestFlight Beta</span> | [Join TestFlight Beta &rarr;](https://testflight.apple.com/join/mcCk473Y) |
+| **Infuse** | <DeviceGroup devices="iphone, ipad, mac, appletv, visionpro" /> | Apple App Store <span class="badge-official">Official</span> | [Get on App Store &rarr;](https://apps.apple.com/app/infuse-7/id1136220934) |
+| **Vesper** | <DeviceGroup devices="iphone, ipad, mac, appletv, visionpro" /> | Apple TestFlight <span class="badge-testflight">TestFlight</span> | [Join TestFlight &rarr;](https://testflight.apple.com/join/mcCk473Y) |
 
 > More players and platform integrations are in active development and will be added soon.
 

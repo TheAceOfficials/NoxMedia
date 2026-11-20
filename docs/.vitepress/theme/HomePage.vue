@@ -6,7 +6,7 @@
       <p class="hero-tagline">Designed for Your Media.</p>
 
       <div class="hero-actions">
-        <a href="/guide/getting-started" class="btn-primary">Get Started</a>
+        <a :href="withBase('/guide/getting-started')" class="btn-primary">Get Started</a>
         <a href="https://github.com/TheAceOfficials/NoxMedia/releases/latest" class="btn-secondary" target="_blank" rel="noopener">Download App</a>
         <a href="https://www.patreon.com/cw/TheAceOfficials" class="btn-tertiary" target="_blank" rel="noopener">Donation / Support</a>
       </div>
@@ -26,7 +26,7 @@
           <a 
             v-for="d in mobileDevices" 
             :key="d.name" 
-            href="/guide/getting-started#clients-compatibility" 
+            :href="withBase('/guide/getting-started#nuvio')" 
             class="device-item"
             :title="d.label"
           >
@@ -44,7 +44,7 @@
           <a 
             v-for="d in tvDevices" 
             :key="d.name" 
-            href="/guide/getting-started#clients-compatibility" 
+            :href="withBase('/guide/getting-started#nuvio')" 
             class="device-item"
             :title="d.label"
           >
@@ -62,7 +62,7 @@
           <a 
             v-for="d in desktopDevices" 
             :key="d.name" 
-            href="/guide/getting-started#clients-compatibility" 
+            :href="withBase('/guide/getting-started#nuvio')" 
             class="device-item"
             :title="d.label"
           >
@@ -96,6 +96,7 @@
 </template>
 
 <script setup>
+import { withBase } from 'vitepress'
 import DeviceIcon from './DeviceIcon.vue'
 
 // 1. Android Phone, Tablet, iPhone, iPad

@@ -21,7 +21,10 @@ export default {
         'cloud-sync': 0,
         'nuvio': 1,
         'jellyfin-bridge': 1,
-        'native-apps': 1
+        'native-apps': 1,
+        'platform-availability': 0,
+        'active-priorities': 0,
+        'completed-milestones': 0
       }
 
       let currentActiveSectionId = ''
@@ -29,6 +32,9 @@ export default {
       let scrollTicking = false
 
       const setupScrollSpyAndAccordion = () => {
+        currentActiveSectionId = ''
+        currentActiveGroupIndex = -1
+
         setTimeout(() => {
           const sections = Array.from(document.querySelectorAll<HTMLElement>('.doc-section[id]'))
           if (!sections || sections.length === 0) return

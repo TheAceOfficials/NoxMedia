@@ -68,19 +68,38 @@ export default defineConfig({
           collapsed: false,
           items: [
             { text: 'All Updates Overview', link: '/updates/' },
-            { text: 'v1.4.325 - Infuse Custom Shelves', link: '/updates/v1-4-325' },
-            { text: 'v1.4.320 - AI Catalog Curation', link: '/updates/v1-4-320' },
+            { text: 'v1.4.325 - Infuse Shelves', link: '/updates/v1-4-325' },
+            { text: 'v1.4.320 - AI Catalogs', link: '/updates/v1-4-320' },
             { text: 'v1.4.318 - Runtime Precision', link: '/updates/v1-4-318' }
+          ]
+        },
+        {
+          text: 'Project Resources',
+          collapsed: true,
+          items: [
+            { text: 'Documentation Guide', link: '/guide/getting-started' },
+            { text: 'Project Roadmap', link: '/roadmap' },
+            { text: 'Frequently Asked Questions', link: '/faq' }
           ]
         }
       ],
       '/roadmap': [
         {
-          text: 'Project Direction',
+          text: 'Project Roadmap',
           collapsed: false,
           items: [
-            { text: 'Roadmap & Priorities', link: '/roadmap' },
-            { text: 'Documentation', link: '/guide/getting-started' }
+            { text: 'Platform Overview', link: '/roadmap#platform-availability' },
+            { text: 'Active Priorities', link: '/roadmap#active-priorities' },
+            { text: 'Completed Milestones', link: '/roadmap#completed-milestones' }
+          ]
+        },
+        {
+          text: 'Project Resources',
+          collapsed: true,
+          items: [
+            { text: 'Documentation Guide', link: '/guide/getting-started' },
+            { text: 'Releases & Changelog', link: '/updates/' },
+            { text: 'Frequently Asked Questions', link: '/faq' }
           ]
         }
       ]

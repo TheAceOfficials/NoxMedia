@@ -4,6 +4,8 @@ This document outlines the development trajectory of NoxMedia, including complet
 
 ---
 
+<section class="doc-section" id="platform-availability">
+
 ## Platform Availability Overview
 
 | Platform / Client | Target Ecosystem | Status |
@@ -16,7 +18,11 @@ This document outlines the development trajectory of NoxMedia, including complet
 | **Linux Client & Server** | <DeviceGroup devices="linux" /> | Coming Soon |
 | **Stremio Direct Playback Bridge** | <DeviceGroup devices="android-phone, android-tv, windows, mac, linux" /> | In Progress |
 
+</section>
+
 ---
+
+<section class="doc-section" id="active-priorities">
 
 ## Active Development & Priorities
 
@@ -33,7 +39,11 @@ This document outlines the development trajectory of NoxMedia, including complet
 - **Status**: Planned
 - **Focus**: Distinct viewing profiles, separate watch histories, individual resume points, and isolated Telegram channel permissions across family members.
 
+</section>
+
 ---
+
+<section class="doc-section" id="completed-milestones">
 
 ## Completed Milestones
 
@@ -41,4 +51,6 @@ This document outlines the development trajectory of NoxMedia, including complet
 - **v1.4.320**: Semantic AI catalog curation using Google Gemini and OpenRouter LLM engines.
 - **v1.4.318**: Fallback runtime precision, anime multi-title sanitization, and 24/7 foreground standby reliability.
 - **v1.4.300**: Chaquopy Python MTProto bridge integration with zero-disk seeking and cloud backup synchronization.
+
+</section>
 
