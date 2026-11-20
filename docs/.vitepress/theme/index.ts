@@ -1,9 +1,14 @@
 import DefaultTheme from 'vitepress/theme'
 import './custom.css'
+import DeviceIcon from './DeviceIcon.vue'
+import DeviceGroup from './DeviceGroup.vue'
 
 export default {
   extends: DefaultTheme,
   enhanceApp({ app, router }) {
+    app.component('DeviceIcon', DeviceIcon)
+    app.component('DeviceGroup', DeviceGroup)
+
     if (typeof window !== 'undefined') {
       // Initialize focus sections observer after DOM updates
       const setupFocusObserver = () => {

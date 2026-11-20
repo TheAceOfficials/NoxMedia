@@ -8,14 +8,14 @@ This document outlines the development trajectory of NoxMedia, including complet
 
 | Platform / Client | Status | Connection Protocol | Target Ecosystem |
 | :--- | :--- | :--- | :--- |
-| **Infuse** | Available Now | Jellyfin Bridge (Direct Mode) | Apple TV, iOS, iPadOS, macOS, visionOS |
-| **Vesper** | Available Now | Jellyfin Bridge | macOS, iOS, iPadOS, tvOS |
-| **Nuvio** | Available Now | Stremio v3 Addon Protocol | Android, Windows, macOS, Web |
-| **Kodi / EmbyCon** | Available Now | Jellyfin / Emby Addon | Android TV, Google TV, Shield TV, Fire TV, PC |
-| **Android TV & Google TV Native App** | In Development | Native Android TV Interface | Android TV, Google TV, Chromecast, Shield TV |
-| **Windows Desktop Native Client** | Coming Soon | Embedded Core Runtime | Windows 10 / 11 (x64 & ARM64) |
-| **Linux Native Client / Server** | Coming Soon | Headless Daemon & CLI | Ubuntu, Debian, Arch, Docker |
-| **Stremio Integration Fix** | In Progress | Localhost HTTP Protocol Bridge | Windows, Android, macOS, Linux |
+| **Infuse** | Available Now | Jellyfin Bridge (Direct Mode) | <DeviceGroup devices="iphone, ipad, mac, appletv, visionpro" /> |
+| **Vesper** | Available Now | Jellyfin Bridge | <DeviceGroup devices="iphone, ipad, mac, appletv" /> |
+| **Nuvio** | Available Now | Stremio v3 Addon Protocol | <DeviceGroup devices="iphone, ipad, mac, tv" /> |
+| **Kodi / EmbyCon** | Available Now | Jellyfin / Emby Addon | <DeviceGroup devices="tv, mac" /> |
+| **Android TV & Google TV Native App** | In Development | Native Android TV Interface | <DeviceGroup devices="tv" /> |
+| **Windows Desktop Native Client** | Coming Soon | Embedded Core Runtime | <DeviceGroup devices="mac" /> |
+| **Linux Native Client / Server** | Coming Soon | Headless Daemon & CLI | <DeviceGroup devices="mac" /> |
+| **Stremio Integration Fix** | In Progress | Localhost HTTP Protocol Bridge | <DeviceGroup devices="iphone, ipad, mac, tv" /> |
 
 ---
 

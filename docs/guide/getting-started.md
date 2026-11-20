@@ -185,14 +185,41 @@ Install the Nuvio Android TV APK, add the manifest URL, and navigate catalogs us
 
 ## Platform Compatibility
 
-| Client / Platform | Supported Operating Systems | Connection Protocol | Status |
+<div class="supported-ecosystem-showcase">
+  <div class="device-showcase-item">
+    <DeviceIcon name="iphone" />
+    <span>iPhone</span>
+  </div>
+  <div class="device-showcase-item">
+    <DeviceIcon name="ipad" />
+    <span>iPad</span>
+  </div>
+  <div class="device-showcase-item">
+    <DeviceIcon name="mac" />
+    <span>Mac</span>
+  </div>
+  <div class="device-showcase-item">
+    <DeviceIcon name="appletv" />
+    <span>Apple TV 4K</span>
+  </div>
+  <div class="device-showcase-item">
+    <DeviceIcon name="visionpro" />
+    <span>Apple Vision Pro</span>
+  </div>
+  <div class="device-showcase-item">
+    <DeviceIcon name="tv" />
+    <span>TV / Monitor</span>
+  </div>
+</div>
+
+| Client / Platform | Supported Devices | Connection Protocol | Status |
 | :--- | :--- | :--- | :--- |
-| **Infuse** | Apple TV, iOS, iPadOS, macOS, visionOS | Jellyfin Bridge (Direct Mode) | Available Now |
-| **Vesper** | macOS, iOS, iPadOS, tvOS | Jellyfin Bridge | Available Now |
-| **Nuvio** | Android, Windows, macOS, Web | Stremio v3 Addon Protocol | Available Now |
-| **Kodi / EmbyCon** | Android TV, Shield TV, Fire TV, PC | Jellyfin / Emby Addon | Available Now |
-| **Native Android TV App** | Android TV, Google TV | Native D-Pad Player | Coming Soon |
-| **Windows Desktop Native** | Windows 10, 11 (x64 / ARM64) | Standalone Client | Coming Soon |
-| **Linux Client / Server** | Ubuntu, Debian, Arch | Standalone & Headless | Coming Soon |
+| **Infuse** | <DeviceGroup devices="iphone, ipad, mac, appletv, visionpro" /> | Jellyfin Bridge (Direct Mode) | Available Now |
+| **Vesper** | <DeviceGroup devices="iphone, ipad, mac, appletv" /> | Jellyfin Bridge | Available Now |
+| **Nuvio** | <DeviceGroup devices="iphone, ipad, mac, tv" /> | Stremio v3 Addon Protocol | Available Now |
+| **Kodi / EmbyCon** | <DeviceGroup devices="tv, mac" /> | Jellyfin / Emby Addon | Available Now |
+| **Native Android TV App** | <DeviceGroup devices="tv" /> | Native D-Pad Player | Coming Soon |
+| **Windows Desktop Native** | <DeviceGroup devices="mac" /> | Standalone Client | Coming Soon |
+| **Linux Client / Server** | <DeviceGroup devices="mac" /> | Standalone & Headless | Coming Soon |
 
 </section>

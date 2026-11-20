@@ -500,3 +500,53 @@ html:not(.dark) .home-bottom-bar {
   border-radius: 9999px;
   border: 1px solid rgba(168, 85, 247, 0.2);
 }
+
+/* ==========================================================================
+   Supported Devices & Ecosystem Showcase
+   ========================================================================== */
+
+.supported-ecosystem-showcase {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  flex-wrap: wrap;
+  padding: 1.5rem;
+  margin: 1.5rem 0;
+  background: radial-gradient(circle at 50% 50%, rgba(168, 85, 247, 0.06), transparent 75%), rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 16px;
+}
+
+html:not(.dark) .supported-ecosystem-showcase {
+  background: rgba(0, 0, 0, 0.02);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.device-showcase-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: #94a3b8;
+  transition: color 0.2s ease, transform 0.2s ease;
+  min-width: 80px;
+}
+
+.device-showcase-item:hover {
+  color: #a855f7;
+  transform: translateY(-2px);
+}
+
+.device-showcase-item svg {
+  width: 26px;
+  height: 26px;
+}
+
+.device-showcase-item span {
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: inherit;
+}
+
