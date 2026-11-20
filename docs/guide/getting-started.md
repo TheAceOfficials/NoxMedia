@@ -115,111 +115,83 @@ NoxMedia unifies playback state across your living room and mobile screens.
 
 </section>
 
-<section class="doc-section" id="infuse-vesper">
+<section class="doc-section" id="nuvio">
 
-## Infuse & Vesper Setup (Apple Ecosystem)
+## NoxMedia - Nuvio
 
-NoxMedia emulates a Jellyfin server bridge, providing deep native integration with both [Firecore Infuse](https://firecore.com/infuse) and [Vesper](https://watchvesper.app).
+NoxMedia provides seamless streaming through the official Stremio Addon v3 Protocol, designed for [Nuvio](https://github.com/nuvio-app).
+
+### Setup Instructions
+1. Open NoxMedia on your host Android device and verify the server is running.
+2. Note your local manifest endpoint:
+   ```http
+   http://<YOUR_HOST_IP>:8096/manifest.json
+   ```
+3. Open Nuvio on your phone, television, or computer.
+4. Navigate to **Settings** -> **Providers & Addons** -> **Add Custom Provider**.
+5. Paste your manifest URL and tap **Connect**. Your library and AI custom shelves will populate immediately.
+
+> [!NOTE]
+> Direct playback in Stremio is temporarily on hold while we resolve an issue related to Stremio's handling of localhost HTTP streaming URLs on Android. In the interim, **Nuvio** is the officially recommended client.
+
+### Nuvio Supported Platforms & Downloads
+
+| Platform / Environment | Distribution | Download Link |
+| :--- | :--- | :--- |
+| **Android Phone, Tablet & TV** <br><DeviceGroup devices="iphone, ipad, tv" /> | Google Play Store <span class="badge-official">Official Store</span> | [Get on Google Play &rarr;](https://play.google.com/store/apps/details?id=com.nuvio.app) |
+| **Android Mobile APK** <br><DeviceGroup devices="iphone" /> | GitHub Releases <span class="badge-sideload">Sideloading</span> | [Download Mobile APK &rarr;](https://github.com/NuvioMedia/NuvioMobile/releases) |
+| **Android TV & Google TV APK** <br><DeviceGroup devices="tv" /> | GitHub Releases <span class="badge-sideload">Sideloading</span> | [Download TV APK &rarr;](https://github.com/NuvioMedia/NuvioTV/releases) |
+| **Desktop (Windows, Linux, macOS)** <br><DeviceGroup devices="mac" /> | GitHub Releases <span class="badge-official">Standalone App</span> | [Download Desktop &rarr;](https://github.com/NuvioMedia/NuvioDesktop/releases) |
+| **Smart TV Packages (Tizen, webOS)** <br><DeviceGroup devices="tv" /> | GitHub Releases <span class="badge-sideload">Sideloading</span> | [Download Smart TV Packages &rarr;](https://github.com/NuvioMedia/NuvioTVSmart/releases) |
+| **iPhone & iPad (Enhanced)** <br><DeviceGroup devices="iphone, ipad" /> | GitHub Releases <span class="badge-sideload">Sideloading</span> | [Download iOS IPA &rarr;](https://github.com/luqmanfadlli/NuvioMobile-Enhanced/releases) |
+| **Apple TV (tvOS)** <br><DeviceGroup devices="appletv" /> | GitHub Releases <span class="badge-sideload">Sideloading</span> | [Download tvOS Package &rarr;](https://github.com/bobsupra/NuvioTVOS) |
+
+</section>
+
+<section class="doc-section" id="jellyfin-bridge">
+
+## NoxMedia - Jellyfin Bridge (Apple Ecosystem)
+
+NoxMedia integrates directly with [Firecore Infuse](https://firecore.com/infuse) and [Vesper](https://watchvesper.app) through an emulated Jellyfin bridge, offering full DirectPlay capabilities, 4K HDR10, Dolby Vision, and Spatial Audio.
 
 ### Connection Parameters
 - **Protocol**: `Jellyfin`
-- **Host**: Your host IP (e.g., `192.168.1.15`)
+- **Host**: Your device IP (e.g., `192.168.1.15`)
 - **Port**: `8096`
 - **Username**: `NoxMedia`
 - **Password**: *(leave blank)*
-
-### Infuse Direct Mode Recommendation
 
 > [!IMPORTANT]
 > **Use Direct Mode in Infuse.**
 > Browse media via the **Files** tab. Avoid enabling full background library crawling under Infuse Settings -> Library. Direct Mode queries metadata on-demand with zero-latency response times.
 
 ### Pinned Home Screen Favorites
-1. Open the **Files** tab in Infuse and select your NoxMedia server.
+1. Open the **Files** tab in Infuse or server view in Vesper and select your NoxMedia server.
 2. Locate any custom shelf (e.g., *Murder Mystery Dark*).
 3. Long-press or click the **Star** icon to favorite.
 4. The shelf will appear as a dedicated horizontal row on your Apple TV or iOS Home Screen.
 
-</section>
+### Jellyfin Compatible Players
 
-<section class="doc-section" id="nuvio">
-
-## Nuvio Streaming
-
-NoxMedia exposes an Addon v3 manifest for [Nuvio](https://github.com/nuvio-app).
-
-### Manifest URL
-```http
-http://<YOUR_HOST_IP>:8096/manifest.json
-```
-
-### Setup Steps
-1. Open Nuvio on Android, Windows, macOS, or Web.
-2. Navigate to **Settings** -> **Providers & Addons** -> **Add Custom Provider**.
-3. Paste your manifest URL and click **Connect**.
-4. Your Telegram library and custom shelves will populate the home feed.
-
-### Notice on Stremio Support
-
-> [!NOTE]
-> Direct playback in Stremio is temporarily on hold while we resolve an issue related to Stremio's handling of localhost HTTP streaming URLs on Android. In the interim, **Nuvio** is the officially recommended client.
-
-</section>
-
-<section class="doc-section" id="android-tv-kodi">
-
-## Android TV & Kodi Guide
-
-### Method 1: Nuvio for Android TV
-Install the Nuvio Android TV APK, add the manifest URL, and navigate catalogs using standard remote controls.
-
-### Method 2: Kodi Jellyfin Addon
-1. Install the official **Jellyfin for Kodi** addon.
-2. Point server address to `http://<YOUR_IP>:8096`.
-3. Select **Add-on (HTTP Stream)** mode.
-4. Browse structured libraries and custom shelves directly from Kodi.
-
-</section>
-
-<section class="doc-section" id="platforms">
-
-## Platform Compatibility
-
-<div class="supported-ecosystem-showcase">
-  <div class="device-showcase-item">
-    <DeviceIcon name="iphone" />
-    <span>iPhone</span>
-  </div>
-  <div class="device-showcase-item">
-    <DeviceIcon name="ipad" />
-    <span>iPad</span>
-  </div>
-  <div class="device-showcase-item">
-    <DeviceIcon name="mac" />
-    <span>Mac</span>
-  </div>
-  <div class="device-showcase-item">
-    <DeviceIcon name="appletv" />
-    <span>Apple TV 4K</span>
-  </div>
-  <div class="device-showcase-item">
-    <DeviceIcon name="visionpro" />
-    <span>Apple Vision Pro</span>
-  </div>
-  <div class="device-showcase-item">
-    <DeviceIcon name="tv" />
-    <span>TV / Monitor</span>
-  </div>
-</div>
-
-| Client / Platform | Supported Devices | Connection Protocol | Status |
+| Player | Supported Devices | Distribution | Download Link |
 | :--- | :--- | :--- | :--- |
-| **Infuse** | <DeviceGroup devices="iphone, ipad, mac, appletv, visionpro" /> | Jellyfin Bridge (Direct Mode) | Available Now |
-| **Vesper** | <DeviceGroup devices="iphone, ipad, mac, appletv" /> | Jellyfin Bridge | Available Now |
-| **Nuvio** | <DeviceGroup devices="iphone, ipad, mac, tv" /> | Stremio v3 Addon Protocol | Available Now |
-| **Kodi / EmbyCon** | <DeviceGroup devices="tv, mac" /> | Jellyfin / Emby Addon | Available Now |
-| **Native Android TV App** | <DeviceGroup devices="tv" /> | Native D-Pad Player | Coming Soon |
-| **Windows Desktop Native** | <DeviceGroup devices="mac" /> | Standalone Client | Coming Soon |
-| **Linux Client / Server** | <DeviceGroup devices="mac" /> | Standalone & Headless | Coming Soon |
+| **Infuse** | <DeviceGroup devices="iphone, ipad, mac, appletv, visionpro" /> | Apple App Store <span class="badge-official">Official App Store</span> | [Get on App Store &rarr;](https://apps.apple.com/app/infuse-7/id1136220934) |
+| **Vesper** | <DeviceGroup devices="iphone, ipad, mac, appletv, visionpro" /> | Apple TestFlight <span class="badge-testflight">TestFlight Beta</span> | [Join TestFlight Beta &rarr;](https://testflight.apple.com/join/mcCk473Y) |
+
+> More players and platform integrations are in active development and will be added soon.
+
+</section>
+
+<section class="doc-section" id="native-apps">
+
+## NoxMedia Native Apps (Coming Soon)
+
+We are actively developing standalone, first-party NoxMedia client applications tailored for specific hardware ecosystems:
+
+| Application | Target Ecosystem | Focus & Highlights | Status |
+| :--- | :--- | :--- | :--- |
+| **Native Android TV & Google TV** | <DeviceGroup devices="tv" /> | 10-foot D-Pad interface, hardware ExoPlayer acceleration, home screen channels | Coming Soon |
+| **Windows Desktop Native** | <DeviceGroup devices="mac" /> | Standalone desktop application with embedded core runtime | Coming Soon |
+| **Linux Desktop & Headless** | <DeviceGroup devices="mac" /> | Dedicated GUI media client and headless background server daemon | Coming Soon |
 
 </section>

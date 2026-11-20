@@ -550,3 +550,59 @@ html:not(.dark) .supported-ecosystem-showcase {
   color: inherit;
 }
 
+/* Distribution & Sideloading Badges */
+.badge-sideload {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.7rem;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: 4px;
+  color: #fb923c;
+  background: rgba(251, 146, 60, 0.1);
+  border: 1px solid rgba(251, 146, 60, 0.25);
+  margin-left: 6px;
+}
+
+.badge-official {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.7rem;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: 4px;
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.1);
+  border: 1px solid rgba(52, 211, 153, 0.25);
+  margin-left: 6px;
+}
+
+.badge-testflight {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.7rem;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: 4px;
+  color: #60a5fa;
+  background: rgba(96, 165, 250, 0.1);
+  border: 1px solid rgba(96, 165, 250, 0.25);
+  margin-left: 6px;
+}
+
+.table-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #c084fc !important;
+  font-weight: 500;
+  text-decoration: none !important;
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+
+.table-link:hover {
+  color: #e9d5ff !important;
+  transform: translateX(2px);
+}
+
+

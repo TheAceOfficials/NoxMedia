@@ -44,13 +44,12 @@ export default defineConfig({
           ]
         },
         {
-          text: 'Client Setup',
+          text: 'Client Platforms & Setup',
           collapsed: false,
           items: [
-            { text: 'Infuse & Vesper (Apple)', link: '/guide/getting-started#infuse-vesper' },
-            { text: 'Nuvio Streaming', link: '/guide/getting-started#nuvio' },
-            { text: 'Android TV & Kodi', link: '/guide/getting-started#android-tv-kodi' },
-            { text: 'Platform Compatibility', link: '/guide/getting-started#platforms' }
+            { text: 'NoxMedia - Nuvio', link: '/guide/getting-started#nuvio' },
+            { text: 'NoxMedia - Jellyfin (Apple)', link: '/guide/getting-started#jellyfin-bridge' },
+            { text: 'Native Apps (Coming Soon)', link: '/guide/getting-started#native-apps' }
           ]
         },
         {

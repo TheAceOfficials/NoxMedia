@@ -78,3 +78,4 @@ const label = computed(() => labelMap[props.name] || props.name)
   letter-spacing: -0.01em;
 }
 </style>
+
