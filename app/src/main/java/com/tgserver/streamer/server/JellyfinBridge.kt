@@ -112,6 +112,10 @@ class JellyfinBridge(
         return raw32
     }
 
+    private fun formatId(id: String, isReefin: Boolean): String {
+        return if (isReefin) formatGuid(id) else id
+    }
+
     private fun isSeasonRawId(raw: String): Boolean =
         raw.startsWith("series_") && seasonSuffixRegex.containsMatchIn(raw)
 
@@ -380,19 +384,23 @@ class JellyfinBridge(
             imageTags["Logo"] = show.seriesHexId
         }
 
+        val sid = formatId(serverId, isReefin)
+        val sId = formatId(show.seriesHexId, isReefin)
+        val pId = formatId(parentLibHex, isReefin)
+
         return mapOf(
             "Name" to show.title,
             "OriginalTitle" to show.title,
             "SortName" to show.title,
             "ForcedSortName" to show.title,
-            "ServerId" to serverId,
-            "Id" to show.seriesHexId,
-            "ParentId" to parentLibHex,
+            "ServerId" to sid,
+            "Id" to sId,
+            "ParentId" to pId,
             "Type" to "Series",
             "IsFolder" to true,
             "Status" to "Continuing",
             "AirDays" to listOf("Monday"),
-            "DisplayPreferencesId" to show.seriesHexId,
+            "DisplayPreferencesId" to sId,
             "ProductionYear" to yearInt,
             "PremiereDate" to "${yearInt}-01-01T00:00:00.0000000Z",
             "Overview" to (firstEp?.overview ?: ""),
@@ -403,11 +411,11 @@ class JellyfinBridge(
             "EpisodeCount" to epCount,
             "RecursiveItemCount" to epCount,
             "PrimaryImageAspectRatio" to 0.6666667,
-            "SeriesPrimaryImageTag" to show.seriesHexId,
-            "ParentLogoItemId" to show.seriesHexId,
-            "ParentBackdropItemId" to show.seriesHexId,
-            "ParentBackdropImageTags" to listOf(show.seriesHexId),
-            "BackdropImageTags" to listOf(show.seriesHexId),
+            "SeriesPrimaryImageTag" to sId,
+            "ParentLogoItemId" to sId,
+            "ParentBackdropItemId" to sId,
+            "ParentBackdropImageTags" to listOf(sId),
+            "BackdropImageTags" to listOf(sId),
             "ImageTags" to imageTags,
             "ProviderIds" to providerIds,
             "CanDelete" to false,
@@ -433,15 +441,19 @@ class JellyfinBridge(
         isReefin: Boolean = false
     ): Map<String, Any?> {
         val epCount = season.episodes.size
+        val sid = formatId(serverId, isReefin)
+        val seaId = formatId(season.seasonHexId, isReefin)
+        val serId = formatId(season.seriesHexId, isReefin)
+
         return mapOf(
             "Name" to "Season ${season.seasonNumber}",
             "SeasonName" to "Season ${season.seasonNumber}",
             "SortName" to "Season ${season.seasonNumber}",
             "ForcedSortName" to "Season ${season.seasonNumber}",
-            "ServerId" to serverId,
-            "Id" to season.seasonHexId,
-            "ParentId" to season.seriesHexId,
-            "SeriesId" to season.seriesHexId,
+            "ServerId" to sid,
+            "Id" to seaId,
+            "ParentId" to serId,
+            "SeriesId" to serId,
             "SeriesName" to season.seriesTitle,
             "IndexNumber" to season.seasonNumber,
             "Type" to "Season",
@@ -449,12 +461,12 @@ class JellyfinBridge(
             "ChildCount" to epCount,
             "RecursiveItemCount" to epCount,
             "PrimaryImageAspectRatio" to 0.6666667,
-            "SeriesPrimaryImageTag" to season.seriesHexId,
-            "ParentLogoItemId" to season.seriesHexId,
-            "ParentLogoImageTag" to season.seriesHexId,
-            "ParentBackdropItemId" to season.seriesHexId,
-            "ParentBackdropImageTags" to listOf(season.seriesHexId),
-            "BackdropImageTags" to listOf(season.seriesHexId),
+            "SeriesPrimaryImageTag" to serId,
+            "ParentLogoItemId" to serId,
+            "ParentLogoImageTag" to serId,
+            "ParentBackdropItemId" to serId,
+            "ParentBackdropImageTags" to listOf(serId),
+            "BackdropImageTags" to listOf(serId),
             "ImageTags" to mapOf("Primary" to season.seriesHexId, "Thumb" to season.seriesHexId),
             "CanDelete" to false,
             "CanDownload" to false,
@@ -502,27 +514,32 @@ class JellyfinBridge(
         item.tmdbId?.takeIf { it > 0 }?.let { providerIds["Tmdb"] = it.toString() }
         item.kitsuId?.takeIf { it > 0 }?.let { providerIds["Kitsu"] = it.toString() }
 
+        val sid = formatId(serverId, isReefin)
+        val epId = formatId(hexId, isReefin)
+        val seaId = formatId(seasonIndex.seasonHexId, isReefin)
+        val serId = formatId(show.seriesHexId, isReefin)
+
         val map = mutableMapOf<String, Any?>(
             "Name" to displayName,
             "SortName" to displayName,
             "ForcedSortName" to displayName,
-            "ServerId" to serverId,
-            "Id" to hexId,
-            "ParentId" to seasonIndex.seasonHexId,
+            "ServerId" to sid,
+            "Id" to epId,
+            "ParentId" to seaId,
             "Type" to "Episode",
             "MediaType" to "Video",
             "IsFolder" to false,
             "IndexNumber" to epNum,
             "ParentIndexNumber" to sNum,
-            "SeriesId" to show.seriesHexId,
+            "SeriesId" to serId,
             "SeriesName" to show.title,
-            "SeasonId" to seasonIndex.seasonHexId,
+            "SeasonId" to seaId,
             "SeasonName" to "Season $sNum",
-            "SeriesPrimaryImageTag" to show.seriesHexId,
-            "SeasonPrimaryImageTag" to seasonIndex.seasonHexId,
-            "ParentBackdropItemId" to show.seriesHexId,
-            "ParentBackdropImageTags" to listOf(show.seriesHexId),
-            "BackdropImageTags" to listOf(show.seriesHexId),
+            "SeriesPrimaryImageTag" to serId,
+            "SeasonPrimaryImageTag" to seaId,
+            "ParentBackdropItemId" to serId,
+            "ParentBackdropImageTags" to listOf(serId),
+            "BackdropImageTags" to listOf(serId),
             "PrimaryImageAspectRatio" to 1.7777778,
             "Container" to ext,
             "LocationType" to if (isReefin) "Remote" else "FileSystem",
@@ -1317,11 +1334,16 @@ class JellyfinBridge(
         val seriesCount = all.filter { isSeries(it) }.distinctBy { it.title.lowercase().trim() }.size
         val animeCount = all.filter { isAnime(it) }.distinctBy { it.title.lowercase().trim() }.size
 
+        val sid = formatId(serverId, isReefin)
+        val mId = formatId(libMoviesHex, isReefin)
+        val sId = formatId(libSeriesHex, isReefin)
+        val aId = formatId(libAnimeHex, isReefin)
+
         val views = mutableListOf(
             mapOf(
                 "Name" to "Movies",
-                "ServerId" to serverId,
-                "Id" to libMoviesHex,
+                "ServerId" to sid,
+                "Id" to mId,
                 "CollectionType" to "movies",
                 "Type" to "CollectionFolder",
                 "IsFolder" to true,
@@ -1339,8 +1361,8 @@ class JellyfinBridge(
             ),
             mapOf(
                 "Name" to "TV Shows",
-                "ServerId" to serverId,
-                "Id" to libSeriesHex,
+                "ServerId" to sid,
+                "Id" to sId,
                 "CollectionType" to "tvshows",
                 "Type" to "CollectionFolder",
                 "IsFolder" to true,
@@ -1358,8 +1380,8 @@ class JellyfinBridge(
             ),
             mapOf(
                 "Name" to "Anime",
-                "ServerId" to serverId,
-                "Id" to libAnimeHex,
+                "ServerId" to sid,
+                "Id" to aId,
                 "CollectionType" to "tvshows",
                 "Type" to "CollectionFolder",
                 "IsFolder" to true,
@@ -1381,12 +1403,13 @@ class JellyfinBridge(
             val customCats = catalogRepo.getCatalogs().filter { !it.isHidden }
             for (cat in customCats) {
                 val catHex = toHexId("cat_${cat.id}")
+                val catId = formatId(catHex, isReefin)
                 val colType = if (cat.filter.mediaType == "series") "tvshows" else "movies"
                 views.add(
                     mapOf(
                         "Name" to cat.name,
-                        "ServerId" to serverId,
-                        "Id" to catHex,
+                        "ServerId" to sid,
+                        "Id" to catId,
                         "CollectionType" to colType,
                         "Type" to "CollectionFolder",
                         "IsFolder" to true,
@@ -2659,11 +2682,14 @@ class JellyfinBridge(
             "Art" to hexId
         )
 
+        val sid = formatId(serverId, isReefin)
+        val itemId = formatId(hexId, isReefin)
+
         val map = mutableMapOf<String, Any?>(
             "Name" to displayName,
             "OriginalTitle" to item.title,
-            "ServerId" to serverId,
-            "Id" to hexId,
+            "ServerId" to sid,
+            "Id" to itemId,
             "Overview" to (item.overview ?: "${item.qualityBadge} • ${item.formattedSize}"),
             "ProductionYear" to yearInt,
             "CommunityRating" to (if (item.rating > 0) item.rating else 8.0),
@@ -2728,21 +2754,23 @@ class JellyfinBridge(
             val seasonRawId = "${seriesRawId}_s$sNum"
             val seriesHex = toHexId(seriesRawId)
             val seasonHex = toHexId(seasonRawId)
+            val serId = formatId(seriesHex, isReefin)
+            val seaId = formatId(seasonHex, isReefin)
             map["Type"] = "Episode"
             map["IsFolder"] = false
             map["IndexNumber"] = epNum
             map["ParentIndexNumber"] = sNum
             map["SeriesName"] = item.title
-            map["SeriesId"] = seriesHex
-            map["SeasonId"] = seasonHex
+            map["SeriesId"] = serId
+            map["SeasonId"] = seaId
             map["SeasonName"] = "Season $sNum"
-            map["SeriesPrimaryImageTag"] = seriesHex
-            map["SeasonPrimaryImageTag"] = seriesHex
-            map["ParentLogoItemId"] = seriesHex
-            map["ParentLogoImageTag"] = seriesHex
-            map["ParentBackdropItemId"] = seriesHex
-            map["ParentBackdropImageTags"] = listOf(seriesHex)
-            map["BackdropImageTags"] = listOf(seriesHex)
+            map["SeriesPrimaryImageTag"] = serId
+            map["SeasonPrimaryImageTag"] = seaId
+            map["ParentLogoItemId"] = serId
+            map["ParentLogoImageTag"] = serId
+            map["ParentBackdropItemId"] = serId
+            map["ParentBackdropImageTags"] = listOf(serId)
+            map["BackdropImageTags"] = listOf(serId)
             map["ImageTags"] = mapOf("Primary" to hexId, "Thumb" to hexId)
         } else {
             map["Type"] = "Movie"
