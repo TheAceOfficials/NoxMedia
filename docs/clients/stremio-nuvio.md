@@ -22,17 +22,17 @@ NoxMedia implements the official Addon v3 Protocol for modern streaming clients,
 With the NoxMedia server active on your host device, your manifest endpoint is:
 
 ```http
-http://<YOUR_SERVER_IP>:8096/manifest.json
+http://<YOUR_SERVER_IP>:7788/manifest.json
 ```
 
-*(For example: `http://192.168.1.15:8096/manifest.json` or `http://127.0.0.1:8096/manifest.json` if running locally on the same device).*
+*(For example: `http://192.168.1.15:7788/manifest.json` or `http://127.0.0.1:7788/manifest.json` if running locally on the same device).*
 
 ### 2. Add Provider in Nuvio
 1. Open **Nuvio** on your Android, Windows, Mac, or Web client.
 2. Navigate to **Settings** -> **Providers & Addons** -> **Add Custom Provider**.
 3. Paste your full manifest URL:
    ```
-   http://192.168.1.15:8096/manifest.json
+   http://192.168.1.15:7788/manifest.json
    ```
 4. Click **Connect / Install**.
 5. Your Telegram libraries and AI custom shelves will populate the home feed immediately.

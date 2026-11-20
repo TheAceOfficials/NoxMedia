@@ -51,7 +51,7 @@ NoxMedia interfaces directly with Telegram's content delivery network through a 
 ### Step 3: Start Server
 1. From the home screen, switch the **Server Toggle** to ON.
 2. Grant requested background battery exemptions so Android does not suspend server operations.
-3. Note your displayed local address (e.g., `http://192.168.1.15:8096`).
+3. Note your displayed local address (e.g., `http://192.168.1.15:7788`).
 
 </section>
 
@@ -125,7 +125,7 @@ NoxMedia provides seamless streaming through the official Stremio Addon v3 Proto
 1. Open NoxMedia on your host Android device and verify the server is running.
 2. Note your local manifest endpoint:
    ```http
-   http://<YOUR_HOST_IP>:8096/manifest.json
+   http://<YOUR_HOST_IP>:7788/manifest.json
    ```
 3. Open Nuvio on your phone, television, or computer.
 4. Navigate to **Settings** -> **Providers & Addons** -> **Add Custom Provider**.
@@ -157,7 +157,7 @@ NoxMedia integrates directly with [Firecore Infuse](https://firecore.com/infuse)
 ### Connection Parameters
 - **Protocol**: `Jellyfin`
 - **Host**: Your device IP (e.g., `192.168.1.15`)
-- **Port**: `8096`
+- **Port**: `7788`
 - **Username**: `NoxMedia`
 - **Password**: *(leave blank)*
 

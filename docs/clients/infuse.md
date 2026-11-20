@@ -20,7 +20,7 @@ Through NoxMedia's **Emulated Jellyfin Bridge**, both players receive full Direc
 ### 1. Identify Server IP
 1. Open NoxMedia on your Android host device.
 2. Ensure the server toggle is active.
-3. Note the local address displayed on the dashboard (e.g., `http://192.168.1.15:8096`).
+3. Note the local address displayed on the dashboard (e.g., `http://192.168.1.15:7788`).
 
 ### 2. Connect in Infuse
 1. Open **Infuse** on your Apple TV, iPhone, iPad, or Mac.
@@ -29,7 +29,7 @@ Through NoxMedia's **Emulated Jellyfin Bridge**, both players receive full Direc
 4. Enter the connection parameters:
    - **Protocol**: `Jellyfin` (or `Emby`)
    - **Address**: `192.168.1.15` *(enter your device's actual IP)*
-   - **Port**: `8096`
+   - **Port**: `7788`
    - **Username**: `NoxMedia` *(or any username)*
    - **Password**: *(leave blank)*
 5. Tap **Save**. Infuse will connect to your server immediately.
@@ -58,7 +58,7 @@ Through NoxMedia's **Emulated Jellyfin Bridge**, both players receive full Direc
 2. Go to **Settings** -> **Servers** -> **Add Server**.
 3. Select **Jellyfin**.
 4. Enter your host server details:
-   - **Server URL**: `http://192.168.1.15:8096`
+   - **Server URL**: `http://192.168.1.15:7788`
    - **Username**: `NoxMedia`
    - **Password**: *(leave blank)*
 5. Confirm the connection. Vesper will synchronize your libraries and display posters, episode layouts, and custom shelves.

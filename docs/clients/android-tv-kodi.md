@@ -17,14 +17,14 @@ NoxMedia can serve media to any Android TV, Google TV, NVIDIA Shield, Fire TV, o
 You can stream to your television through the following methods:
 
 ### Method 1: Nuvio for Android TV
-Install Nuvio on your Android TV or Google TV box, add the NoxMedia manifest URL (`http://<YOUR_IP>:8096/manifest.json`), and browse with remote control navigation.
+Install Nuvio on your Android TV or Google TV box, add the NoxMedia manifest URL (`http://<YOUR_IP>:7788/manifest.json`), and browse with remote control navigation.
 
 ### Method 2: Kodi via Jellyfin Addon
 1. Open Kodi on your TV device.
 2. Install the **Jellyfin for Kodi** addon from the official Kodi / Jellyfin repository.
 3. Enter your server connection:
    ```
-   http://192.168.1.15:8096
+   http://192.168.1.15:7788
    ```
 4. Choose **Add-on (HTTP Stream)** mode for live cloud streaming.
 5. Enter `NoxMedia` as the username and leave the password blank.

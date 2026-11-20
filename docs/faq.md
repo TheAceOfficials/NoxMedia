@@ -16,9 +16,9 @@ Find answers to common questions regarding NoxMedia setup, streaming protocols, 
 
 ### Can I stream outside my home Wi-Fi network?
 **Yes.** There are multiple supported methods to access your server remotely:
-1. **Tailscale / WireGuard (Recommended)**: Install Tailscale on your host device and your remote device (iPhone, laptop). You obtain a secure private mesh IP (e.g., `http://100.x.y.z:8096`).
-2. **Cloudflare Tunnels**: Route port 8096 through a Cloudflare tunnel to your personal domain.
-3. **Router Port Forwarding**: Forward external port `8096` to your host device's local IP address in router administration.
+1. **Tailscale / WireGuard (Recommended)**: Install Tailscale on your host device and your remote device (iPhone, laptop). You obtain a secure private mesh IP (e.g., `http://100.x.y.z:7788`).
+2. **Cloudflare Tunnels**: Route port 7788 through a Cloudflare tunnel to your personal domain.
+3. **Router Port Forwarding**: Forward external port `7788` to your host device's local IP address in router administration.
 
 ---
 
@@ -29,7 +29,7 @@ Because Telegram channels often contain thousands of files, Infuse's recursive l
 ---
 
 ### Does NoxMedia work with Vesper?
-**Yes.** Vesper connects seamlessly using the Jellyfin server protocol (`http://<HOST_IP>:8096`), offering high-speed playback across macOS, iOS, iPadOS, and tvOS.
+**Yes.** Vesper connects seamlessly using the Jellyfin server protocol (`http://<HOST_IP>:7788`), offering high-speed playback across macOS, iOS, iPadOS, and tvOS.
 
 ---
 
