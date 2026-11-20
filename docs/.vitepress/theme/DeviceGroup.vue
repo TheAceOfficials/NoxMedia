@@ -55,17 +55,19 @@ const getLabel = (name) => labelMap[name] || name
 .device-group-container {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  padding: 5px 12px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 9999px;
+  gap: 8px;
+  padding: 2px 0;
+  margin-top: 3px;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
   vertical-align: middle;
 }
 
 html:not(.dark) .device-group-container {
-  background: rgba(0, 0, 0, 0.03);
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: transparent !important;
+  border: none !important;
 }
 
 .device-item {
