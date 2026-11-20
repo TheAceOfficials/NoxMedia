@@ -48,7 +48,7 @@ export default defineConfig({
           collapsed: true,
           items: [
             { text: 'NoxMedia - Nuvio', link: '/guide/getting-started#nuvio' },
-            { text: 'NoxMedia - Jellyfin Bridge', link: '/guide/getting-started#jellyfin-bridge' },
+            { text: 'NoxMedia - Jellyfin (Apple)', link: '/guide/getting-started#jellyfin-bridge' },
             { text: 'Native Apps (Coming Soon)', link: '/guide/getting-started#native-apps' }
           ]
         },

@@ -1698,7 +1698,7 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                 val loginPickerUrl = "http://$localIp:$effectivePort/jellyfin/login"
 
                 Text(
-                    text = "Transform your server into an isolated Jellyfin & Emby endpoint for third-party player apps like Infuse, Reefin, Swiftfin, Findroid, Streamyfin, Kodi, and Jellyfin TV.",
+                    text = "Transform your server into an isolated Jellyfin & Emby endpoint for third-party player apps like Infuse, Swiftfin, Findroid, Streamyfin, Kodi, and Jellyfin TV.",
                     color = TextSecondary,
                     fontSize = 12.sp,
                     lineHeight = 17.sp
@@ -2200,7 +2200,6 @@ fun SettingsScreen(viewModel: MainAppViewModel) {
                     ) {
                         listOf(
                             "Infuse (Apple TV / iOS)",
-                            "Reefin (Android / Android TV)",
                             "Swiftfin",
                             "Findroid",
                             "Streamyfin",
