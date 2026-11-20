@@ -21,14 +21,10 @@
       <line x1="10" y1="16.2" x2="14" y2="16.2" />
     </svg>
 
-    <!-- Apple TV (TV Screen in background + Apple TV Puck & Siri Remote in foreground) -->
-    <svg v-else-if="name === 'appletv'" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M12 16.5h8.5a2 2 0 0 0 2-2V4.5a2 2 0 0 0-2-2H3.5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h2" />
-      <rect x="2" y="12" width="8" height="8" rx="2" stroke-width="1.6" />
-      <circle cx="6" cy="16" r="0.75" fill="currentColor" stroke="none" />
-      <rect x="11.5" y="10.5" width="5.5" height="11" rx="2.75" stroke-width="1.6" />
-      <circle cx="14.25" cy="13.5" r="1.1" stroke-width="1.1" />
-      <circle cx="14.25" cy="17.5" r="0.6" fill="currentColor" stroke="none" />
+    <!-- Apple TV (Clean minimalist display silhouette with floating pill stand) -->
+    <svg v-else-if="name === 'appletv'" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2.5" y="3.5" width="19" height="13.5" rx="3" ry="3" />
+      <line x1="7.5" y1="20.2" x2="16.5" y2="20.2" stroke-width="2.2" />
     </svg>
 
     <!-- Apple Vision Pro -->
@@ -61,7 +57,6 @@
     <svg v-else-if="name === 'android-phone'" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
       <rect x="6" y="2" width="12" height="20" rx="3" ry="3" />
       <circle cx="12" cy="5" r="0.8" fill="currentColor" stroke="none" />
-      <line x1="10" y1="19.2" x2="14" y2="19.2" stroke-width="1.4" />
       <line x1="18.8" y1="7" x2="18.8" y2="9.5" stroke-width="1.5" />
       <line x1="18.8" y1="11" x2="18.8" y2="14" stroke-width="1.5" />
     </svg>
@@ -70,7 +65,6 @@
     <svg v-else-if="name === 'android-tablet'" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
       <rect x="3.5" y="2.5" width="17" height="19" rx="2.5" ry="2.5" />
       <circle cx="12" cy="4.8" r="0.75" fill="currentColor" stroke="none" />
-      <line x1="9.5" y1="19" x2="14.5" y2="19" stroke-width="1.4" />
       <line x1="21.2" y1="6" x2="21.2" y2="9" stroke-width="1.5" />
     </svg>
 
