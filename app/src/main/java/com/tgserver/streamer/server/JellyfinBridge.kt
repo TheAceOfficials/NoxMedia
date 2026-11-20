@@ -104,6 +104,14 @@ class JellyfinBridge(
     // Known Reefin client IPs (cached across active connections)
     private val reefinClientIps = ConcurrentHashMap.newKeySet<String>()
 
+    private fun formatGuid(raw32: String): String {
+        val clean = raw32.replace("-", "").trim()
+        if (clean.length == 32) {
+            return "${clean.substring(0, 8)}-${clean.substring(8, 12)}-${clean.substring(12, 16)}-${clean.substring(16, 20)}-${clean.substring(20, 32)}"
+        }
+        return raw32
+    }
+
     private fun isSeasonRawId(raw: String): Boolean =
         raw.startsWith("series_") && seasonSuffixRegex.containsMatchIn(raw)
 
@@ -678,19 +686,28 @@ class JellyfinBridge(
 
         StreamLog.i(TAG, "[$method] $cleanUri params=$params (from ${session.remoteIpAddress ?: "unknown"}) [isInfuse=$isInfuse, isReefin=$isReefin]")
 
+        if (method == Method.OPTIONS) {
+            val resp = NanoHTTPD.newFixedLengthResponse(Response.Status.OK, "text/plain", "")
+            resp.addHeader("Access-Control-Allow-Origin", "*")
+            resp.addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, HEAD")
+            resp.addHeader("Access-Control-Allow-Headers", "*")
+            resp.addHeader("Access-Control-Max-Age", "86400")
+            return resp
+        }
+
         return try {
             when {
                 // Root landing / server handshake / sign-in picker
                 lowerUri == "/" || lowerUri == "" || lowerUri == "/login" || lowerUri.matches(rootHexPathRegex) -> {
-                    handleSystemInfo(localIp, config.port, isPublic = true)
+                    handleSystemInfo(localIp, config.port, isPublic = true, isReefin = isReefin)
                 }
 
                 // ================= 1. Handshake & System Info =================
                 lowerUri == "/system/info/public" -> {
-                    handleSystemInfo(localIp, config.port, isPublic = true)
+                    handleSystemInfo(localIp, config.port, isPublic = true, isReefin = isReefin)
                 }
                 lowerUri == "/system/info" -> {
-                    handleSystemInfo(localIp, config.port, isPublic = false)
+                    handleSystemInfo(localIp, config.port, isPublic = false, isReefin = isReefin)
                 }
                 lowerUri == "/system/configuration" -> {
                     handleSystemConfiguration(config.port)
@@ -703,7 +720,7 @@ class JellyfinBridge(
                 lowerUri == "/users/public" -> {
                     handleUsersPublic(isReefin)
                 }
-                lowerUri == "/users/authenticatebyname" -> {
+                lowerUri.endsWith("/authenticatebyname") || lowerUri.endsWith("/authenticate") || lowerUri.contains("/authenticate") -> {
                     handleAuthenticateByName(session, params, headers, isInfuse, isReefin)
                 }
                 lowerUri == "/users/me" -> {
@@ -935,14 +952,15 @@ class JellyfinBridge(
 
     // --- Endpoint Handlers ---
 
-    private fun handleSystemInfo(localIp: String, port: Int, isPublic: Boolean): Response {
+    private fun handleSystemInfo(localIp: String, port: Int, isPublic: Boolean, isReefin: Boolean = false): Response {
+        val sid = if (isReefin) formatGuid(serverId) else serverId
         val info = mutableMapOf<String, Any?>(
             "LocalAddress" to "http://$localIp:$port",
             "ServerName" to "NoxMedia",
             "Version" to SERVER_VERSION,
             "ProductName" to "Jellyfin Server",
             "OperatingSystem" to "Linux",
-            "Id" to serverId,
+            "Id" to sid,
             "StartupWizardCompleted" to true
         )
 
@@ -1022,11 +1040,14 @@ class JellyfinBridge(
 
     private fun buildUserDto(username: String, isReefin: Boolean = false): Map<String, Any?> {
         val isoNow = getIsoTimestamp()
+        val uid = if (isReefin) formatGuid(defaultUserId) else defaultUserId
+        val sid = if (isReefin) formatGuid(serverId) else serverId
         return mapOf(
             "Name" to username,
-            "ServerId" to serverId,
+            "ServerId" to sid,
             "ServerName" to "NoxMedia",
-            "Id" to defaultUserId,
+            "Id" to uid,
+            "PrimaryImageTag" to "primary_user_tag",
             "HasPassword" to isReefin,
             "HasConfiguredPassword" to isReefin,
             "HasConfiguredEasyPassword" to false,
@@ -1105,6 +1126,11 @@ class JellyfinBridge(
         if (paramPw.isNotBlank()) receivedPassword = paramPw
 
         val isoNow = getIsoTimestamp()
+        val uid = if (isReefin) formatGuid(defaultUserId) else defaultUserId
+        val sid = if (isReefin) formatGuid(serverId) else serverId
+        val sessId = if (isReefin) formatGuid(defaultSessionId) else defaultSessionId
+        val token = if (isReefin) formatGuid("c0a80101b2c34d5ef64789a0b1c2d3e4") else accessToken
+
         val userObj = buildUserDto(requestedUsername, isReefin)
 
         val authHeader = headers["x-emby-authorization"] ?: headers["X-Emby-Authorization"] ?: headers["authorization"] ?: ""
@@ -1125,7 +1151,7 @@ class JellyfinBridge(
             reefinClientIps.add(session.remoteIpAddress)
         }
 
-        val sessionObj = mapOf(
+        val sessionObj = mutableMapOf<String, Any?>(
             "PlayState" to mapOf(
                 "CanSeek" to true,
                 "IsPaused" to false,
@@ -1137,12 +1163,20 @@ class JellyfinBridge(
                 "AudioStreamIndex" to -1
             ),
             "AdditionalUsers" to emptyList<String>(),
+            "Capabilities" to mapOf(
+                "PlayableMediaTypes" to listOf("Video", "Audio"),
+                "SupportedCommands" to listOf("MoveUp", "MoveDown", "MoveLeft", "MoveRight", "Select", "Back", "ToggleFullscreen"),
+                "SupportsMediaControl" to true,
+                "SupportsPersistentIdentifier" to true
+            ),
             "RemoteEndPoint" to (session.remoteIpAddress ?: "127.0.0.1"),
-            "Id" to defaultSessionId,
-            "UserId" to defaultUserId,
+            "PlayableMediaTypes" to listOf("Video", "Audio"),
+            "Id" to sessId,
+            "UserId" to uid,
             "UserName" to requestedUsername,
             "Client" to detectedClient,
             "LastActivityDate" to isoNow,
+            "LastPlaybackCheckIn" to isoNow,
             "DeviceName" to detectedDevice,
             "DeviceId" to detectedDeviceId,
             "ApplicationVersion" to "1.0.0",
@@ -1156,8 +1190,8 @@ class JellyfinBridge(
         val authResult = mapOf(
             "User" to userObj,
             "SessionInfo" to sessionObj,
-            "AccessToken" to accessToken,
-            "ServerId" to serverId
+            "AccessToken" to token,
+            "ServerId" to sid
         )
         return jsonResponse(authResult)
     }
@@ -2678,12 +2712,18 @@ class JellyfinBridge(
         val json = gson.toJson(data)
         val resp = NanoHTTPD.newFixedLengthResponse(status, "application/json; charset=utf-8", json)
         resp.addHeader("X-Application-Version", SERVER_VERSION)
+        resp.addHeader("Access-Control-Allow-Origin", "*")
+        resp.addHeader("Access-Control-Allow-Headers", "*")
+        resp.addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, HEAD")
         return resp
     }
 
     private fun noContentResponse(): Response {
         val resp = NanoHTTPD.newFixedLengthResponse(Response.Status.NO_CONTENT, "text/plain", "")
         resp.addHeader("X-Application-Version", SERVER_VERSION)
+        resp.addHeader("Access-Control-Allow-Origin", "*")
+        resp.addHeader("Access-Control-Allow-Headers", "*")
+        resp.addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, HEAD")
         return resp
     }
 }
