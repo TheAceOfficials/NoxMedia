@@ -44,9 +44,9 @@ NoxMedia interfaces directly with Telegram's content delivery network through a 
 
 ### Step 2: Install and Authenticate
 1. Download the latest release from the [GitHub Releases](https://github.com/TheAceOfficials/NoxMedia/releases/latest) page.
-2. Open NoxMedia and enter your `api_id`, `api_hash`, and phone number.
-3. Enter the login confirmation code sent to your official Telegram app.
-4. If Two-Step Verification (2FA) is active, enter your cloud password.
+2. Open NoxMedia and enter your `api_id` and `api_hash`. You have two authentication methods:
+   - **Direct In-App Login**: Enter your phone number, receive the official confirmation code in your Telegram app, and enter it directly. If 2-Step Verification (2FA) is active, enter your cloud password.
+   - **Session String Login**: Paste an existing Pyrogram session string generated via our [Google Colab Notebook](https://colab.research.google.com/github/TheAceOfficials/NoxMedia/blob/main/string_session.ipynb) or via `@StringSessionRobot` in Telegram.
 
 ### Step 3: Start Server
 1. From the home screen, switch the **Server Toggle** to ON.
@@ -64,19 +64,36 @@ NoxMedia turns both private and public channels into a structured, searchable ca
 ### Supported Channel Identifiers
 - **Public Channels**: Username format `@channelname` or URL `https://t.me/channelname`.
 - **Private Channels**: Invite link `https://t.me/+inviteHash` (your authenticated account must be a member).
-- **Channel IDs**: Numeric identifier (e.g., `-1001234567890`).
+- **Channel IDs**: Numeric identifier with `-100` prefix (e.g., `-1001234567890`).
 
-### Smart File Parsing
+### Finding Channel IDs (Private & Public)
+To connect private channels without a public `@username`:
+1. Open [@idbot](https://t.me/idbot) or [@userinfobot](https://t.me/userinfobot) in Telegram and tap **Start**.
+2. Forward any video or message from your private channel into the bot chat.
+3. The bot will instantly reply with the chat's unique numeric ID:
+   ```
+   Forwarded from chat: My Private Media
+   ID: -1001234567890
+   ```
+4. Copy the full ID including the `-100` prefix and paste it into NoxMedia's **Channels** tab.
+
+### Smart File Parsing & Assembly
 During channel sync, NoxMedia's engine parses raw file names:
 - **Title & Year**: Strips release group prefixes while preserving title and release year.
 - **Season & Episode**: Normalizes standard naming formats (`S01E05`, `1x05`, `Part 1`).
+- **Multi-Part Split Video Assembly**: Automatically discovers and transparently concatenates split parts (`part1.mp4`, `part2.mp4` / `pt1`, `pt2`) into a single unified stream on the fly.
 - **Quality & Dynamic Range**: Detects `2160p (4K)`, `1080p`, `HDR10`, `Dolby Vision`, `HEVC`, and `AV1`.
 - **Audio & Subtitles**: Recognizes embedded multi-language tracks (`Hindi`, `English`, `5.1 AAC`, `Atmos`).
+
+### ZIP Archive Handling & Direct Streaming
+NoxMedia natively scans and parses media files packed inside `.zip` archives directly from Telegram channels without downloading or extracting them to disk:
+- **Uncompressed ZIPs (Store Mode / 0% compression)**: Direct real-time streaming and arbitrary byte seeking work seamlessly. Because media files (such as `.mkv` or `.mp4`) are already internally compressed, storing them into a ZIP using `Store` (no compression) allows NoxMedia to read random byte-ranges on demand directly from Telegram's cloud.
+- **Compressed ZIPs (Deflate)**: NoxMedia will detect and catalog the media file in your library with full posters and metadata, but real-time playback is not supported as compressed archives require decompressing from byte 0.
 
 ### Metadata Providers
 - **Movies**: Primary matching against TheMovieDatabase (TMDB).
 - **TV Series**: Comprehensive episode listings via TheTVDB & TMDB.
-- **Anime**: Romaji title resolution and seasonal mapping via Kitsu.io and AniList.
+- **Anime**: Romaji title resolution and seasonal mapping via Kitsu.io and AniList. Automatic absolute episode numbering (e.g., *One Piece 1130*, *Bleach 39*) ensures long-running anime map to correct season and episode structures.
 
 </section>
 
@@ -104,14 +121,34 @@ Instead of rigid static genres, NoxMedia allows you to construct dynamic collect
 
 ## True Cloud Sync & Standby
 
-NoxMedia unifies playback state across your living room and mobile screens.
+NoxMedia unifies playback state across your living room and mobile screens with automated cloud persistence and reliable 24/7 background operation.
 
+### Cross-Device Sync & Scrobbling
 - **Playback Continuity**: Pause a stream on Apple TV via Infuse or Vesper, and resume at the exact second on your phone or PC via Nuvio.
-- **Watched History**: Scrobbling updates reflect universally across all connected clients.
-- **24/7 Android Standby**:
-  - Run as an Android Foreground Service with continuous wake lock protection.
-  - Set device battery management to **Unrestricted** / **Don't Optimize**.
-  - Ensure Wi-Fi sleep policy is set to **Always on during sleep**.
+- **Universal Watched History**: Scrobbling and watched status update in real time across all connected clients.
+
+### Automated Telegram Cloud Backup
+- **Saved Messages Backup**: Automatically archives all server settings, custom catalogs, and monitored channels directly to your Telegram **Saved Messages** (`#NoxMediaBackup`) on configurable intervals (1h, 2h, 6h, 12h, 24h).
+- **Silent Restore**: When logging into NoxMedia on a new phone or tablet, NoxMedia automatically detects your cloud backup and restores your channel configurations in seconds.
+
+### Remote Access & Mobile Data (Tailscale Mesh VPN)
+When operating over cellular mobile data (4G/5G), telecom carriers place devices behind Carrier-Grade NAT (CGNAT) and dynamically rotate IP addresses whenever switching towers, causing local manifest URLs to break.
+
+[Tailscale](https://tailscale.com) creates a secure, zero-config peer-to-peer mesh network:
+1. Install Tailscale on your NoxMedia Android host device and client devices (TV, laptop, iPhone).
+2. Sign in with the same account on both devices.
+3. Tailscale assigns your host device a permanent, static **`100.x.y.z`** IP address that never changes.
+4. NoxMedia automatically detects and displays this Tailscale address on the home dashboard:
+   ```
+   http://100.x.y.z:7788/manifest.json
+   ```
+5. Connect this permanent URL into Nuvio, Infuse, or Vesper for uninterrupted worldwide remote access.
+
+### 24/7 Background Standby Best Practices
+To ensure Android does not suspend NoxMedia when your screen is locked:
+- **Set Battery to Unrestricted**: Go to Android **Settings** -> **Apps** -> **NoxMedia** -> **Battery** -> Select **Unrestricted**.
+- **Lock in Recent Apps**: On devices with aggressive memory management (Xiaomi MIUI/HyperOS, OnePlus OxygenOS, Samsung OneUI), open the recent apps overview, long-press NoxMedia, and select the **Lock** icon.
+- **Wi-Fi High-Performance Locks**: NoxMedia automatically requests high-performance Wi-Fi locks to prevent radio sleep during active playback.
 
 </section>
 

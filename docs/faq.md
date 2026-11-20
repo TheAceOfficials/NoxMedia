@@ -43,3 +43,31 @@ Because NoxMedia serves direct media streams, codec support is determined by you
 - **Infuse & Vesper**: Plays virtually all formats natively (4K HDR10, Dolby Vision, HEVC/H.265, AV1, DTS-HD MA, Dolby TrueHD Atmos, FLAC).
 - **Nuvio**: Supports modern video formats via hardware decoders.
 - **Kodi**: Plays all raw remuxes and multi-channel audio tracks.
+
+---
+
+### Can NoxMedia stream files packed inside `.zip` archives?
+**Yes, for uncompressed archives.**
+- **Store Mode (0% Compression)**: Works seamlessly. Because media files (like `.mkv` or `.mp4`) are already compressed, packing them with `Store` mode allows NoxMedia to perform random byte seeks on-demand directly from Telegram's cloud.
+- **Compressed Archives (Deflate)**: Detected and cataloged in your library with full artwork and metadata, but real-time random seeking is not supported as decompression must begin from byte 0.
+
+---
+
+### Why can't I host the NoxMedia server on iPhone or iPad?
+Apple's iOS security architecture strictly prohibits long-running background network socket listeners. iOS suspends or terminates background processes within 30 seconds of the device being locked or minimized.
+However, **you can seamlessly watch NoxMedia streams on iOS** by connecting your Apple device (iPhone, iPad, Mac, Apple TV, Vision Pro) to your Android host server using **Infuse**, **Vesper**, or **Nuvio**!
+
+---
+
+### How do I find private Telegram channel IDs?
+1. Open [@idbot](https://t.me/idbot) or [@userinfobot](https://t.me/userinfobot) in Telegram.
+2. Forward any video or message from your private channel into the bot.
+3. The bot will reply with the channel's unique ID (e.g., `-1001234567890`).
+4. Copy the entire ID including the `-100` prefix and paste it into NoxMedia's **Channels** tab.
+
+---
+
+### How do I keep the server running 24/7 without Android killing it?
+1. **Set Battery to Unrestricted**: Go to Android **Settings** -> **Apps** -> **NoxMedia** -> **Battery** -> Select **Unrestricted**.
+2. **Lock in Recent Apps**: Open the Android task switcher, long-press NoxMedia, and tap the **Lock** icon (on MIUI/HyperOS, OxygenOS, or OneUI).
+3. **Exclude from App Killers**: Add NoxMedia to your OEM's background whitelist so battery optimizers do not terminate the background service.
