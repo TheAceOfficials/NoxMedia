@@ -1,16 +1,16 @@
 <template>
   <span class="device-icon-wrapper" :title="label">
-    <!-- iPhone -->
+    <!-- iPhone (Dynamic Island delicate & small) -->
     <svg v-if="name === 'iphone'" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
       <rect x="6" y="2" width="12" height="20" rx="3.5" ry="3.5" />
-      <line x1="10" y1="5.2" x2="14" y2="5.2" stroke-width="2" />
-      <line x1="9.5" y1="18.8" x2="14.5" y2="18.8" />
+      <rect x="10.75" y="4.5" width="2.5" height="1.1" rx="0.55" fill="currentColor" stroke="none" />
+      <line x1="9.5" y1="19.2" x2="14.5" y2="19.2" stroke-width="1.4" />
     </svg>
 
     <!-- iPad -->
     <svg v-else-if="name === 'ipad'" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
       <rect x="4" y="2.5" width="16" height="19" rx="3" ry="3" />
-      <line x1="9.5" y1="18.5" x2="14.5" y2="18.5" />
+      <line x1="9.5" y1="18.5" x2="14.5" y2="18.5" stroke-width="1.4" />
     </svg>
 
     <!-- Mac -->
@@ -21,11 +21,14 @@
       <line x1="10" y1="16.2" x2="14" y2="16.2" />
     </svg>
 
-    <!-- Apple TV -->
+    <!-- Apple TV (TV Screen in background + Apple TV Puck & Siri Remote in foreground) -->
     <svg v-else-if="name === 'appletv'" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <rect x="3" y="6" width="18" height="12" rx="3.5" ry="3.5" />
-      <line x1="3" y1="12" x2="21" y2="12" stroke-width="1.2" opacity="0.6" />
-      <circle cx="12" cy="15" r="0.75" fill="currentColor" />
+      <path d="M12 16.5h8.5a2 2 0 0 0 2-2V4.5a2 2 0 0 0-2-2H3.5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h2" />
+      <rect x="2" y="12" width="8" height="8" rx="2" stroke-width="1.6" />
+      <circle cx="6" cy="16" r="0.75" fill="currentColor" stroke="none" />
+      <rect x="11.5" y="10.5" width="5.5" height="11" rx="2.75" stroke-width="1.6" />
+      <circle cx="14.25" cy="13.5" r="1.1" stroke-width="1.1" />
+      <circle cx="14.25" cy="17.5" r="0.6" fill="currentColor" stroke="none" />
     </svg>
 
     <!-- Apple Vision Pro -->
@@ -33,14 +36,15 @@
       <path d="M3.5 10.5 C3.5 6.5, 7 5, 12 5 C17 5, 20.5 6.5, 20.5 10.5 C20.5 14.5, 18 17, 15 17 C13.5 17, 12.8 15, 12 15 C11.2 15, 10.5 17, 9 17 C6 17, 3.5 14.5, 3.5 10.5 Z" />
     </svg>
 
-    <!-- Windows Desktop (Monitor + Tower) -->
+    <!-- Windows Desktop (Monitor + Tower separated side-by-side, no overlap) -->
     <svg v-else-if="name === 'windows'" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <rect x="2" y="4" width="13.5" height="11.5" rx="2" ry="2" />
-      <line x1="4.5" y1="19" x2="13" y2="19" stroke-width="1.8" />
-      <rect x="13.5" y="2" width="8.5" height="17" rx="2.5" ry="2.5" />
-      <line x1="16" y1="5.5" x2="19.5" y2="5.5" stroke-width="1.5" />
-      <line x1="16" y1="7.5" x2="19.5" y2="7.5" stroke-width="1.5" />
-      <circle cx="17.75" cy="15" r="0.75" fill="currentColor" />
+      <rect x="1.5" y="4.5" width="12" height="10" rx="1.5" ry="1.5" />
+      <line x1="7.5" y1="14.5" x2="7.5" y2="17.5" stroke-width="1.6" />
+      <line x1="4.5" y1="17.5" x2="10.5" y2="17.5" stroke-width="1.6" />
+      <rect x="15.2" y="3.5" width="7.2" height="15" rx="1.8" ry="1.8" />
+      <circle cx="18.8" cy="6" r="0.75" fill="currentColor" stroke="none" />
+      <line x1="17" y1="8.5" x2="20.5" y2="8.5" stroke-width="1.2" />
+      <line x1="17" y1="10.8" x2="20.5" y2="10.8" stroke-width="1.2" />
     </svg>
 
     <!-- Linux / CLI Terminal -->
@@ -53,28 +57,21 @@
       <line x1="12" y1="16.5" x2="16.5" y2="16.5" stroke-width="2" />
     </svg>
 
-    <!-- Android Smartphone -->
+    <!-- Android Smartphone (Clean, sleek, single outline with top punch-hole camera) -->
     <svg v-else-if="name === 'android-phone'" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <rect x="5.5" y="2" width="13" height="20" rx="3.5" ry="3.5" />
-      <line x1="5.5" y1="5.2" x2="18.5" y2="5.2" stroke-width="1.2" />
-      <line x1="5.5" y1="18.8" x2="18.5" y2="18.8" stroke-width="1.2" />
-      <line x1="10" y1="3.6" x2="13" y2="3.6" stroke-width="1.2" />
-      <circle cx="14.8" cy="3.6" r="0.5" fill="currentColor" stroke="none" />
-      <line x1="10.5" y1="20.4" x2="13.5" y2="20.4" stroke-width="1.2" />
-      <line x1="4.2" y1="6.8" x2="4.2" y2="8.8" stroke-width="1.5" />
-      <line x1="4.2" y1="9.8" x2="4.2" y2="11.8" stroke-width="1.5" />
-      <line x1="19.8" y1="8" x2="19.8" y2="10.5" stroke-width="1.5" />
+      <rect x="6" y="2" width="12" height="20" rx="3" ry="3" />
+      <circle cx="12" cy="5" r="0.8" fill="currentColor" stroke="none" />
+      <line x1="10" y1="19.2" x2="14" y2="19.2" stroke-width="1.4" />
+      <line x1="18.8" y1="7" x2="18.8" y2="9.5" stroke-width="1.5" />
+      <line x1="18.8" y1="11" x2="18.8" y2="14" stroke-width="1.5" />
     </svg>
 
-    <!-- Android Tablet -->
+    <!-- Android Tablet (Sleek, thin, clean lines) -->
     <svg v-else-if="name === 'android-tablet'" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <rect x="3.5" y="2" width="17" height="20" rx="3" ry="3" />
-      <rect x="5.2" y="4.2" width="13.6" height="15.6" rx="1.2" stroke-width="1.2" />
-      <circle cx="9" cy="3.1" r="0.45" fill="currentColor" stroke="none" />
-      <line x1="10.8" y1="3.1" x2="13.2" y2="3.1" stroke-width="0.9" />
-      <circle cx="15" cy="3.1" r="0.45" fill="currentColor" stroke="none" />
-      <line x1="21.4" y1="5.5" x2="21.4" y2="7.5" stroke-width="1.5" />
-      <line x1="21.4" y1="9" x2="21.4" y2="12" stroke-width="1.5" />
+      <rect x="3.5" y="2.5" width="17" height="19" rx="2.5" ry="2.5" />
+      <circle cx="12" cy="4.8" r="0.75" fill="currentColor" stroke="none" />
+      <line x1="9.5" y1="19" x2="14.5" y2="19" stroke-width="1.4" />
+      <line x1="21.2" y1="6" x2="21.2" y2="9" stroke-width="1.5" />
     </svg>
 
     <!-- Android TV / Google TV -->
