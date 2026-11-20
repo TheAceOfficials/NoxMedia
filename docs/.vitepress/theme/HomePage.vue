@@ -83,12 +83,12 @@
       <div class="bottom-right">
         <span class="version-group">
           <span class="version-label">Stable</span>
-          <a href="https://github.com/TheAceOfficials/NoxMedia/releases/latest" target="_blank" rel="noopener" class="version-link">v1.4.320</a>
+          <a href="https://github.com/TheAceOfficials/NoxMedia/releases/latest" target="_blank" rel="noopener" class="version-link">v1.5.0</a>
         </span>
         <span class="version-divider">&bull;</span>
         <span class="version-group">
           <span class="version-label">Beta</span>
-          <a href="https://github.com/TheAceOfficials/NoxMedia/releases" target="_blank" rel="noopener" class="version-link">v1.4.325</a>
+          <a href="https://github.com/TheAceOfficials/NoxMedia/releases" target="_blank" rel="noopener" class="version-link">v1.5-beta</a>
         </span>
       </div>
     </div>

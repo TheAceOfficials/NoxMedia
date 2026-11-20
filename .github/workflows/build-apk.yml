@@ -66,9 +66,9 @@ jobs:
             echo "is_prerelease=false" >> $GITHUB_OUTPUT
             echo "make_latest=true" >> $GITHUB_OUTPUT
           elif [[ "$IS_BETA" == "true" ]]; then
-            # Beta branch push: tags as v1.4.<run_number>-beta
-            BASE_VER=$(grep -m1 'val baseVersion =' app/build.gradle.kts | cut -d '"' -f2 || echo "1.4")
-            [ -z "$BASE_VER" ] && BASE_VER="1.4"
+            # Beta branch push: tags as v1.5.<run_number>-beta
+            BASE_VER=$(grep -m1 'val baseVersion =' app/build.gradle.kts | cut -d '"' -f2 || echo "1.5")
+            [ -z "$BASE_VER" ] && BASE_VER="1.5"
             FULL_VER="${BASE_VER}.${{ github.run_number }}-beta"
             echo "tag_name=v${FULL_VER}" >> $GITHUB_OUTPUT
             echo "version_name=${FULL_VER}" >> $GITHUB_OUTPUT
@@ -76,9 +76,9 @@ jobs:
             echo "is_prerelease=true" >> $GITHUB_OUTPUT
             echo "make_latest=false" >> $GITHUB_OUTPUT
           else
-            # Continuous push on main/master: reads baseVersion from app/build.gradle.kts (e.g. 1.4)
-            BASE_VER=$(grep -m1 'val baseVersion =' app/build.gradle.kts | cut -d '"' -f2 || echo "1.4")
-            [ -z "$BASE_VER" ] && BASE_VER="1.4"
+            # Continuous push on main/master: reads baseVersion from app/build.gradle.kts (e.g. 1.5)
+            BASE_VER=$(grep -m1 'val baseVersion =' app/build.gradle.kts | cut -d '"' -f2 || echo "1.5")
+            [ -z "$BASE_VER" ] && BASE_VER="1.5"
             FULL_VER="${BASE_VER}.${{ github.run_number }}"
             echo "tag_name=v${FULL_VER}" >> $GITHUB_OUTPUT
             echo "version_name=${FULL_VER}" >> $GITHUB_OUTPUT
@@ -108,15 +108,9 @@ jobs:
           generate_release_notes: false
           body: |
             ### What's Changed
-            • perf(engine): reconstructed streaming pipeline delivering up to 3.5x faster throughput and 70% lower latency
-            • feat(catalogs): custom shelves with optional AI curation powered by Gemini and OpenRouter
-            • feat(metadata): manual TMDB, TVDB, and Kitsu ID assignment with prioritized metadata fallbacks
-            • feat(ui): upgraded content screen with edge-to-edge season carousels and 16:9 episode accordions
-            • feat(sync): persistent all-time data usage synchronization across devices via True Cloud Sync
-            • polish(settings): minimal Apple-style verified badges, masked API keys, and expandable beta guide
-            • fix(stremio): precomputed 15ms cache eliminating catalog loading delays in Nuvio and Stremio
-            • fix(home): accurate In Standby Mode status display during active Alexa standby
-            • fix(library): resolved season selector clipping for smooth edge-to-edge scrolling
+            • Added Infuse & Vesper Support (Media Server via Jellyfin)
+            • Performance boost
+            • Minor bug fixes
 
             ---
 

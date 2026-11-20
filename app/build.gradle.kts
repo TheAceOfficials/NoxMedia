@@ -5,7 +5,7 @@ plugins {
   id("com.chaquo.python")
 }
 
-val baseVersion = "1.4"
+val baseVersion = "1.5"
 val buildCode = project.findProperty("BUILD_NUMBER")?.toString()?.toIntOrNull() ?: 1
 val computedVersion = project.findProperty("VERSION_NAME")?.toString() ?: "$baseVersion.$buildCode"
 

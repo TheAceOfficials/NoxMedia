@@ -46,54 +46,21 @@ data class WhatsNewRelease(
 object WhatsNewRepository {
 
     val currentRelease: WhatsNewRelease = WhatsNewRelease(
-        version = "1.4",
-        releaseTitle = "Streaming Engine Overhaul, Catalogs & Metadata Control",
+        version = "1.5",
+        releaseTitle = "Infuse & Vesper Support, Performance Boost",
         releaseDate = "November 2026",
         items = listOf(
             WhatsNewItem(
                 category = ChangeCategory.NEW,
-                title = "Custom & AI-Powered Catalogs",
-                description = "Create custom shelves or let Gemini/OpenRouter curate collections directly from your library."
-            ),
-            WhatsNewItem(
-                category = ChangeCategory.NEW,
-                title = "Manual Database ID Overrides",
-                description = "Assign TMDB, TVDB, or Kitsu IDs per title to prioritize specific metadata and numbering."
-            ),
-            WhatsNewItem(
-                category = ChangeCategory.NEW,
-                title = "Content Management Overhaul",
-                description = "Redesigned series screen with edge-to-edge season pills, 16:9 episode accordions, and quick stream copy."
+                title = "Added Infuse & Vesper Support (Media Server via Jellyfin)"
             ),
             WhatsNewItem(
                 category = ChangeCategory.IMPROVEMENT,
-                title = "Reconstructed Streaming Engine",
-                description = "Up to 3.5x faster throughput with 70% lower buffering latency and zero-stall seeking."
-            ),
-            WhatsNewItem(
-                category = ChangeCategory.IMPROVEMENT,
-                title = "Refined Settings & Visual Polish",
-                description = "Minimal Apple-style verified badges, masked AI keys with eye toggle, and collapsible beta info."
-            ),
-            WhatsNewItem(
-                category = ChangeCategory.IMPROVEMENT,
-                title = "True Cloud Sync for All-Time Usage",
-                description = "All-time streaming bandwidth is permanently preserved and synchronized across all devices."
+                title = "Performance boost"
             ),
             WhatsNewItem(
                 category = ChangeCategory.FIX,
-                title = "Instant External Catalog Loading",
-                description = "Precomputed 15ms cache eliminates Nuvio and Stremio catalog delays and blank skeletons."
-            ),
-            WhatsNewItem(
-                category = ChangeCategory.FIX,
-                title = "Home Standby Status Accuracy",
-                description = "Server status card now correctly displays In Standby Mode when Alexa standby is listening."
-            ),
-            WhatsNewItem(
-                category = ChangeCategory.FIX,
-                title = "Edge-to-Edge Season Slider",
-                description = "Fixed boundary clipping so season selector scrolls seamlessly across full screen width."
+                title = "Minor bug fixes"
             )
         )
     )

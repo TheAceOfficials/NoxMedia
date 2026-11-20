@@ -47,6 +47,7 @@ This document outlines the development trajectory of NoxMedia, including complet
 
 ## Completed Milestones
 
+- **v1.5.0**: Added Infuse & Vesper Support (Media Server via Jellyfin), performance boost, and minor bug fixes.
 - **v1.4.325**: Dynamic Infuse & Vesper Custom Catalogs via Jellyfin Bridge with zero-latency in-memory caching.
 - **v1.4.320**: Semantic AI catalog curation using Google Gemini and OpenRouter LLM engines.
 - **v1.4.318**: Fallback runtime precision, anime multi-title sanitization, and 24/7 foreground standby reliability.
