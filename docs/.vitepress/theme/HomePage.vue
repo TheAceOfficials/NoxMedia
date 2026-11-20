@@ -106,11 +106,12 @@ const mobileDevices = [
   { name: 'ipad', label: 'iPad' }
 ]
 
-// 2. Smart TV, Android TV, Apple TV
+// 2. Smart TV, Android TV, Apple TV, Vision Pro
 const tvDevices = [
   { name: 'smart-tv', label: 'Smart TV' },
   { name: 'android-tv', label: 'Android TV' },
-  { name: 'appletv', label: 'Apple TV' }
+  { name: 'appletv', label: 'Apple TV' },
+  { name: 'visionpro', label: 'Vision Pro' }
 ]
 
 // 3. Windows, Linux, MacBook (Web Browser removed)
