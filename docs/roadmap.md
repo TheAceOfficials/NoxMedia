@@ -39,6 +39,10 @@ This document outlines the development trajectory of NoxMedia, including complet
 - **Status**: Planned
 - **Focus**: Distinct viewing profiles, separate watch histories, individual resume points, and isolated Telegram channel permissions across family members.
 
+### WeTrakr Collection & Library Sync
+- **Status**: Planned
+- **Focus**: Automated two-way collection synchronization with WeTrakr's My Library ecosystem. Automatically catalogs indexed cloud media as digital owned items, matching parsed resolutions (4K, 1080p), HDR profiles (Dolby Vision, HDR10), and multi-channel audio configurations directly to user tracking profiles.
+
 </section>
 
 ---
